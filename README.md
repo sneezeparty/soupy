@@ -7,7 +7,7 @@ Set environment variables in .env, which currently includes:
 3. Bot's behaviour (attitude, preferences, etc)
 4. The number of messages to consider during the bot's response.
 
-Error handling is not currently working.
+Error handling *may be* working currently.  It's hard to say.
 
 
 
