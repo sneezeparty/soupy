@@ -1,0 +1,7 @@
+colorama==0.4.6
+discord==2.1.0
+discord.py==2.1.0
+dotenv-python==0.0.1
+openai==0.27.0
+OpenAIAuth==0.2.0
+
