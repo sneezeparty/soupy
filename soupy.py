@@ -54,7 +54,7 @@ async def on_message(message):
                 model="gpt-3.5-turbo",
                 messages=messages,
             )
-            airesponse = (response.choices[0].message.content)
+            airesponse = (response.choices[0].message.content).replace('"', '')
         except openai.error.ApiError as e:
             print(f"Error: OpenAI API Error - {e}")
             airesponse = "OpenAI API Error -- there is a problem with OpenAI's services right now."
@@ -67,5 +67,6 @@ async def on_message(message):
         print("Tokens:", Fore.GREEN + str(
             response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
         time.sleep(RATE_LIMIT)  # rate limit on OpenAI queries
+
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
