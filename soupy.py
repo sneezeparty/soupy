@@ -20,7 +20,7 @@ openai.api_key = os.environ.get("OPENAI_API_KEY")
 intents = discord.Intents.default()
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
-chatgpt_behaviour = "You are a Discord chatbot named Soupy Dafoe that reluctantly answers questions with sarcastic and witty responses, and you are preoccupied with soup."
+chatgpt_behaviour = os.environ.get("BEHAVIOUR")
 messages = []
 
 def should_bot_respond_to_message(message):
