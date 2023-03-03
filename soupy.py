@@ -38,7 +38,7 @@ async def on_message(message):
 
             # Retrieve the last 10 messages from the channel history
             messages = []
-            async for message in channel.history(limit=10):
+            async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
                 messages.append({"role": "system", "content": message.content})
             messages = messages[::-1]
 
