@@ -1,0 +1,1 @@
+This is a basic ChatGPT Discord bot that utilizes the ChatGPT API.
