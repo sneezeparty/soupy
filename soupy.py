@@ -55,9 +55,9 @@ async def on_message(message):
                 messages=messages,
             )
             airesponse = (response.choices[0].message.content)
-        except openai.errors.ApiError as e:
+        except openai.error.ApiError as e:
             print(f"Error: OpenAI API Error - {e}")
-            airesponse = "I'm not feeling very chatty right now. Try again later?"
+            airesponse = "OpenAI API Error -- there is a problem with OpenAI's services right now."
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
