@@ -7,7 +7,7 @@ import random
 import time
 from colorama import init, Fore
 
-# enable colors in windows cmd
+# enable colors in windows cmd console
 init(convert=True)
 
 # Load environment variables
