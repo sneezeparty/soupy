@@ -75,9 +75,9 @@ async def on_message(message):
                 max_tokens=int(os.environ.get("MAX_TOKENS"))
             )
             airesponse = (response.choices[0].message.content)
-        except openai.error.ApiError as e:  # this error handling doesn't seem to be working right now
+        except openai.error.OpenAIError as e:  # this error handling doesn't seem to be working right now
             print(f"Error: OpenAI API Error - {e}")
-            airesponse = "OpenAI API Error -- there is a problem with OpenAI's services right now."
+            airesponse = "An error has occurred with your request.  Please try again."
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
