@@ -16,19 +16,22 @@ load_dotenv()
 
 RATE_LIMIT = 1.0  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
 openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
-intents = discord.Intents.default()  # by default it uses all intents, but you can change this
+intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
-chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bot's "personality"
+chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bots "personality"
 messages = []
 
+# The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.
+# It will respond in CHANNEL_ID channel to every message, even when it is not mentioned.
 
-# The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.  It will respond in CHANNEL_ID channel even when it is not mentioned.
+
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False
     return (bot.user in message.mentions or random.random() < 0.02 or
             message.channel.id == int(os.environ.get("CHANNEL_ID")))
+
 
 # Split message into multiple chunks of at least min_length characters
 def split_message(message_content, min_length=1500):
@@ -47,7 +50,7 @@ def split_message(message_content, min_length=1500):
 
 @bot.event
 async def on_message(message):
-    global response
+    global messages
     if should_bot_respond_to_message(message):
         try:
             # Get the channel object from the message object
@@ -74,8 +77,8 @@ async def on_message(message):
                 top_p=0.9,
                 max_tokens=int(os.environ.get("MAX_TOKENS"))
             )
-            airesponse = (response.choices[0].message.content)
-        except openai.error.OpenAIError as e:  # this error handling doesn't seem to be working right now
+            airesponse = response.choices[0].message.content
+        except openai.error.OpenAIError as e:  # basic error handling
             print(f"Error: OpenAI API Error - {e}")
             airesponse = "An error has occurred with your request.  Please try again."
         except Exception as e:
