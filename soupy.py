@@ -60,7 +60,7 @@ async def on_message(message):
                 top_p=0.9,
                 max_tokens=2000
             )
-            airesponse = (response.choices[0].message.content).replace('"', '')
+            airesponse = (response.choices[0].message.content)
         except openai.error.ApiError as e:
             print(f"Error: OpenAI API Error - {e}")
             airesponse = "OpenAI API Error -- there is a problem with OpenAI's services right now."
