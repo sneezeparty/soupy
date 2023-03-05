@@ -14,8 +14,6 @@ Set environment variables in .env, which currently includes:
 4. The number of messages to consider during the bot's response.
 5. A channel for the bot to respond in.
 
-Error handling *may be* working currently.  It's hard to say.
-
 
 
 
