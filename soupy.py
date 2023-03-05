@@ -6,6 +6,7 @@ import openai
 import random
 import time
 from colorama import init, Fore
+import re
 
 # enable colors in windows cmd console
 init(convert=True)
@@ -30,6 +31,19 @@ def should_bot_respond_to_message(message):
     return (bot.user in message.mentions or random.random() < 0.02 or
             message.channel.id == int(os.environ.get("CHANNEL_ID")))
 
+# Split message into multiple chunks of at least min_length characters
+def split_message(message_content, min_length=1000):
+    chunks = []
+    remaining = message_content
+    while len(remaining) > min_length:
+        chunk = remaining[:min_length]
+        last_period_index = chunk.rfind(".")
+        if last_period_index == -1:
+            last_period_index = min_length - 1
+        chunks.append(chunk[:last_period_index+1])
+        remaining = remaining[last_period_index+1:]
+    chunks.append(remaining)
+    return chunks
 
 @bot.event
 async def on_message(message):
@@ -55,7 +69,6 @@ async def on_message(message):
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
-                # max_tokens=2000,
                 temperature=1.5,
                 top_p=0.9,
                 max_tokens=2000
@@ -67,11 +80,18 @@ async def on_message(message):
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
-        await message.channel.send(airesponse)
-        print(bot.user, ":", Fore.RED + airesponse + Fore.RESET)
+
+        # Split response into multiple messages if it is longer than 1000 characters
+        airesponse_chunks = split_message(airesponse)
+
+        # Send each message individually
+        for chunk in airesponse_chunks:
+            await message.channel.send(chunk)
+            print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
+            time.sleep(RATE_LIMIT)  # rate limit on OpenAI queries
+
         print("Total Tokens:", Fore.GREEN + str(
             response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
-        time.sleep(RATE_LIMIT)  # rate limit on OpenAI queries
 
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
