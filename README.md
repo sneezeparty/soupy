@@ -12,6 +12,8 @@ Set environment variables in .env, which currently includes:
 
 Error handling *may be* working currently.  It's hard to say.
 
+The bot will now split any message longer than 1000 characters into multiple chunks, and then send those chunks as separate messages.
+
 
 
 
