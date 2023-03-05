@@ -32,7 +32,7 @@ def should_bot_respond_to_message(message):
             message.channel.id == int(os.environ.get("CHANNEL_ID")))
 
 # Split message into multiple chunks of at least min_length characters
-def split_message(message_content, min_length=1000):
+def split_message(message_content, min_length=1500):
     chunks = []
     remaining = message_content
     while len(remaining) > min_length:
@@ -71,7 +71,7 @@ async def on_message(message):
                 messages=messages,
                 temperature=1.5,
                 top_p=0.9,
-                max_tokens=2000
+                max_tokens=int(os.environ.get("MAX_TOKENS"))
             )
             airesponse = (response.choices[0].message.content)
         except openai.error.ApiError as e:
