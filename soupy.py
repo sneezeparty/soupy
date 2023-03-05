@@ -23,10 +23,12 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 chatgpt_behaviour = os.environ.get("BEHAVIOUR")
 messages = []
 
+# The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.  It will respond in that channel even when it is not mentioned.
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False
-    return bot.user in message.mentions or (random.random() < 0.02)
+    return (bot.user in message.mentions or random.random() < 0.02 or
+            message.channel.id == int(os.environ.get("CHANNEL_ID")))
 
 
 @bot.event
@@ -53,6 +55,10 @@ async def on_message(message):
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=messages,
+                # max_tokens=2000,
+                temperature=1.5,
+                top_p=0.9,
+                max_tokens=2000
             )
             airesponse = (response.choices[0].message.content).replace('"', '')
         except openai.error.ApiError as e:
@@ -62,9 +68,8 @@ async def on_message(message):
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
         await message.channel.send(airesponse)
-        print(message.author, ":", message.content)
         print(bot.user, ":", Fore.RED + airesponse + Fore.RESET)
-        print("Tokens:", Fore.GREEN + str(
+        print("Total Tokens:", Fore.GREEN + str(
             response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
         time.sleep(RATE_LIMIT)  # rate limit on OpenAI queries
 
