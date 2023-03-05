@@ -1,5 +1,5 @@
-##Soupy 
-###Soupy is a ChatGPT Discord bot that utilizes the ChatGPT API.
+## Soupy 
+### Soupy is a ChatGPT Discord bot that utilizes the ChatGPT API.
 
 The current functionality of the bot is:
 
