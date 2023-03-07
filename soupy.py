@@ -39,11 +39,11 @@ def split_message(message_content, min_length=1500):
     remaining = message_content
     while len(remaining) > min_length:
         chunk = remaining[:min_length]
-        last_period_index = chunk.rfind(".")
-        if last_period_index == -1:
-            last_period_index = min_length - 1
-        chunks.append(chunk[:last_period_index+1])
-        remaining = remaining[last_period_index+1:]
+        last_punctuation_index = max(chunk.rfind("."), chunk.rfind("!"), chunk.rfind("?"))
+        if last_punctuation_index == -1:
+            last_punctuation_index = min_length - 1
+        chunks.append(chunk[:last_punctuation_index+1])
+        remaining = remaining[last_punctuation_index+1:]
     chunks.append(remaining)
     return chunks
 
