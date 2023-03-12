@@ -64,8 +64,8 @@ async def on_message(message):
 
             # Append the messages to the chat history
             messages = [
-                {"role": "user", "content": chatgpt_behaviour},
-                {"role": "system", "content": "Here is the message history:"}
+                {"role": "system", "content": chatgpt_behaviour},
+                {"role": "user", "content": "Here is the message history:"}
             ] + messages
             messages += [{"role": "system", "content": "What is your reply?"}]
 
