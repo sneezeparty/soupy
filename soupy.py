@@ -47,6 +47,7 @@ def split_message(message_content, min_length=1500):
 @bot.event
 async def on_message(message):
     global messages
+    original_message_author = message.author
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         try:
@@ -90,12 +91,12 @@ async def on_message(message):
             if is_random_response:
                 await message.channel.send(chunk)
             else:
-                await message.channel.send(f'{message.author.mention} {chunk}')
+                await message.channel.send(f'{original_message_author.mention} {chunk}')
             print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
             time.sleep(RATE_LIMIT)
 
         print("Total Tokens:", Fore.GREEN + str(
-            response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
+            response["usage"]["total_tokens"]) + Fore.RESET)
 
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
