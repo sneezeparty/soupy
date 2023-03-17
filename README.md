@@ -3,7 +3,7 @@
 
 The current functionality of the bot is:
 
-1. Soupy will respond to all @mentions of itself in all channels that it can access, *and* to all messages in a specific channel, even if it isn't mentioned.
+1. Soupy will respond to all @mentions of itself in all channels that it can access (200 tokens max), *and* to all messages in a specific channel, even if it isn't mentioned.
 2. Soupy will also respond to 2% of all messages in all channels that it has access to -- but it will limit its total tokens in these channels to 200.
 3. Soupy considers the message history of the channel where it is activated, which by default is the 10 previous messages.
 4. Soupy bot will now split any message longer than 1500 characters into multiple chunks, and then send those chunks as separate messages.
