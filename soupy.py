@@ -13,7 +13,6 @@ init(convert=True)
 # Load environment variables
 load_dotenv()
 
-
 RATE_LIMIT = 1.0  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
 openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
 intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
@@ -22,6 +21,7 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bots "personality"
 messages = []
 
+
 # The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.
 # It will respond in CHANNEL_ID channel to every message, even when it is not mentioned.
 
@@ -29,7 +29,7 @@ messages = []
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False, False
-    is_random_response = random.random() < 0.02
+    is_random_response = random.random() < 0.02  # It will also respond to 2% of every message in every channel that it can access.
     return (bot.user in message.mentions or is_random_response or
             message.channel.id == int(os.environ.get("CHANNEL_ID"))), is_random_response
 
@@ -43,8 +43,8 @@ def split_message(message_content, min_length=1500):
         last_punctuation_index = max(chunk.rfind("."), chunk.rfind("!"), chunk.rfind("?"))
         if last_punctuation_index == -1:
             last_punctuation_index = min_length - 1
-        chunks.append(chunk[:last_punctuation_index+1])
-        remaining = remaining[last_punctuation_index+1:]
+        chunks.append(chunk[:last_punctuation_index + 1])
+        remaining = remaining[last_punctuation_index + 1:]
     chunks.append(remaining)
     return chunks
 
@@ -52,7 +52,7 @@ def split_message(message_content, min_length=1500):
 @bot.event
 async def on_message(message):
     global messages
-    should_respond, is_random_response = should_bot_respond_to_message(message)  # Update this line
+    should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         try:
             # Get the channel object from the message object
@@ -66,9 +66,9 @@ async def on_message(message):
 
             # Append the messages to the chat history
             messages = [
-                {"role": "system", "content": chatgpt_behaviour},
-                {"role": "user", "content": "Here is the message history:"}
-            ] + messages
+                           {"role": "system", "content": chatgpt_behaviour},
+                           {"role": "user", "content": "Here is the message history:"}
+                       ] + messages
             messages += [{"role": "system", "content": "What is your reply?"}]
 
             print(f'chat history: {messages}')
