@@ -28,9 +28,10 @@ messages = []
 
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
-        return False
-    return (bot.user in message.mentions or random.random() < 0.02 or
-            message.channel.id == int(os.environ.get("CHANNEL_ID")))
+        return False, False
+    is_random_response = random.random() < 0.02
+    return (bot.user in message.mentions or is_random_response or
+            message.channel.id == int(os.environ.get("CHANNEL_ID"))), is_random_response
 
 
 # Split message into multiple chunks of at least min_length characters
@@ -51,7 +52,8 @@ def split_message(message_content, min_length=1500):
 @bot.event
 async def on_message(message):
     global messages
-    if should_bot_respond_to_message(message):
+    should_respond, is_random_response = should_bot_respond_to_message(message)  # Update this line
+    if should_respond:
         try:
             # Get the channel object from the message object
             channel = message.channel
@@ -70,7 +72,11 @@ async def on_message(message):
             messages += [{"role": "system", "content": "What is your reply?"}]
 
             print(f'chat history: {messages}')
-            max_tokens = 200 if message.channel.id != int(os.environ.get("CHANNEL_ID")) else int(os.environ.get("MAX_TOKENS"))
+            # Update max_tokens assignment based on whether it's a random response
+            if is_random_response:
+                max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
+            else:
+                max_tokens = int(os.environ.get("MAX_TOKENS"))
 
             response = openai.ChatCompletion.create(
                 model=os.environ.get("MODEL"),
