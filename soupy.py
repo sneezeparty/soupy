@@ -70,12 +70,14 @@ async def on_message(message):
             messages += [{"role": "system", "content": "What is your reply?"}]
 
             print(f'chat history: {messages}')
+            max_tokens = 200 if message.channel.id != int(os.environ.get("CHANNEL_ID")) else int(os.environ.get("MAX_TOKENS"))
+
             response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
+                model=os.environ.get("MODEL"),
                 messages=messages,
                 temperature=1.5,
                 top_p=0.9,
-                max_tokens=int(os.environ.get("MAX_TOKENS"))
+                max_tokens=max_tokens
             )
             airesponse = response.choices[0].message.content
         except openai.error.OpenAIError as e:  # basic error handling
