@@ -22,10 +22,6 @@ chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to 
 messages = []
 
 
-# The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.
-# It will respond in CHANNEL_ID channel to every message, even when it is not mentioned.
-
-
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False, False
@@ -34,7 +30,6 @@ def should_bot_respond_to_message(message):
             message.channel.id == int(os.environ.get("CHANNEL_ID"))), is_random_response
 
 
-# Split message into multiple chunks of at least min_length characters
 def split_message(message_content, min_length=1500):
     chunks = []
     remaining = message_content
@@ -55,16 +50,13 @@ async def on_message(message):
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         try:
-            # Get the channel object from the message object
             channel = message.channel
 
-            # Retrieve the last n messages from the channel history
             messages = []
-            async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
-                messages.append({"role": "system", "content": message.content})
+            async for msg in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
+                messages.append({"role": "system", "content": msg.content})
             messages = messages[::-1]
 
-            # Append the messages to the chat history
             messages = [
                            {"role": "system", "content": chatgpt_behaviour},
                            {"role": "user", "content": "Here is the message history:"}
@@ -72,7 +64,6 @@ async def on_message(message):
             messages += [{"role": "system", "content": "What is your reply?"}]
 
             print(f'chat history: {messages}')
-            # Update max_tokens assignment based on whether it's a random response
             if is_random_response:
                 max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
             else:
@@ -86,21 +77,22 @@ async def on_message(message):
                 max_tokens=max_tokens
             )
             airesponse = response.choices[0].message.content
-        except openai.error.OpenAIError as e:  # basic error handling
+        except openai.error.OpenAIError as e:
             print(f"Error: OpenAI API Error - {e}")
             airesponse = "An error has occurred with your request.  Please try again."
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
 
-        # Split response into multiple messages if it is longer than min_length characters
         airesponse_chunks = split_message(airesponse)
 
-        # Send each chunked message individually
         for chunk in airesponse_chunks:
-            await message.channel.send(chunk)
+            if is_random_response:
+                await message.channel.send(chunk)
+            else:
+                await message.channel.send(f'{message.author.mention} {chunk}')
             print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
-            time.sleep(RATE_LIMIT)  # rate limit on OpenAI queries
+            time.sleep(RATE_LIMIT)
 
         print("Total Tokens:", Fore.GREEN + str(
             response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
