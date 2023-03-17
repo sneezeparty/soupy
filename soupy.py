@@ -93,10 +93,6 @@ async def on_message(message):
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
 
-        # Include mention if bot was mentioned or it's in the CHANNEL_ID channel
-        if bot.user in message.mentions or message.channel.id == int(os.environ.get("CHANNEL_ID")):
-            airesponse = f"{message.author.mention}, {airesponse}"
-
         # Split response into multiple messages if it is longer than min_length characters
         airesponse_chunks = split_message(airesponse)
 
@@ -108,5 +104,6 @@ async def on_message(message):
 
         print("Total Tokens:", Fore.GREEN + str(
             response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
+
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
