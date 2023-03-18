@@ -5,7 +5,9 @@ from discord.ext import commands
 import openai
 import random
 import time
+import asyncio
 from colorama import init, Fore
+
 
 # enable colors in windows cmd console
 init(convert=True)
@@ -59,43 +61,52 @@ async def on_message(message):
             # Get the channel object from the message object
             channel = message.channel
 
-            # Retrieve the last n messages from the channel history
-            messages = []
-            async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
-                messages.append({"role": "system", "content": message.content})
-            messages = messages[::-1]
+            # Send a typing indicator while generating a response
+            async with channel.typing():
+                # Retrieve the last n messages from the channel history
+                messages = []
+                async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
+                    messages.append({"role": "system", "content": message.content})
+                messages = messages[::-1]
 
-            # Append the messages to the chat history
-            messages = [
-                {"role": "system", "content": chatgpt_behaviour},
-                {"role": "user", "content": "Here is the message history:"}
-            ] + messages
-            messages += [{"role": "system", "content": "What is your reply?"}]
+                # Append the messages to the chat history
+                messages = [
+                    {"role": "system", "content": chatgpt_behaviour},
+                    {"role": "user", "content": "Here is the message history:"}
+                ] + messages
+                messages += [{"role": "system", "content": "What is your reply?"}]
 
-            print(f'chat history: {messages}')
-            # Update max_tokens assignment based on whether it's a random response
-            if is_random_response:
-                max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
-            else:
-                max_tokens = int(os.environ.get("MAX_TOKENS"))
+                print(f'chat history: {messages}')
+                # Update max_tokens assignment based on whether it's a random response
+                if is_random_response:
+                    max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
+                else:
+                    max_tokens = int(os.environ.get("MAX_TOKENS"))
 
-            response = openai.ChatCompletion.create(
-                model=os.environ.get("MODEL"),
-                messages=messages,
-                temperature=1.5,
-                top_p=0.9,
-                max_tokens=max_tokens
-            )
-            airesponse = response.choices[0].message.content
+                response = openai.ChatCompletion.create(
+                    model=os.environ.get("MODEL"),
+                    messages=messages,
+                    temperature=1.5,
+                    top_p=0.9,
+                    max_tokens=max_tokens
+                )
+                airesponse = response.choices[0].message.content
+
+                # Split response into multiple messages if it is longer than min_length characters
+                airesponse_chunks = split_message(airesponse)
+
+                # Calculate the total time to sleep
+                total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
+
+                # Sleep while the typing indicator is active
+                await asyncio.sleep(total_sleep_time)
+
         except openai.error.OpenAIError as e:  # basic error handling
             print(f"Error: OpenAI API Error - {e}")
             airesponse = "An error has occurred with your request.  Please try again."
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
-
-        # Split response into multiple messages if it is longer than min_length characters
-        airesponse_chunks = split_message(airesponse)
 
         # Send each chunked message individually
         for chunk in airesponse_chunks:
