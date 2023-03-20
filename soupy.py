@@ -8,20 +8,24 @@ import time
 import asyncio
 from colorama import init, Fore
 
+
 # enable colors in windows cmd console
 init(convert=True)
 
 # Load environment variables
 load_dotenv()
 
-RATE_LIMIT = 1.0  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
+
+RATE_LIMIT = 0.25  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
 openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
 intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bots "personality"
 messages = []
-HISTORYLENGTH = int(os.environ.get("HISTORYLENGTH"))
+
+# The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.
+# It will respond in CHANNEL_ID channel to every message, even when it is not mentioned.
 
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
@@ -31,6 +35,8 @@ def should_bot_respond_to_message(message):
     return (bot.user in message.mentions or is_random_response or
             message.channel.id in allowed_channel_ids), is_random_response
 
+
+# Split message into multiple chunks of at least min_length characters
 def split_message(message_content, min_length=1500):
     chunks = []
     remaining = message_content
@@ -44,7 +50,6 @@ def split_message(message_content, min_length=1500):
     chunks.append(remaining)
     return chunks
 
-import asyncio
 
 async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(openai.ChatCompletion.create, *args, **kwargs)
@@ -56,7 +61,7 @@ async def on_message(message):
     if should_respond:
         airesponse_chunks = []
         response = {}
-        openai_api_error_occurred = False
+        openai_api_error_occurred = False  # Add a flag variable here
 
         try:
             channel = message.channel
@@ -73,12 +78,8 @@ async def on_message(message):
                 messages += [{"role": "system", "content": "What is your reply?"}]
 
                 print(f'chat history: {messages}')
-
-                # Determine the appropriate max_tokens based on the bot's behavior
                 if is_random_response:
                     max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
-                elif bot.user in message.mentions:
-                    max_tokens = int(os.environ.get("MAX_TOKENS"))
                 else:
                     max_tokens = int(os.environ.get("MAX_TOKENS"))
 
