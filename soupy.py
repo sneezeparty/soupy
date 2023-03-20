@@ -55,23 +55,18 @@ def split_message(message_content, min_length=1500):
 @bot.event
 async def on_message(message):
     global messages
-    should_respond, is_random_response = should_bot_respond_to_message(message)  # Update this line
+    should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
-        # Initialize airesponse_chunks with an empty list
         airesponse_chunks = []
+        response = {}  # Initialize response as an empty dictionary
         try:
-            # Get the channel object from the message object
             channel = message.channel
-
-            # Send a typing indicator while generating a response
             async with channel.typing():
-                # Retrieve the last n messages from the channel history
                 messages = []
                 async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
                     messages.append({"role": "system", "content": message.content})
                 messages = messages[::-1]
 
-                # Append the messages to the chat history
                 messages = [
                     {"role": "system", "content": chatgpt_behaviour},
                     {"role": "user", "content": "Here is the message history:"}
@@ -79,7 +74,6 @@ async def on_message(message):
                 messages += [{"role": "system", "content": "What is your reply?"}]
 
                 print(f'chat history: {messages}')
-                # Update max_tokens assignment based on whether it's a random response
                 if is_random_response:
                     max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
                 else:
@@ -94,30 +88,25 @@ async def on_message(message):
                 )
                 airesponse = response.choices[0].message.content
 
-                # Split response into multiple messages if it is longer than min_length characters
                 airesponse_chunks = split_message(airesponse)
-
-                # Calculate the total time to sleep
                 total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
-
-                # Sleep while the typing indicator is active
                 await asyncio.sleep(total_sleep_time)
 
-        except openai.error.OpenAIError as e:  # basic error handling
+        except openai.error.OpenAIError as e:
             print(f"Error: OpenAI API Error - {e}")
             airesponse = "An error has occurred with your request.  Please try again."
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
 
-        # Send each chunked message individually
         for chunk in airesponse_chunks:
             await message.channel.send(chunk)
             print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
-            time.sleep(RATE_LIMIT)  # rate limit on OpenAI queries
+            time.sleep(RATE_LIMIT)
 
-        print("Total Tokens:", Fore.GREEN + str(
-            response["usage"]["total_tokens"]) + Fore.RESET)  # displays total tokens used in the console
-
+        if 'usage' in response:  # Check if 'response' contains the 'usage' key
+            print("Total Tokens:", Fore.GREEN + str(
+                response["usage"]["total_tokens"]) + Fore.RESET)
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
+
