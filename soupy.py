@@ -52,13 +52,20 @@ def split_message(message_content, min_length=1500):
     return chunks
 
 
+import asyncio  # Make sure to import asyncio at the beginning of the file
+
+# ...
+
+async def async_chat_completion(*args, **kwargs):
+    return await asyncio.to_thread(openai.ChatCompletion.create, *args, **kwargs)
+
 @bot.event
 async def on_message(message):
     global messages
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         airesponse_chunks = []
-        response = {}  # Initialize response as an empty dictionary
+        response = {}
         try:
             channel = message.channel
             async with channel.typing():
@@ -79,7 +86,7 @@ async def on_message(message):
                 else:
                     max_tokens = int(os.environ.get("MAX_TOKENS"))
 
-                response = openai.ChatCompletion.create(
+                response = await async_chat_completion(
                     model=os.environ.get("MODEL"),
                     messages=messages,
                     temperature=1.5,
@@ -104,9 +111,10 @@ async def on_message(message):
             print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
             time.sleep(RATE_LIMIT)
 
-        if 'usage' in response:  # Check if 'response' contains the 'usage' key
+        if 'usage' in response:
             print("Total Tokens:", Fore.GREEN + str(
                 response["usage"]["total_tokens"]) + Fore.RESET)
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
+
 
