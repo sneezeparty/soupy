@@ -24,8 +24,8 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bots "personality"
 messages = []
 
-# The bot will respond whenever it is @mentioned, and also in whatever channel is specified in .env CHANNEL_ID.
-# It will respond in CHANNEL_ID channel to every message, even when it is not mentioned.
+# The bot will respond whenever it is @mentioned, and also in whatever channels are specified in .env CHANNEL_IDS.
+# It will respond in CHANNEL_IDS channel to every message, even when it is not mentioned.
 
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
