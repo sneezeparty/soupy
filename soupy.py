@@ -66,6 +66,8 @@ async def on_message(message):
     if should_respond:
         airesponse_chunks = []
         response = {}
+        openai_api_error_occurred = False  # Add a flag variable here
+
         try:
             channel = message.channel
             async with channel.typing():
@@ -101,20 +103,28 @@ async def on_message(message):
 
         except openai.error.OpenAIError as e:
             print(f"Error: OpenAI API Error - {e}")
-            airesponse = "An error has occurred with your request.  Please try again."
+            airesponse = f"An error has occurred with your request. Please try again. Error details: {e}"
+            openai_api_error_occurred = True  # Set the flag to True when an error occurs
+
+            # Send the error message to the channel
+            await message.channel.send(airesponse)
+
         except Exception as e:
             print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
             airesponse = "Wuh?"
 
-        for chunk in airesponse_chunks:
-            await message.channel.send(chunk)
-            print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
-            time.sleep(RATE_LIMIT)
+        # Send the response to the channel if there was no OpenAI API error
+        if not openai_api_error_occurred:
+            for chunk in airesponse_chunks:
+                await message.channel.send(chunk)
+                print(bot.user, ":", Fore.RED + chunk + Fore.RESET)
+                time.sleep(RATE_LIMIT)
 
         if 'usage' in response:
             print("Total Tokens:", Fore.GREEN + str(
                 response["usage"]["total_tokens"]) + Fore.RESET)
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
+
 
 
