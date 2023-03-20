@@ -33,8 +33,9 @@ def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False, False
     is_random_response = random.random() < 0.02
+    allowed_channel_ids = [int(channel_id) for channel_id in os.environ.get("CHANNEL_IDS").split(',')]
     return (bot.user in message.mentions or is_random_response or
-            message.channel.id == int(os.environ.get("CHANNEL_ID"))), is_random_response
+            message.channel.id in allowed_channel_ids), is_random_response
 
 
 # Split message into multiple chunks of at least min_length characters
