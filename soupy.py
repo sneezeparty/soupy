@@ -57,6 +57,8 @@ async def on_message(message):
     global messages
     should_respond, is_random_response = should_bot_respond_to_message(message)  # Update this line
     if should_respond:
+        # Initialize airesponse_chunks with an empty list
+        airesponse_chunks = []
         try:
             # Get the channel object from the message object
             channel = message.channel
