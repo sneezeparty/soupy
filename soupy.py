@@ -9,14 +9,10 @@ import asyncio
 from colorama import init, Fore
 
 
-# enable colors in windows cmd console
-init(convert=True)
-
-# Load environment variables
-load_dotenv()
-
-
-RATE_LIMIT = 0.25  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
+# constants and settings
+load_dotenv() # Load environment variables
+init(convert=True) # enable colors in windows cmd console
+RATE_LIMIT = 0.5  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
 openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
 intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
 intents.members = True
@@ -24,13 +20,15 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bots "personality"
 messages = []
 
+
 # The bot will respond whenever it is @mentioned, and also in whatever channels are specified in .env CHANNEL_IDS.
 # It will respond in CHANNEL_IDS channel to every message, even when it is not mentioned.
+
 
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False, False
-    is_random_response = random.random() < 0.02
+    is_random_response = random.random() < 0.01
     allowed_channel_ids = [int(channel_id) for channel_id in os.environ.get("CHANNEL_IDS").split(',')]
     return (bot.user in message.mentions or is_random_response or
             message.channel.id in allowed_channel_ids), is_random_response
