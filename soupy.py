@@ -12,7 +12,7 @@ from colorama import init, Fore
 # constants and settings
 load_dotenv() # Load environment variables
 init(convert=True) # enable colors in windows cmd console
-RATE_LIMIT = 0.5  # rate limit in seconds (sleep this many seconds between each OpenAI API request)
+RATE_LIMIT = 0.5  # rate limit in seconds (sleep this many seconds between each OpenAI API request, set to 0 to disable)
 openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
 intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
 intents.members = True
