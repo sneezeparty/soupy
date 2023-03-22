@@ -53,66 +53,60 @@ async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(openai.ChatCompletion.create, *args, **kwargs)
 
 @bot.event
-# ... (previous code unchanged)
-
 async def on_message(message):
     global messages
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         airesponse_chunks = []
         response = {}
-        openai_api_error_occurred = False
+        openai_api_error_occurred = False  # Add a flag variable here
 
-        for attempt in range(3):  # Loop up to 3 times (0, 1, 2)
-            try:
-                channel = message.channel
-                async with channel.typing():
-                    messages = []
-                    async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
-                        messages.append({"role": "system", "content": message.content})
-                    messages = messages[::-1]
+        try:
+            channel = message.channel
+            async with channel.typing():
+                messages = []
+                async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
+                    messages.append({"role": "system", "content": message.content})
+                messages = messages[::-1]
 
-                    messages = [
-                        {"role": "system", "content": chatgpt_behaviour},
-                        {"role": "user", "content": "Here is the message history:"}
-                    ] + messages
-                    messages += [{"role": "system", "content": "What is your reply?"}]
+                messages = [
+                    {"role": "system", "content": chatgpt_behaviour},
+                    {"role": "user", "content": "Here is the message history:"}
+                ] + messages
+                messages += [{"role": "system", "content": "What is your reply?"}]
 
-                    print(f'chat history: {messages}')
-                    if is_random_response:
-                        max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
-                    else:
-                        max_tokens = int(os.environ.get("MAX_TOKENS"))
+                print(f'chat history: {messages}')
+                if is_random_response:
+                    max_tokens = int(os.environ.get("MAX_TOKENS_RANDOM"))
+                else:
+                    max_tokens = int(os.environ.get("MAX_TOKENS"))
 
-                    response = await async_chat_completion(
-                        model=os.environ.get("MODEL"),
-                        messages=messages,
-                        temperature=1.5,
-                        top_p=0.9,
-                        max_tokens=max_tokens
-                    )
-                    airesponse = response.choices[0].message.content
+                response = await async_chat_completion(
+                    model=os.environ.get("MODEL"),
+                    messages=messages,
+                    temperature=1.5,
+                    top_p=0.9,
+                    max_tokens=max_tokens
+                )
+                airesponse = response.choices[0].message.content
 
-                    airesponse_chunks = split_message(airesponse)
-                    total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
-                    await asyncio.sleep(total_sleep_time)
+                airesponse_chunks = split_message(airesponse)
+                total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
+                await asyncio.sleep(total_sleep_time)
 
-                break  # If successful, break out of the loop
+        except openai.error.OpenAIError as e:
+            print(f"Error: OpenAI API Error - {e}")
+            airesponse = f"An error has occurred with your request. Please try again. Error details: {e}"
+            openai_api_error_occurred = True  # Set the flag to True when an error occurs
 
-            except openai.error.OpenAIError as e:
-                print(f"Error: OpenAI API Error - {e}")
-                airesponse = f"An error has occurred with your request. Please try again. Error details: {e}"
-                openai_api_error_occurred = True
+            # Send the error message to the channel
+            await message.channel.send(airesponse)
 
-                if attempt < 2:  # If it's not the last attempt
-                    await asyncio.sleep(0.5)  # Wait for 0.5 seconds before retrying
-                else:  # If it's the last attempt
-                    await message.channel.send(airesponse)  # Send the error message to the channel
+        except Exception as e:
+            print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
+            airesponse = "Wuh?"
 
-            except Exception as e:
-                print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
-                airesponse = "Wuh?"
-
+        # Send the response to the channel if there was no OpenAI API error
         if not openai_api_error_occurred:
             for chunk in airesponse_chunks:
                 await message.channel.send(chunk)
@@ -124,7 +118,6 @@ async def on_message(message):
                 response["usage"]["total_tokens"]) + Fore.RESET)
 
 bot.run(os.environ.get("DISCORD_TOKEN"))
-
 
 
 
