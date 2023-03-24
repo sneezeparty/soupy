@@ -23,15 +23,19 @@ messages = []
 
 # The bot will respond whenever it is @mentioned, and also in whatever channels are specified in .env CHANNEL_IDS.
 # It will respond in CHANNEL_IDS channel to every message, even when it is not mentioned.
-
+# Soupy won't respond if someone else is @mentioned in the channel where it responds to all messages.
 
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
+        return False, False
+    mentioned_users = [user for user in message.mentions if not user.bot] # Get all non-bot mentioned users
+    if mentioned_users:
         return False, False
     is_random_response = random.random() < 0.01
     allowed_channel_ids = [int(channel_id) for channel_id in os.environ.get("CHANNEL_IDS").split(',')]
     return (bot.user in message.mentions or is_random_response or
             message.channel.id in allowed_channel_ids), is_random_response
+
 
 
 # Split message into multiple chunks of at least min_length characters
