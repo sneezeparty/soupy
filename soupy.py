@@ -8,10 +8,9 @@ import time
 import asyncio
 from colorama import init, Fore
 
-
 # constants and settings
-load_dotenv() # Load environment variables
-init(convert=True) # enable colors in windows cmd console
+load_dotenv()  # Load environment variables
+init(convert=True)  # enable colors in windows cmd console
 RATE_LIMIT = 0.5  # rate limit in seconds (sleep this many seconds between each OpenAI API request, set to 0 to disable)
 openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
 intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
@@ -28,7 +27,7 @@ messages = []
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
         return False, False
-    mentioned_users = [user for user in message.mentions if not user.bot] # Get all non-bot mentioned users
+    mentioned_users = [user for user in message.mentions if not user.bot]  # Get all non-bot mentioned users
     if mentioned_users:
         return False, False
     is_random_response = random.random() < 0.01
@@ -37,8 +36,7 @@ def should_bot_respond_to_message(message):
             message.channel.id in allowed_channel_ids), is_random_response
 
 
-
-# Split message into multiple chunks of at least min_length characters
+# Split message into multiple chunks of at least min_length characters.
 def split_message(message_content, min_length=1500):
     chunks = []
     remaining = message_content
@@ -47,14 +45,15 @@ def split_message(message_content, min_length=1500):
         last_punctuation_index = max(chunk.rfind("."), chunk.rfind("!"), chunk.rfind("?"))
         if last_punctuation_index == -1:
             last_punctuation_index = min_length - 1
-        chunks.append(chunk[:last_punctuation_index+1])
-        remaining = remaining[last_punctuation_index+1:]
+        chunks.append(chunk[:last_punctuation_index + 1])
+        remaining = remaining[last_punctuation_index + 1:]
     chunks.append(remaining)
     return chunks
 
 
 async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(openai.ChatCompletion.create, *args, **kwargs)
+
 
 @bot.event
 async def on_message(message):
@@ -74,9 +73,9 @@ async def on_message(message):
                 messages = messages[::-1]
 
                 messages = [
-                    {"role": "system", "content": chatgpt_behaviour},
-                    {"role": "user", "content": "Here is the message history:"}
-                ] + messages
+                               {"role": "system", "content": chatgpt_behaviour},
+                               {"role": "user", "content": "Here is the message history:"}
+                           ] + messages
                 messages += [{"role": "system", "content": "What is your reply?"}]
 
                 print(f'chat history: {messages}')
@@ -121,7 +120,5 @@ async def on_message(message):
             print("Total Tokens:", Fore.GREEN + str(
                 response["usage"]["total_tokens"]) + Fore.RESET)
 
+
 bot.run(os.environ.get("DISCORD_TOKEN"))
-
-
-
