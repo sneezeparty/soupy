@@ -25,6 +25,7 @@ messages = []
 # Soupy won't respond if someone else is @mentioned in the channel where it responds to all messages.
 
 def should_bot_respond_to_message(message):
+    allowed_channel_ids = [int(channel_id) for channel_id in os.environ.get("CHANNEL_IDS").split(',')]
     if message.author == bot.user:
         return False, False
     is_random_response = random.random() < 0.01
@@ -32,7 +33,7 @@ def should_bot_respond_to_message(message):
     if mentioned_users or not (
             bot.user in message.mentions or is_random_response or message.channel.id in allowed_channel_ids):
         return False, False
-    allowed_channel_ids = [int(channel_id) for channel_id in os.environ.get("CHANNEL_IDS").split(',')]
+
     return (bot.user in message.mentions or is_random_response or
             message.channel.id in allowed_channel_ids), is_random_response
 
