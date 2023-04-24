@@ -56,10 +56,21 @@ def split_message(message_content, min_length=1500):
 async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(openai.ChatCompletion.create, *args, **kwargs)
 
+async def fetch_message_history(channel):
+    message_history = []
+    async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
+        message_history.append({"role": "system", "content": message.content})
+    return message_history[::-1]
 
 @bot.event
 async def on_message(message):
     global messages
+    if message.author == bot.user:
+        return
+
+    # Fetch message history
+    messages = await fetch_message_history(message.channel)
+
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         airesponse_chunks = []
@@ -69,10 +80,6 @@ async def on_message(message):
         try:
             channel = message.channel
             async with channel.typing():
-                messages = []
-                async for message in channel.history(limit=int(os.environ.get("HISTORYLENGTH"))):
-                    messages.append({"role": "system", "content": message.content})
-                messages = messages[::-1]
 
                 messages = [
                                {"role": "system", "content": chatgpt_behaviour},
