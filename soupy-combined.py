@@ -34,7 +34,6 @@ RATE_LIMIT = 0.5
 
 # Get behavior settings from .env
 chatgpt_behaviour = os.getenv("BEHAVIOUR")
-messages = []
 
 # Determine if the bot should respond to the message
 def should_bot_respond_to_message(message):
@@ -67,6 +66,12 @@ async def async_chat_completion(*args, **kwargs):
 async def fetch_message_history(channel):
     message_history = []
     async for message in channel.history(limit=int(os.getenv("HISTORYLENGTH"))):
+        # Ignore messages within an embed (i.e., messages with attachments)
+        if message.embeds:
+            continue
+        # Ignore messages that start with "!generate"
+        if message.content.startswith("!generate"):
+            continue
         message_history.append({"role": "system", "content": message.content})
     return message_history[::-1]
 
@@ -93,11 +98,10 @@ async def generate(ctx, *, prompt: str):
 @bot.event
 async def on_message(message):
     await bot.process_commands(message)  # Ensure commands are processed
-    global messages
-    if message.author == bot.user:
+
+    if message.author == bot.user or message.embeds:
         return
         
-    messages = await fetch_message_history(message.channel)
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         airesponse_chunks = []
@@ -107,6 +111,9 @@ async def on_message(message):
         try:
             channel = message.channel
             async with channel.typing():
+                # Fetch and filter the message history
+                messages = await fetch_message_history(channel)
+                
                 messages = [
                                {"role": "system", "content": chatgpt_behaviour},
                                {"role": "user", "content": "Here is the message history:"}
