@@ -10,13 +10,14 @@ from colorama import init, Fore
 
 # constants and settings
 load_dotenv()  # Load environment variables
+openai.api_key = os.getenv("OPENAI_API_KEY")  # Set your OpenAI API key
 init(convert=True)  # enable colors in windows cmd console
-RATE_LIMIT = 0.5  # rate limit in seconds (sleep this many seconds between each OpenAI API request, set to 0 to disable)
-openai.api_key = os.environ.get("OPENAI_API_KEY")  # insert your own openai API key here
-intents = discord.Intents.default()  # by default, it uses all intents, but you can change this
-intents.members = True
-bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
-chatgpt_behaviour = os.environ.get("BEHAVIOUR")  # this is the .env variable to alter the bots "personality"
+RATE_LIMIT = 0.5  # rate limit in seconds
+intents = discord.Intents.default()
+intents.messages = True  # This is for general message content outside of direct messages.
+intents.message_content = True  # This is for the content of the message, which is now considered privileged.
+bot = commands.Bot(command_prefix='!', intents=intents)
+chatgpt_behaviour = os.getenv("BEHAVIOUR")
 messages = []
 
 
@@ -54,7 +55,7 @@ def split_message(message_content, min_length=1500):
 
 
 async def async_chat_completion(*args, **kwargs):
-    return await asyncio.to_thread(openai.ChatCompletion.create, *args, **kwargs)
+    return await asyncio.to_thread(openai.chat.completions.create, *args, **kwargs)
 
 
 async def fetch_message_history(channel):
@@ -69,7 +70,7 @@ async def on_message(message):
     global messages
     if message.author == bot.user:
         return
-
+        
     # Fetch message history
     messages = await fetch_message_history(message.channel)
 
@@ -107,8 +108,8 @@ async def on_message(message):
                 airesponse_chunks = split_message(airesponse)
                 total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
                 await asyncio.sleep(total_sleep_time)
-
-        except openai.error.OpenAIError as e:
+        
+        except openai.OpenAIError as e:
             print(f"Error: OpenAI API Error - {e}")
             airesponse = f"An error has occurred with your request. Please try again. Error details: {e}"
             openai_api_error_occurred = True  # Set the flag to True when an error occurs
