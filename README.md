@@ -1,4 +1,7 @@
 ## Soupy 
+
+### Soupy Duo is a very simple OpenAI/Dall-E-3 API Discord bot.  It's simple to set up and it's simple to run.
+
 ### Soupy is a simple-to-setup/simple-to-use ChatGPT Discord bot that utilizes the ChatGPT API.
 
 The current functionality of the bot is:
