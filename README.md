@@ -1,4 +1,4 @@
-## Soupy 
+## Soupy / Soupy Duo
 
 ### Soupy Duo is a very simple OpenAI/Dall-E-3 API Discord bot.  It's simple to set up and it's simple to run.
 
