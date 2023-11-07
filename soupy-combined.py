@@ -27,7 +27,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Initialize colorama for colored console output
-init(convert=True)
+init()
 
 # Rate limiting
 RATE_LIMIT = 0.5
@@ -66,14 +66,17 @@ async def async_chat_completion(*args, **kwargs):
 async def fetch_message_history(channel):
     message_history = []
     async for message in channel.history(limit=int(os.getenv("HISTORYLENGTH"))):
-        # Ignore messages within an embed (i.e., messages with attachments)
+        # Skip messages that contain embeds (likely bot messages or system messages)
         if message.embeds:
             continue
-        # Ignore messages that start with "!generate"
-        if message.content.startswith("!generate"):
+        # Skip messages that start with the command prefix '!generate'
+        if message.content.startswith('!generate'):
             continue
-        message_history.append({"role": "system", "content": message.content})
+        # Assuming that system messages do not come from 'User' accounts (you might need to adjust this)
+        role = "system" if message.author.bot else "user"
+        message_history.append({"role": role, "content": message.content})
     return message_history[::-1]
+
 
 @bot.event
 async def on_ready():
@@ -119,7 +122,14 @@ async def on_message(message):
                                {"role": "user", "content": "Here is the message history:"}
                            ] + messages
                 messages += [{"role": "assistant", "content": "What is your reply?"}, {"role": "system", "content": chatgpt_behaviour}]
-                print(f'chat history: {messages}')
+                
+                        # Printing each chat message on a new line for readability
+                print('Chat history:')
+                for msg in messages:
+                    role = msg['role']
+                    content = msg['content'].replace('\n', '\n               ')  # Replace newlines in content to align multi-line messages
+                    print(f'  {role.capitalize()}: {content}')
+                
                 if is_random_response:
                     max_tokens = int(os.getenv("MAX_TOKENS_RANDOM"))
                 else:
