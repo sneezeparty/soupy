@@ -10,7 +10,7 @@ load_dotenv()
 # Initialize the OpenAI client with your API key
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if openai_api_key is None:
-    raise ValueError("No OpenAI API key found. Make sure to set the OPENAI_API_KEY environment variable.")
+    raise ValueError("No OpenAI API key found. Make sure to set the OPENAI_API_KEY environment variable in a .env file.")
 client = OpenAI(api_key=openai_api_key)
 
 # Define the bot with the specified intents and command prefix
@@ -45,5 +45,5 @@ async def generate(ctx, *, prompt: str):
 # Run the bot with your token
 discord_bot_token = os.getenv("DISCORD_BOT_TOKEN")
 if discord_bot_token is None:
-    raise ValueError("No Discord bot token found. Make sure to set the DISCORD_BOT_TOKEN environment variable.")
+    raise ValueError("No Discord bot token found. Make sure to set the DISCORD_BOT_TOKEN environment variable in a .env file.")
 bot.run(discord_bot_token)
