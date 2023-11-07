@@ -1,4 +1,10 @@
-## Soupy / Soupy Duo
+## Soupy / Soupy Duo -- Requires OpenAI API access.
+
+### Soupy-combined combines the functionality of the chat bot with the functionality of the image generation bot.
+
+1. Install dependencies.
+2. Create a .env and populate it.
+3. Have fun.
 
 ### Soupy Duo is a very simple OpenAI/Dall-E-3 API Discord bot.  It's simple to set up and it's simple to run.
 
