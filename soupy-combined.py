@@ -73,7 +73,7 @@ async def fetch_message_history(channel):
         if message.content.startswith('!generate'):
             continue
         # Assuming that system messages do not come from 'User' accounts (you might need to adjust this)
-        role = "system" if message.author.bot else "user"
+        role = "assistant" if message.author.bot else "user"
         message_history.append({"role": role, "content": message.content})
     return message_history[::-1]
 
