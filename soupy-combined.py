@@ -8,7 +8,8 @@ import random
 import time
 import asyncio
 from colorama import init, Fore
-
+from io import BytesIO
+import requests
 
 # Load environment variables
 load_dotenv()
@@ -93,18 +94,22 @@ async def generate(ctx, *, prompt: str):
             n=1,
         )
         image_url = response.data[0].url
+        image_data = requests.get(image_url).content
+        image_file = BytesIO(image_data)
+        image_file.seek(0)
+        image_discord = discord.File(fp=image_file, filename='image.png')
 
-    embed = discord.Embed(title="Generated Image", description=f"Prompt: {prompt}")
-    embed.set_image(url=image_url)
-    await ctx.send(embed=embed)
+    await ctx.send(f"Generated Image -- every image you generate costs $0.04, so please keep that in mind\nPrompt: {prompt}", file=image_discord)
 
 @bot.event
 async def on_message(message):
-    await bot.process_commands(message)  # Ensure commands are processed
-
-    if message.author == bot.user or message.embeds:
+    # If the message is from the bot itself or contains an attachment/embed, ignore it
+    if message.author == bot.user or message.attachments or message.embeds:
         return
-        
+
+    # Ensure commands are processed, but ignore the bot's own command invocations
+    await bot.process_commands(message)
+    
     should_respond, is_random_response = should_bot_respond_to_message(message)
     if should_respond:
         airesponse_chunks = []
