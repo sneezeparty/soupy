@@ -1,3 +1,5 @@
+# !! Only soupy-combined is currently functioning correctly !!
+
 ## Soupy / Soupy Duo -- Requires OpenAI API access.
 
 ### Soupy-combined combines the functionality of the chat bot with the functionality of the image generation bot.
