@@ -1,4 +1,4 @@
-# !! Only soupy-combined is currently functioning correctly !!
+# !! Only soupy-combined is currently functioning correctly
 
 ## Soupy / Soupy Duo -- Requires OpenAI API access.
 
