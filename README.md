@@ -2,17 +2,23 @@
 
 ### Soupy-combined combines the functionality of the chat bot with the functionality of the image generation bot.
 
+Currently, soupy-combined.py uses the chat model specified in the .env, and the image !generate uses a hard-coded model which IS NOT referenced in the .env.
+
 1. Install dependencies.
 2. Create a .env and populate it.
 3. Have fun.
 
 ### Soupy Duo is a very simple OpenAI/Dall-E-3 API Discord bot.  It's simple to set up and it's simple to run.
 
+This is ONLY for !generate and the model is hard coded into the file.
+
 1. Install dependencies.
 2. create a .env and populate it with your OPENAI_API_KEY and DISCORD_BOT_TOKEN
 3. Have fun at $0.04 per image, yikes.
 
 ### Soupy is a simple-to-setup/simple-to-use ChatGPT Discord bot that utilizes the ChatGPT API.
+
+This is currently ONLY chat.
 
 The current functionality of the bot is:
 
