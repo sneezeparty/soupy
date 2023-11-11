@@ -14,7 +14,7 @@ import requests
 # Load environment variables
 load_dotenv()
 
-# Initialize the OpenAI client with your API key for both image and chat functionalities
+# Initialize the OpenAI client with your API key
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if openai_api_key is None:
     raise ValueError("No OpenAI API key found. Make sure to set the OPENAI_API_KEY environment variable.")
@@ -67,17 +67,16 @@ async def async_chat_completion(*args, **kwargs):
 async def fetch_message_history(channel):
     message_history = []
     async for message in channel.history(limit=int(os.getenv("HISTORYLENGTH"))):
-        # Skip messages that contain embeds (likely bot messages or system messages)
         if message.embeds:
-            continue
-        # Skip messages that start with the command prefix '!generate'
+            continue            
+                # Ignore messages containing the phrase "Generated Image"
+        if "Generated Image" in message.content:
+            return
         if message.content.startswith('!generate'):
             continue
-        # Assuming that system messages do not come from 'User' accounts (you might need to adjust this)
         role = "assistant" if message.author.bot else "user"
         message_history.append({"role": role, "content": message.content})
     return message_history[::-1]
-
 
 @bot.event
 async def on_ready():
@@ -85,6 +84,7 @@ async def on_ready():
 
 @bot.command()
 async def generate(ctx, *, prompt: str):
+    print(f"Creating image based on: {prompt}")
     async with ctx.typing():
         response = client.images.generate(
             model="dall-e-3",
@@ -99,15 +99,21 @@ async def generate(ctx, *, prompt: str):
         image_file.seek(0)
         image_discord = discord.File(fp=image_file, filename='image.png')
 
-    await ctx.send(f"Generated Image -- every image you generate costs $0.04, so please keep that in mind\nPrompt: {prompt}", file=image_discord)
+    await ctx.send(f"Generated Image -- every image you generate costs $0.04 so please keep that in mind\nPrompt: {prompt}", file=image_discord)
 
 @bot.event
 async def on_message(message):
-    # If the message is from the bot itself or contains an attachment/embed, ignore it
+    # Ignore messages from the bot itself or that contain attachments/embeds
     if message.author == bot.user or message.attachments or message.embeds:
         return
 
-    # Ensure commands are processed, but ignore the bot's own command invocations
+    # Ignore messages containing the phrase "Generated Image"
+#    if "Generated Image" in message.content:
+#        return
+
+    if message.author == bot.user or message.attachments or message.embeds:
+        return
+
     await bot.process_commands(message)
     
     should_respond, is_random_response = should_bot_respond_to_message(message)
@@ -119,20 +125,17 @@ async def on_message(message):
         try:
             channel = message.channel
             async with channel.typing():
-                # Fetch and filter the message history
                 messages = await fetch_message_history(channel)
-                
                 messages = [
                                {"role": "system", "content": chatgpt_behaviour},
                                {"role": "user", "content": "Here is the message history:"}
                            ] + messages
                 messages += [{"role": "assistant", "content": "What is your reply?"}, {"role": "system", "content": chatgpt_behaviour}]
                 
-                        # Printing each chat message on a new line for readability
                 print('Chat history:')
                 for msg in messages:
                     role = msg['role']
-                    content = msg['content'].replace('\n', '\n               ')  # Replace newlines in content to align multi-line messages
+                    content = msg['content'].replace('\n', '\n               ')
                     print(f'  {role.capitalize()}: {content}')
                 
                 if is_random_response:
