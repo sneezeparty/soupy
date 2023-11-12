@@ -38,7 +38,11 @@ chatgpt_behaviour = os.getenv("BEHAVIOUR")
 
 # Determine if the bot should respond to the message
 def should_bot_respond_to_message(message):
-    allowed_channel_ids = [int(channel_id) for channel_id in os.getenv("CHANNEL_IDS").split(',')]
+    channel_ids_str = os.getenv("CHANNEL_IDS")
+    if not channel_ids_str:
+        return False, False
+
+    allowed_channel_ids = [int(channel_id) for channel_id in channel_ids_str.split(',')]
     if message.author == bot.user:
         return False, False
     is_random_response = random.random() < 0.01
@@ -65,18 +69,21 @@ async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(openai.chat.completions.create, *args, **kwargs)
 
 async def fetch_message_history(channel):
+    history_length_str = os.getenv("HISTORYLENGTH")
+    history_length = int(history_length_str) if history_length_str else 100  # default to 100 if not set
+
     message_history = []
-    async for message in channel.history(limit=int(os.getenv("HISTORYLENGTH"))):
+    async for message in channel.history(limit=history_length):
         if message.embeds:
-            continue            
-                # Ignore messages containing the phrase "Generated Image"
-        if "Generated Image" in message.content:
-            return
+            continue
+#        if "Generated Image" in message.content:
+#            return
         if message.content.startswith('!generate'):
             continue
         role = "assistant" if message.author.bot else "user"
         message_history.append({"role": role, "content": message.content})
-    return message_history[::-1]
+
+    return message_history[::-1] if message_history else []
 
 @bot.event
 async def on_ready():
@@ -123,10 +130,6 @@ async def on_message(message):
     # Ignore messages from the bot itself or that contain attachments/embeds
     if message.author == bot.user or message.attachments or message.embeds:
         return
-
-    # Ignore messages containing the phrase "Generated Image"
-#    if "Generated Image" in message.content:
-#        return
 
     if message.author == bot.user or message.attachments or message.embeds:
         return
