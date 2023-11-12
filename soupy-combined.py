@@ -45,11 +45,18 @@ def should_bot_respond_to_message(message):
     allowed_channel_ids = [int(channel_id) for channel_id in channel_ids_str.split(',')]
     if message.author == bot.user:
         return False, False
+
+    # Check for bot's own 'Generated Image' messages
+    if "Generated Image" in message.content:
+        return False, False
+
     is_random_response = random.random() < 0.01
     mentioned_users = [user for user in message.mentions if not user.bot]
     if mentioned_users or not (bot.user in message.mentions or is_random_response or message.channel.id in allowed_channel_ids):
         return False, False
+
     return (bot.user in message.mentions or is_random_response or message.channel.id in allowed_channel_ids), is_random_response
+
 
 # Split message into chunks
 def split_message(message_content, min_length=1500):
@@ -70,14 +77,14 @@ async def async_chat_completion(*args, **kwargs):
 
 async def fetch_message_history(channel):
     history_length_str = os.getenv("HISTORYLENGTH")
-    history_length = int(history_length_str) if history_length_str else 100  # default to 100 if not set
+    history_length = int(history_length_str) if history_length_str else 15  # default to 100 if not set
 
     message_history = []
     async for message in channel.history(limit=history_length):
         if message.embeds:
             continue
-#        if "Generated Image" in message.content:
-#            return
+        if "Generated Image" in message.content or message.content.startswith('!generate'):
+            continue
         if message.content.startswith('!generate'):
             continue
         role = "assistant" if message.author.bot else "user"
@@ -132,6 +139,10 @@ async def on_message(message):
         return
 
     if message.author == bot.user or message.attachments or message.embeds:
+        return
+            
+    # Ignore messages that are responses to the !generate command
+    if "Generated Image" in message.content:
         return
 
     await bot.process_commands(message)
