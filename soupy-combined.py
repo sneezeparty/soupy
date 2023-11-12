@@ -84,22 +84,39 @@ async def on_ready():
 
 @bot.command()
 async def generate(ctx, *, prompt: str):
-    print(f"Creating image based on: {prompt}")
-    async with ctx.typing():
-        response = client.images.generate(
-            model="dall-e-3",
-            prompt=prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1,
-        )
-        image_url = response.data[0].url
-        image_data = requests.get(image_url).content
-        image_file = BytesIO(image_data)
-        image_file.seek(0)
-        image_discord = discord.File(fp=image_file, filename='image.png')
+    try:
+        print(f"Creating image based on: {prompt}")
+        async with ctx.typing():
+            response = client.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1,
+            )
+            image_url = response.data[0].url
+            image_data = requests.get(image_url).content
+            image_file = BytesIO(image_data)
+            image_file.seek(0)
+            image_discord = discord.File(fp=image_file, filename='image.png')
 
-    await ctx.send(f"Generated Image -- every image you generate costs $0.04 so please keep that in mind\nPrompt: {prompt}", file=image_discord)
+        await ctx.send(f"Generated Image -- every image you generate costs $0.04 so please keep that in mind\nPrompt: {prompt}", file=image_discord)
+
+    except openai.BadRequestError as e:
+        # Extracting the relevant error message
+        error_message = str(e)
+        if 'content_policy_violation' in error_message:
+            # Find the start and end of the important message
+            start = error_message.find("'message': '") + len("'message': '")
+            end = error_message.find("', 'param'")
+            important_message = error_message[start:end]
+
+            # Send the extracted message to the channel
+            await ctx.send(f"Error: {important_message}")
+
+    except Exception as e:
+        # Handle other exceptions
+        await ctx.send(f"An error occurred: {e}")
 
 @bot.event
 async def on_message(message):
