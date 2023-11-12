@@ -10,6 +10,8 @@ Currently, soupy-combined.py uses the chat model specified in the .env, and the 
 2. Create a .env and populate it.
 3. Have fun.
 
+Note: The bot is currently responding to itself after posting the results of !generate to the channel where it responds to all messages, regardless of not being @mentioned.  I'm trying to figure out a solution but haven't yet.
+
 ### Soupy Duo is a very simple OpenAI/Dall-E-3 API Discord bot.  It's simple to set up and it's simple to run.
 
 This is ONLY for !generate and the model is hard coded into the file.
