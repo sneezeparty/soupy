@@ -8,8 +8,11 @@ import random
 import time
 import asyncio
 from colorama import init, Fore
+import io
 from io import BytesIO
 import requests
+from PIL import Image
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -92,6 +95,36 @@ async def fetch_message_history(channel):
 
     return message_history[::-1] if message_history else []
 
+async def encode_discord_image(image_url):
+    response = requests.get(image_url)
+    image = Image.open(io.BytesIO(response.content))
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+async def analyze_image(base64_image, instructions):
+    payload = {
+        "model": "gpt-4-vision-preview",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": instructions},  # Use the instructions provided in the message
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                ]
+            }
+        ],
+        "max_tokens": 300
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {openai_api_key}"
+    }
+
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+    return response.json()
+
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name}')
@@ -134,16 +167,43 @@ async def generate(ctx, *, prompt: str):
 
 @bot.event
 async def on_message(message):
-    # Ignore messages from the bot itself or that contain attachments/embeds
-    if message.author == bot.user or message.attachments or message.embeds:
+    # First, always call this to ensure the bot can process commands
+    await bot.process_commands(message)
+
+    # without this, the bot will generate 2 images erroneously
+    if message.content.startswith(bot.command_prefix):
         return
 
-    if message.author == bot.user or message.attachments or message.embeds:
+    # Check if the message is from the bot itself
+    if message.author == bot.user:
         return
-            
-    # Ignore messages that are responses to the !generate command
-    if "Generated Image" in message.content:
-        return
+
+    # Initialize instructions variable
+    instructions = "What’s in this image?"  # Default instructions
+
+    # Update instructions if there is accompanying text
+    if message.content and message.author != bot.user:
+        instructions = message.content
+
+    # Process image attachments
+    if message.attachments:
+        for attachment in message.attachments:
+            if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg','.webp')):
+                async with message.channel.typing():
+                    base64_image = await encode_discord_image(attachment.url)
+                    instructions = message.content if message.content else "What’s in this image?"
+                    analysis_result = await analyze_image(base64_image, instructions)
+                    response_text = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if response_text:
+                        await message.channel.send(response_text)
+                        # Using a different color for the actual analysis result
+                        print(Fore.BLUE + "Image analysis result: " + Fore.YELLOW + f"{response_text}")
+                    else:
+                        response_fail_message = "Sorry, I couldn't analyze the image."
+                        await message.channel.send(response_fail_message)
+                        # Using a different color for failure messages
+                        print(Fore.RED + response_fail_message)
+                    return
 
     await bot.process_commands(message)
     
@@ -185,7 +245,18 @@ async def on_message(message):
                 airesponse_chunks = split_message(airesponse)
                 total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
                 await asyncio.sleep(total_sleep_time)
-        
+  
+          # New: Check if the message has an image attachment
+                if message.attachments:
+                    for attachment in message.attachments:
+                        if any(attachment.filename.lower().endswith(ext) for ext in ['jpg', 'jpeg', 'png']):
+                            await message.channel.send("Analyzing image, please wait...")
+                            base64_image = await encode_discord_image(attachment.url)
+                            analysis_result = await analyze_image(base64_image)
+                            response_text = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                            await message.channel.send(f"Image analysis result: {response_text}")
+                            break
+  
         except openai.OpenAIError as e:
             print(f"Error: OpenAI API Error - {e}")
             airesponse = f"An error has occurred with your request. Please try again. Error details: {e}"
@@ -204,6 +275,7 @@ async def on_message(message):
 
         if 'usage' in response:
             print("Total Tokens:", Fore.GREEN + str(response["usage"]["total_tokens"]) + Fore.RESET)
+  
 
 # Run the bot with your token
 discord_bot_token = os.getenv("DISCORD_TOKEN")
