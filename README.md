@@ -1,6 +1,6 @@
 # !! Only soupy-combined is currently functioning correctly
 
-Pretty much update on 12/10/2023 -- soupy can now analyze images sent to the channel.  It will also follow instructions on how you want the image to be analyzed.  For example, "describe this as a 5 year old would describe it" or "give a poetic description of this image."
+Pretty big update on 12/10/2023 -- soupy can now analyze images sent to the channel.  It will also follow instructions on how you want the image to be analyzed.  For example, "describe this as a 5 year old would describe it" or "give a poetic description of this image."
 
 To use this functionality, just tag the bot in a message with an attached image, and optionally give an instruction about how you would like the image to be analyzed.
 
