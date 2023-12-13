@@ -80,18 +80,29 @@ async def async_chat_completion(*args, **kwargs):
 
 async def fetch_message_history(channel):
     history_length_str = os.getenv("HISTORYLENGTH")
-    history_length = int(history_length_str) if history_length_str else 15  # default to 100 if not set
+    desired_history_length = int(history_length_str) if history_length_str else 15  # default to 15 if not set
 
     message_history = []
-    async for message in channel.history(limit=history_length):
-        if message.embeds:
+    total_messages_checked = 0
+    max_messages_to_check = desired_history_length * 2  # To avoid checking too many messages
+
+    async for message in channel.history(limit=max_messages_to_check):
+        if len(message_history) >= desired_history_length:
+            break  # Stop if desired history length is reached
+
+        if message.embeds or message.attachments:
             continue
         if "Generated Image" in message.content or message.content.startswith('!generate'):
             continue
-        if message.content.startswith('!generate'):
-            continue
+        if message.content.startswith('!generate') or not message.content.strip():
+            continue  # Skip blank messages
+
         role = "assistant" if message.author.bot else "user"
         message_history.append({"role": role, "content": message.content})
+        total_messages_checked += 1
+
+        if total_messages_checked >= max_messages_to_check:
+            break  # Stop if maximum messages to check is reached
 
     return message_history[::-1] if message_history else []
 
@@ -258,11 +269,9 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-
-  
-
 # Run the bot with your token
 discord_bot_token = os.getenv("DISCORD_TOKEN")
 if discord_bot_token is None:
     raise ValueError("No Discord bot token found. Make sure to set the DISCORD_BOT_TOKEN environment variable.")
 bot.run(discord_bot_token)
+
