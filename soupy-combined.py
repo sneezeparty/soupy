@@ -189,55 +189,53 @@ async def on_message(message):
         try:
             channel = message.channel
             async with channel.typing():
-                messages = await fetch_message_history(channel)
-                messages = [
-                    {"role": "system", "content": chatgpt_behaviour},
-                    {"role": "user", "content": "Here is the message history:"}
-                ] + messages
-                messages += [{"role": "assistant", "content": "What is your reply?"}, {"role": "system", "content": chatgpt_behaviour}]
-
-                print('Chat history:')
-                for msg in messages:
-                    role = msg['role']
-                    content = msg['content'].replace('\n', '\n               ')
-                    print(f'  {role.capitalize()}: {content}')
-
-                if is_random_response:
-                    max_tokens = int(os.getenv("MAX_TOKENS_RANDOM"))
-                else:
-                    max_tokens = int(os.getenv("MAX_TOKENS"))
-
-                response = await async_chat_completion(
-                    model=os.getenv("MODEL_CHAT"),
-                    messages=messages,
-                    temperature=1.5,
-                    top_p=0.9,
-                    max_tokens=max_tokens
-                )
-                airesponse = response.choices[0].message.content
-                airesponse_chunks = split_message(airesponse)
-                total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
-                await asyncio.sleep(total_sleep_time)
-
-                # Process image attachments
                 if message.attachments:
+                    # Process image attachments
                     for attachment in message.attachments:
                         if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg','.webp')):
-                            async with message.channel.typing():
-                                base64_image = await encode_discord_image(attachment.url)
-                                instructions = message.content if message.content else "What’s in this image?"
-                                analysis_result = await analyze_image(base64_image, instructions)
-                                response_text = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                                if response_text:
-                                    await message.channel.send(response_text)
-                                    # Using a different color for the actual analysis result
-                                    print(Fore.BLUE + "Image analysis result: " + Fore.YELLOW + f"{response_text}")
-                                else:
-                                    response_fail_message = "Sorry, I couldn't analyze the image."
-                                    await message.channel.send(response_fail_message)
-                                    # Using a different color for failure messages
-                                    print(Fore.RED + response_fail_message)
-                                return
+                            base64_image = await encode_discord_image(attachment.url)
+                            instructions = message.content if message.content else "What’s in this image?"
+                            analysis_result = await analyze_image(base64_image, instructions)
+                            response_text = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                            if response_text:
+                                await message.channel.send(response_text)
+                                print(Fore.BLUE + "Image analysis result: " + Fore.YELLOW + f"{response_text}")
+                            else:
+                                response_fail_message = "Sorry, I couldn't analyze the image."
+                                await message.channel.send(response_fail_message)
+                                print(Fore.RED + response_fail_message)
+                            return
+                else:
+                    # Fetch message history for text messages only
+                    messages = await fetch_message_history(channel)
+                    messages = [
+                        {"role": "system", "content": chatgpt_behaviour},
+                        {"role": "user", "content": "Here is the message history:"}
+                    ] + messages
+                    messages += [{"role": "assistant", "content": "What is your reply?"}, {"role": "system", "content": chatgpt_behaviour}]
+
+                    print('Chat history:')
+                    for msg in messages:
+                        role = msg['role']
+                        content = msg['content'].replace('\n', '\n               ')
+                        print(f'  {role.capitalize()}: {content}')
+
+                    if is_random_response:
+                        max_tokens = int(os.getenv("MAX_TOKENS_RANDOM"))
+                    else:
+                        max_tokens = int(os.getenv("MAX_TOKENS"))
+
+                    response = await async_chat_completion(
+                        model=os.getenv("MODEL_CHAT"),
+                        messages=messages,
+                        temperature=1.5,
+                        top_p=0.9,
+                        max_tokens=max_tokens
+                    )
+                    airesponse = response.choices[0].message.content
+                    airesponse_chunks = split_message(airesponse)
+                    total_sleep_time = RATE_LIMIT * len(airesponse_chunks)
+                    await asyncio.sleep(total_sleep_time)
 
         except openai.OpenAIError as e:
             print(f"Error: OpenAI API Error - {e}")
@@ -256,9 +254,10 @@ async def on_message(message):
                 time.sleep(RATE_LIMIT)
 
             if 'usage' in response:
-                print("Total Tokens:", Fore.GREEN + str(response["usage"]["total_tokens"]) + Fore.RESET)
+                print("Total Tokens for text response:", Fore.GREEN + str(response["usage"]["total_tokens"]) + Fore.RESET)
 
     await bot.process_commands(message)
+
 
   
 
