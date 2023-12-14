@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 
-# Load environment variables
+# Load environment variables.
 load_dotenv()
 
 # Initialize the OpenAI client with your API key
