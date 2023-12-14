@@ -8,7 +8,7 @@ import time
 import asyncio
 from colorama import init, Fore
 
-# constants and settings
+# constants and settings.
 load_dotenv()  # Load environment variables
 openai.api_key = os.getenv("OPENAI_API_KEY")  # Set your OpenAI API key
 init(convert=True)  # enable colors in windows cmd console
