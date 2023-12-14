@@ -7,7 +7,7 @@ import openai
 import random
 import time
 import asyncio
-from colorama import init, Fore
+from colorama import init, Fore, Style, Back
 import io
 from io import BytesIO
 import requests
@@ -17,6 +17,9 @@ import piexif
 
 # Load environment variables
 load_dotenv()
+
+# Initialize colorama for colored console output
+init(autoreset=True)
 
 # Initialize the OpenAI client with your API key
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -30,9 +33,6 @@ intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Initialize colorama for colored console output
-init()
 
 # Rate limiting
 RATE_LIMIT = 0.5
@@ -127,7 +127,7 @@ async def encode_discord_image(image_url):
         if image.width > max_dimension or image.height > max_dimension:
             ratio = min(max_dimension / image.width, max_dimension / image.height)
             new_size = (int(image.width * ratio), int(image.height * ratio))
-            image = image.resize(new_size, Image.ANTIALIAS)
+            image = image.resize(new_size)
             print(f"Image resized to: {new_size}")
 
         # Save the image into a BytesIO object and encode it in base64
@@ -235,17 +235,18 @@ async def on_message(message):
                     # Process image attachments
                     for attachment in message.attachments:
                         if attachment.filename.lower().endswith(('.png', '.jpg', '.jpeg','.webp')):
+                            print(Fore.CYAN + f"Processing image: {attachment.filename}" + Fore.RESET)  # Image processing log
                             base64_image = await encode_discord_image(attachment.url)
                             instructions = message.content if message.content else "What’s in this image?"
                             analysis_result = await analyze_image(base64_image, instructions)
                             response_text = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
                             if response_text:
                                 await message.channel.send(response_text)
-                                print(Fore.BLUE + "Image analysis result: " + Fore.YELLOW + f"{response_text}")
+                                print(Fore.MAGENTA + "Image analysis result: " + response_text + Fore.RESET)  # Success log
                             else:
                                 response_fail_message = "Sorry, I couldn't analyze the image."
                                 await message.channel.send(response_fail_message)
-                                print(Fore.RED + response_fail_message)
+                                print(Fore.YELLOW + response_fail_message + Fore.RESET)  # Warning log
                             return
                 else:
                     # Fetch message history for text messages only
@@ -260,7 +261,9 @@ async def on_message(message):
                     for msg in messages:
                         role = msg['role']
                         content = msg['content'].replace('\n', '\n               ')
-                        print(f'  {role.capitalize()}: {content}')
+                        print(f'{Fore.GREEN}{role.capitalize()}: {Fore.YELLOW}{content}{Fore.RESET}')
+
+
 
                     if is_random_response:
                         max_tokens = int(os.getenv("MAX_TOKENS_RANDOM"))
@@ -280,14 +283,16 @@ async def on_message(message):
                     await asyncio.sleep(total_sleep_time)
 
         except openai.OpenAIError as e:
-            print(f"Error: OpenAI API Error - {e}")
+            error_msg = f"Error: OpenAI API Error - {e}"
+            print(Fore.RED + error_msg + Fore.RESET)  # Error log
             airesponse = f"An error has occurred with your request. Please try again. Error details: {e}"
             openai_api_error_occurred = True
             await message.channel.send(airesponse)
 
         except Exception as e:
-            print(Fore.BLUE + f"Error: {e}" + Fore.RESET)
-            airesponse = "Wuh?"
+            error_msg = f"Unexpected error: {e}"
+            print(Fore.RED + error_msg + Fore.RESET)  # Error log
+            airesponse = "An unexpected error has occurred."
 
         if not openai_api_error_occurred:
             for chunk in airesponse_chunks:
