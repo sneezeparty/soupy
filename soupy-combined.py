@@ -107,11 +107,28 @@ async def fetch_message_history(channel):
     return message_history[::-1] if message_history else []
 
 async def encode_discord_image(image_url):
-    response = requests.get(image_url)
-    image = Image.open(io.BytesIO(response.content))
-    buffered = io.BytesIO()
-    image.save(buffered, format="JPEG")
-    return base64.b64encode(buffered.getvalue()).decode('utf-8')
+    try:
+        response = requests.get(image_url)
+        image = Image.open(io.BytesIO(response.content))
+
+        print(f"Original image format: {image.format}")  # Log the original format
+
+        # Convert .webp images to JPEG
+        if image.format == 'WEBP':
+            image = image.convert('RGB')
+            print("Converted WEBP image to JPEG")  # Log conversion
+
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG")
+        encoded_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        print("Image encoding successful")  # Log successful encoding
+        return encoded_image
+
+    except Exception as e:
+        print(f"Error in encode_discord_image: {e}")  # Log any exceptions
+        return None
+
 
 async def analyze_image(base64_image, instructions):
     payload = {
@@ -274,4 +291,3 @@ discord_bot_token = os.getenv("DISCORD_TOKEN")
 if discord_bot_token is None:
     raise ValueError("No Discord bot token found. Make sure to set the DISCORD_BOT_TOKEN environment variable.")
 bot.run(discord_bot_token)
-
