@@ -13,6 +13,7 @@ from io import BytesIO
 import requests
 from PIL import Image
 import base64
+import piexif
 
 # Load environment variables
 load_dotenv()
@@ -113,21 +114,34 @@ async def encode_discord_image(image_url):
 
         print(f"Original image format: {image.format}")  # Log the original format
 
-        # Convert .webp images to JPEG
-        if image.format == 'WEBP':
-            image = image.convert('RGB')
-            print("Converted WEBP image to JPEG")  # Log conversion
+        # If the image is not in JPEG format, convert it to JPEG
+        if image.format != 'JPEG':
+            # If the image has an alpha channel, remove it by converting to 'RGB'
+            if 'A' in image.getbands():
+                image = image.convert('RGB')
+            
+            print("Image is being converted to JPEG format")
+        
+        # Resize the image if it's too large; choose a maximum dimension
+        max_dimension = 1000
+        if image.width > max_dimension or image.height > max_dimension:
+            ratio = min(max_dimension / image.width, max_dimension / image.height)
+            new_size = (int(image.width * ratio), int(image.height * ratio))
+            image = image.resize(new_size, Image.ANTIALIAS)
+            print(f"Image resized to: {new_size}")
 
+        # Save the image into a BytesIO object and encode it in base64
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG")
         encoded_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        
+
         print("Image encoding successful")  # Log successful encoding
         return encoded_image
 
     except Exception as e:
         print(f"Error in encode_discord_image: {e}")  # Log any exceptions
         return None
+
 
 
 async def analyze_image(base64_image, instructions):
