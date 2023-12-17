@@ -11,15 +11,19 @@ Soupy does more stuff now.
 5. Describe the image attached to a message.
 
 A generated image:
+
 ![generate](https://github.com/sneezeparty/soupy/assets/38020091/6a76a432-1ed9-4138-b999-6fe1bef752fd)
 
 The instruction to transform the image:
+
 ![transform-instruction](https://github.com/sneezeparty/soupy/assets/38020091/b7576eca-c417-4689-92ef-7d2bb4758fa7)
 
 The transformed image:
+
 ![transform](https://github.com/sneezeparty/soupy/assets/38020091/f7d28c2b-65f6-447a-8214-da3b94d1e3d4)
 
 An image description:
+
 ![description](https://github.com/sneezeparty/soupy/assets/38020091/65ac63e1-3975-46f5-bb48-e1e77e9dd328)
 
 Note: These are all from the channel in which soupy responds to all messages.  That's an environment variable.
