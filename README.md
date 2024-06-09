@@ -28,10 +28,12 @@ Once Solr is installed, create a new core with ```solr create -c soupy```
 
 Once installed, Solr must be properly configured with certain fields.  
 
-```<field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+```
+<field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
 <field name="username" type="string" indexed="true" stored="true"/>
 <field name="content" type="text_general" indexed="true" stored="true"/>
-<field name="timestamp" type="pdate" indexed="true" stored="true"/>```
+<field name="timestamp" type="pdate" indexed="true" stored="true"/>
+```
 
 Once all this is complete, it works pretty darn consistently.  It is likely that soupy-solr.py won't run at all without solr properly in place.
 
