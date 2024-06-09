@@ -24,6 +24,8 @@ This is a major update for soupy.  The new updates are contained in soupy-solr.p
 
 In order to get soupy-solr.py up and running, you must first install Solr.  I'll leave that up to you to figure out.  It's not that hard, I hope.
 
+Once Solr is installed, create a new core with ```solr create -c soupy```
+
 Once installed, Solr must be properly configured with certain fields.  
 
 ```<field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
