@@ -86,7 +86,7 @@ def index_all_json_files(directory):
 
 
 # Process and index the data
-index_all_json_files("/Users/matthewgilford/git/soupy/combined/")
+index_all_json_files("/Users/LOCALDIRECTORY/git/soupy/combined/")
 
 # Commit changes to make sure data is indexed
 solr.commit()
