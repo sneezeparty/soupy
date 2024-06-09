@@ -39,6 +39,8 @@ Once installed, Solr must be properly configured with certain fields.
 
 Once all this is complete, it works pretty darn consistently.  It is likely that soupy-solr.py won't run at all without solr properly in place.
 
+There is one absolute directory in the script.  Change it to as you please.  It's on line 89.
+
 ## IMPORTANT
 
 The first time you successfully run soupy-solr.py after having Solr properly configured, your server's chat history will be indexed into local JSON files by the script.  This takes a while.  It might take 5 minutes, or over an hour, depending on the number of channels you're indexing, how many days of history you're indexing, and so on.  After that initial index, loading is significantly faster.
