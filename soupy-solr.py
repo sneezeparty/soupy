@@ -45,7 +45,6 @@ try:
     # Optionally, perform a simple query to check if Solr is responding
     solr.ping()
     print("Successfully connected to Solr.")
-    
 except Exception as e:
     print(f"Failed to connect to Solr. Error: {e}")
 
@@ -84,9 +83,8 @@ def index_all_json_files(directory):
             else:
                 print(Fore.YELLOW + f"No new entries to index from file: {json_file_path}" + Style.RESET_ALL)
 
-
 # Process and index the data
-index_all_json_files("/Users/LOCALDIRECTORY/git/soupy/combined/")
+index_all_json_files("/scriptlocation")
 
 # Commit changes to make sure data is indexed
 solr.commit()
@@ -111,7 +109,6 @@ RATE_LIMIT = 0.25
 chatgpt_behaviour = os.getenv("BEHAVIOUR")
 transform_behaviour = os.getenv("TRANSFORM")
 
-# Error formatting
 # Error formatting
 def format_error_message(error):
     error_prefix = "Error: "  # Define a prefix for error messages
@@ -141,15 +138,13 @@ def format_error_message(error):
     except Exception as e:
         return Fore.RED + error_prefix + f"An unexpected error occurred while formatting the error message: {e}" + Style.RESET_ALL
 
-
-# Progress bar for use during JSON updatating and creation
+# Progress bar for use during JSON updating and creation
 def update_progress_bar(current, total):
     bar_length = 50
     progress = current / total
     block = int(round(bar_length * progress))
     text = "\rProgress: [{0}] {1}%".format("#" * block + "-" * (bar_length - block), round(progress * 100, 2))
     print(text, end="" if current < total else "\n")
-
 
 # Function to determine if the bot should respond to a message
 def should_bot_respond_to_message(message):
@@ -167,9 +162,6 @@ def should_bot_respond_to_message(message):
         return True, is_random_response
     return False, False
 
-from colorama import Fore, Style
-
-
 async def fetch_recent_messages(channel, history_length=15):
     message_history = []
     async for message in channel.history(limit=history_length, oldest_first=False):
@@ -180,10 +172,8 @@ async def fetch_recent_messages(channel, history_length=15):
         message_history.append({"role": role, "content": f"{user_mention}{message.content}"})
     return message_history
 
-
-
 async def get_expanded_keywords(message):
-    prompt = f"Identify and list up to 8 single keywords that represent the main topics of this message.  These keywords should be single words.  These keywords should be related to the main topic of the message and they should not be things like 'mention' 'notification' 'message' or 'participant'.  The keywords should be lowercase, should not be numbered, and should have no puncuation.  Avoid the using keywords that are a 'type' of message, such as query, recall, remember, mention, or conversation.  Instead, they should be real topics of the message.  Expand the keywords that you find by adding other, potentially related keywords.  For example, if someone asks about 'democrats' then also add the keywork 'republican' and 'politics'.  If someone asks about 'food' maybe include different types of common dishes like 'spaghetti' or even types of cuisine like 'italian' or 'chinese'.  Message: '{message}'"
+    prompt = f"Identify and list up to 8 single keywords that represent the main topics of this message. These keywords should be single words. These keywords should be related to the main topic of the message and they should not be things like 'mention' 'notification' 'message' or 'participant'. The keywords should be lowercase, should not be numbered, and should have no punctuation. Avoid using keywords that are a 'type' of message, such as query, recall, remember, mention, or conversation. Instead, they should be real topics of the message. Expand the keywords that you find by adding other, potentially related keywords. For example, if someone asks about 'democrats' then also add the keyword 'republican' and 'politics'. If someone asks about 'food' maybe include different types of common dishes like 'spaghetti' or even types of cuisine like 'italian' or 'chinese'. Message: '{message}'"
     try:
         response = await async_chat_completion(
             model=os.getenv("MODEL_CHAT"),
@@ -203,21 +193,9 @@ async def get_expanded_keywords(message):
         print(Fore.RED + f"Error in getting expanded keywords: {e}" + Style.RESET_ALL)
         return None
 
-        return topic_keywords[:10]  # Limit to 10 keywords
-    except Exception as e:
-        print(f"{Fore.RED}Error in getting topic keywords:{Style.RESET_ALL} {e}")
-        return None
-
-
-def generate_message_id(channel_id, timestamp):
-    # Use a consistent ISO 8601 format for timestamps
-    formatted_timestamp = timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")
-    return f"{channel_id}_{formatted_timestamp}"
-
-
 async def save_channel_history_to_json(channel):
-    start_time = time.time()
-    filename = f"{channel.id}.json"
+    start_time = time.time()  # Use time.time() instead of datetime.now()
+    filename = f"/scriptlocation/{channel.id}.json"
     existing_data = []
     new_message_count = 0
 
@@ -225,11 +203,24 @@ async def save_channel_history_to_json(channel):
     file_exists_for_channel = os.path.exists(filename)
     days_to_look_back = 15 if file_exists_for_channel else 365
 
-    if file_exists_for_channel:
-        with open(filename, "r", encoding='utf-8') as file:
-            existing_data = json.load(file)
-        existing_data_count = len(existing_data)
-        print(f"Existing data loaded for channel {Fore.CYAN}{channel.name}{Style.RESET_ALL} (ID: {channel.id}) with {existing_data_count} messages.")
+    try:
+        if file_exists_for_channel:
+            with open(filename, "r", encoding='utf-8') as file:
+                existing_data = json.load(file)
+            existing_data_count = len(existing_data)
+            print(f"Existing data loaded for channel {Fore.CYAN}{channel.name}{Style.RESET_ALL} (ID: {channel.id}) with {existing_data_count} messages.")
+        else:
+            # Create an empty JSON file if it doesn't exist
+            with open(filename, "w", encoding='utf-8') as file:
+                json.dump(existing_data, file)
+            print(f"Created new JSON file for channel {Fore.CYAN}{channel.name}{Style.RESET_ALL} (ID: {channel.id}).")
+
+    except PermissionError as e:
+        print(Fore.RED + f"PermissionError: Unable to create or read file {filename} for channel {channel.name}. Error: {e}" + Style.RESET_ALL)
+        return
+    except Exception as e:
+        print(Fore.RED + f"Error: Unable to create or read file {filename} for channel {channel.name}. Error: {e}" + Style.RESET_ALL)
+        return
 
     # Initialize progress tracking
     average_messages_per_day = 100  # Estimate based on your data
@@ -254,18 +245,23 @@ async def save_channel_history_to_json(channel):
             update_progress_bar(processed_messages, total_messages)
 
     if new_message_count > 0:
-        with open(filename, "w", encoding='utf-8') as file:
-            json.dump(existing_data, file, indent=4, ensure_ascii=False)
+        try:
+            with open(filename, "w", encoding='utf-8') as file:
+                json.dump(existing_data, file, indent=4, ensure_ascii=False)
+            print(Fore.GREEN + f"Successfully saved {new_message_count} new messages to file {filename} for channel {channel.name}." + Style.RESET_ALL)
+        except PermissionError as e:
+            print(Fore.RED + f"PermissionError: Unable to write to file {filename} for channel {channel.name}. Error: {e}" + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.RED + f"Error: Unable to write to file {filename} for channel {channel.name}. Error: {e}" + Style.RESET_ALL)
 
     end_time = time.time()
     duration = end_time - start_time
     new_or_existing = "new" if new_message_count > 0 else "existing"
-    print(Fore.BLUE + f"Completed processing channel {Fore.CYAN}{channel.name}{Fore.BLUE} (ID: {channel.id}) in guild: {channel.guild.name}. {new_or_existing} messages: {new_message_count if new_message_count > 0 else existing_data_count}. Duration: {duration:.2f} seconds." + Style.RESET_ALL)
-
+    print(Fore.BLUE + f"Completed processing channel {Fore.CYAN}{channel.name}{Fore.BLUE} (ID: {channel.id}) in guild: {channel.guild.name}. {new_or_existing} messages: {new_message_count if new_message_count > 0 else len(existing_data)}. Duration: {duration:.2f} seconds." + Style.RESET_ALL)
 
 # Add new messages to the json and update the index.
 def save_message_to_json_and_index_solr(channel_id, username, content, timestamp):
-    filename = f"{channel_id}.json"
+    filename = f"/scriptlocation/{channel_id}.json"
     message_id = generate_message_id(channel_id, timestamp)
 
     # Prepare the data structure for the message
@@ -293,6 +289,9 @@ def save_message_to_json_and_index_solr(channel_id, username, content, timestamp
                 file.seek(0)
                 file.truncate()  # Clear the file before writing new data
                 json.dump(file_data, file, indent=4, ensure_ascii=False)
+    else:
+        with open(filename, "w", encoding='utf-8') as file:
+            json.dump([data], file, indent=4, ensure_ascii=False)
 
     # Index the new message in Solr
     try:
@@ -300,7 +299,6 @@ def save_message_to_json_and_index_solr(channel_id, username, content, timestamp
         print(Fore.GREEN + f"Message '{message_id}' by {username} indexed in Solr." + Style.RESET_ALL)
     except Exception as e:
         print(Fore.RED + f"Failed to index message '{message_id}' in Solr: {e}" + Style.RESET_ALL)
-
 
 # Split a long message into smaller chunks
 def split_message(message_content, min_length=1500):
@@ -315,8 +313,7 @@ def split_message(message_content, min_length=1500):
         remaining = remaining[index + 1:]
     chunks.append(remaining)
     return chunks
-    
-    
+
 def combine_and_rank_results(history, solr_results):
     combined_results = []
     combined_results.extend(history)
@@ -336,7 +333,6 @@ def combine_and_rank_results(history, solr_results):
 async def async_chat_completion(*args, **kwargs):
     response = await asyncio.to_thread(openai.chat.completions.create, *args, **kwargs)
     return response
-    
 
 async def perform_tiered_solr_search(message_author, expanded_keywords):
     solr_queries = {
@@ -357,46 +353,12 @@ async def perform_tiered_solr_search(message_author, expanded_keywords):
             print(f"No valid queries for {tier}. Skipping Solr query for this tier.")
     return solr_results
 
-
 # Retrieve a specified number of recent messages from a channel for context
 async def fetch_message_history(channel, message_author, expanded_keywords):
     history = await fetch_recent_messages(channel, history_length=15)
     solr_results = await perform_tiered_solr_search(message_author, expanded_keywords)
     combined_results = combine_and_rank_results(history, solr_results)
     return combined_results
-
-
-    # Fetch messages in reverse order (newest first)
-    async for message in channel.history(limit=history_length * 2, oldest_first=False):
-        if len(message_history) < history_length and message.content:
-            user_mention = f"{message.author.name}: " if message.author != bot.user else ""
-            role = "assistant" if message.author == bot.user else "user"
-            message_history.insert(0, {"role": role, "content": f"{user_mention}{message.content}"})  # Insert at the beginning
-
-    if topic_words:
-        # Construct Solr query using 'OR'
-        solr_query = f'username:"{message_author}" AND content:(' + ' OR '.join([f'"{word.strip()}"' for word in topic_words]) + ')'
-        print(f"Executing Solr query: {solr_query}")
-
-        try:
-            solr_results = solr.search(solr_query, **{"rows": 10})
-            # Debugging: Print out raw results
-            print(f"Raw Solr Results: {solr_results.docs}")
-            print(f"Number of results: {len(solr_results)}")
-            for idx, result in enumerate(solr_results):
-                print(f"Result {idx + 1}: {result}")
-                if isinstance(result.get('username'), list) and isinstance(result.get('content'), list):
-                    username = result['username'][0]
-                    content = result['content'][0]
-                    formatted_result = f"{username}: {content}"
-                    message_history.append({"role": "user", "content": formatted_result})
-                else:
-                    print("Warning: Unexpected data structure in Solr result")
-        except Exception as e:
-            print(f"Error querying Solr: {e}")
-
-    return message_history
-
 
 # Function to remove redundant messages
 def remove_redundant_messages(messages):
@@ -410,8 +372,6 @@ def remove_redundant_messages(messages):
         last_message = message
     return filtered_messages
 
-
-
 # Set the image side based on a modifier in the prompt
 def parse_image_size(prompt):
     if "--wide" in prompt:
@@ -424,7 +384,6 @@ def parse_image_size(prompt):
         size = "1024x1024"
     return prompt, size
 
-
 # Create unique filenames for generated images
 def generate_unique_filename(prompt, extension=".png"):
     # Create a base filename from the prompt
@@ -434,7 +393,6 @@ def generate_unique_filename(prompt, extension=".png"):
     # Combine base filename and timestamp
     unique_filename = f"{base_filename}_{timestamp}{extension}"
     return unique_filename
-
 
 # Process an image URL and return a base64 encoded string
 async def encode_discord_image(image_url):
@@ -467,7 +425,6 @@ async def analyze_image(base64_image, instructions):
     return response_json
 
 # Event listener for when the bot is ready
-
 @bot.event
 async def on_ready():
     print(Fore.BLUE + f'Logged in as {bot.user.name}' + Style.RESET_ALL)
@@ -475,19 +432,34 @@ async def on_ready():
         total_guilds = len(bot.guilds)
         print(Fore.MAGENTA + f"Checking channels in guild: {guild.name} ({guild_idx}/{total_guilds})" + Style.RESET_ALL)
 
-        total_channels = len(guild.text_channels)
-        for channel_idx, channel in enumerate(guild.text_channels, start=1):
+        all_channels = guild.text_channels
+        total_channels = len(all_channels)
+        
+        print(Fore.YELLOW + f"Total channels in guild {guild.name}: {total_channels}" + Style.RESET_ALL)
+
+        # Print out all channels
+        for channel in all_channels:
+            print(Fore.YELLOW + f"Channel {channel.name} (ID: {channel.id})" + Style.RESET_ALL)
+
+        processed_channels = set()
+        
+        for channel in all_channels:
             try:
-                print(Fore.YELLOW + f"Processing channel {channel.name} ({channel_idx}/{total_channels}) in guild: {guild.name}" + Style.RESET_ALL)
+                print(Fore.YELLOW + f"Processing channel {channel.name} (ID: {channel.id})" + Style.RESET_ALL)
                 await save_channel_history_to_json(channel)
-                print(Fore.GREEN + f"Completed processing channel {channel.name} ({channel_idx}/{total_channels}) in guild: {guild.name}" + Style.RESET_ALL)
+                print(Fore.GREEN + f"Completed processing channel {channel.name} (ID: {channel.id})" + Style.RESET_ALL)
+                processed_channels.add(channel.id)
             except Exception as e:
                 print(Fore.RED + f"Failed to save history for channel {channel.name} (ID: {channel.id}): {e}" + Style.RESET_ALL)
 
+        # Identify and print any channels that were not processed
+        for channel in all_channels:
+            if channel.id not in processed_channels:
+                print(Fore.RED + f"Channel {channel.name} (ID: {channel.id}) was not processed." + Style.RESET_ALL)
 
 # New command to fetch and display the current time in a specified city
 @bot.command()
-async def time(ctx, *, location_query: str):
+async def time_command(ctx, *, location_query: str):
     try:
         geolocator = Nominatim(user_agent="discord_bot_yourbotname")
         location = geolocator.geocode(location_query, addressdetails=True, language='en', timeout=10)
@@ -524,10 +496,6 @@ async def time(ctx, *, location_query: str):
     except Exception as e:
         await ctx.send("Sorry, I'm unable to process your request at the moment.")
         print(Fore.YELLOW + f"[!time Command Exception] An error occurred: {e}" + Style.RESET_ALL)
-
-@bot.event
-async def on_ready():
-    print(f'Logged in as {bot.user.name}')
 
 # Command to generate an image based on a text prompt
 @bot.command()
@@ -585,18 +553,15 @@ async def transform(ctx, *, instructions: str):
                     # Analyze the image and get its description
                     description_result = await analyze_image(base64_image, "Describe this image, you give detailed and accurate descriptions, be specific in whatever ways you can, such as but not limited to colors, species, poses, orientations, objects, and contexts.")
                     
-                    # New handling starts here
                     if description_result.get('choices'):
                         first_choice = description_result['choices'][0]
                         message_content = first_choice.get('message', {}).get('content', '').strip()
                         if not message_content:
-                            # Handle empty content gracefully
                             print("The API's response did not contain a description.")
                             await ctx.send("Sorry, I couldn't generate a description for the image.")
                             return
                         original_description = message_content
                     else:
-                        # Handle unexpected formats or missing data
                         print("Unexpected response format or error received from API:")
                         print(json.dumps(description_result, indent=2))
                         await ctx.send("Sorry, I encountered an unexpected issue while processing the image.")
@@ -647,7 +612,6 @@ async def transform(ctx, *, instructions: str):
     else:
         await ctx.send("Please attach an image with the !transform command.")
 
-
 @bot.command()
 async def analyze(ctx):
     # Check if there is an attachment in the message
@@ -679,12 +643,6 @@ async def analyze(ctx):
 
 @bot.event
 async def on_message(message):
-    # Debug print with conditional coloring based on message content
-    if "Error:" in message.content:
-        print(Fore.RED + f"Received message: {message.content}" + Style.RESET_ALL)
-    else:
-        print(Fore.CYAN + f"Received message: {message.content}" + Style.RESET_ALL)
-
     # Process any commands that might be part of the message
     await bot.process_commands(message)
    
@@ -751,22 +709,14 @@ async def on_message(message):
         try:
             async with message.channel.typing():
                 # Remove redundant messages from channel and Solr history
-                # The redundant removal call is fine as is, but make sure it's returning what you expect
                 filtered_messages = remove_redundant_messages(messages_with_solr)
 
                 # Prepare the messages for sending to OpenAI
-                # Ensure that system_message, current_user_message, and assistant_prompt are defined
                 system_message = {"role": "system", "content": chatgpt_behaviour}
                 current_user_message = {"role": "user", "content": f"{message.author.name}: {message.content}"}
                 assistant_prompt = {"role": "assistant", "content": "What is your reply? Keep the current conversation going, but utilize the chat history if it seems appropriate and relevant."}
 
-                # Now we use `filtered_messages` since we've removed the redundant ones
                 messages_for_openai = [system_message] + filtered_messages + [current_user_message, assistant_prompt]
-
-#                # Log the messages being sent to OpenAI
-#                print("Messages sent to OpenAI:")
-#                for msg in messages_for_openai:
-#                    print(f"{msg['role'].capitalize()}: {msg['content']}")
 
                 # Log the chat history for debugging
                 print('Chat history for OpenAI:')
@@ -777,7 +727,6 @@ async def on_message(message):
                 max_tokens = int(os.getenv("MAX_TOKENS_RANDOM")) if is_random_response else int(os.getenv("MAX_TOKENS"))
 
                 # Generate a response using the OpenAI API
-                # Make sure to send `messages_for_openai` since that's our prepared list
                 response = await async_chat_completion(model=os.getenv("MODEL_CHAT"), messages=messages_for_openai, temperature=1.5, top_p=0.9, max_tokens=max_tokens)
 
                 # Extract and print the token usage information
@@ -823,11 +772,11 @@ async def on_message(message):
     # Process any commands included in the message
     await bot.process_commands(message)
 
-
-
 # Initialize the bot with the Discord token from environment variables
 discord_bot_token = os.getenv("DISCORD_TOKEN")
 if discord_bot_token is None:
     raise ValueError("No Discord bot token found. Make sure to set the DISCORD_BOT_TOKEN environment variable.")
 bot.run(discord_bot_token)
+
+
 
