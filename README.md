@@ -9,7 +9,7 @@ Soupy (soupy-solr.py) now has all of the following functions:
 4. !generate an image based on user input.
 5. !transform an image based on user input.
 6. Describe the image attached to a message.
-7. !time <cityname> will return the time in that city.  For example, "!time Belgium" will return the time in Belgium.
+7. !whattime <cityname> will return the time in that city.  For example, "!whattime Belgium" will return the time in Belgium.
 8. WORKS BEST WITH GPT-4o.  Other versions of GPT are fine, but 4o is highly, highly recommended.
 
 This is a major update for soupy.  The new updates are contained in soupy-solr.py.  In a nutshell, all of the below functionality works, plus some new stuff that you'll want to get set up.  There are many small updates, but the main update is as follows:
