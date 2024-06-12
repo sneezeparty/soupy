@@ -84,7 +84,7 @@ def index_all_json_files(directory):
                 print(Fore.YELLOW + f"No new entries to index from file: {json_file_path}" + Style.RESET_ALL)
 
 # Process and index the data
-index_all_json_files("/scriptlocation")
+index_all_json_files("/Users/matthewgilford/git/soupy/combined/")
 
 # Commit changes to make sure data is indexed
 solr.commit()
@@ -195,7 +195,7 @@ async def get_expanded_keywords(message):
 
 async def save_channel_history_to_json(channel):
     start_time = time.time()  # Use time.time() instead of datetime.now()
-    filename = f"/scriptlocation/{channel.id}.json"
+    filename = f"/Users/matthewgilford/git/soupy/combined/{channel.id}.json"
     existing_data = []
     new_message_count = 0
 
@@ -261,7 +261,7 @@ async def save_channel_history_to_json(channel):
 
 # Add new messages to the json and update the index.
 def save_message_to_json_and_index_solr(channel_id, username, content, timestamp):
-    filename = f"/scriptlocation/{channel_id}.json"
+    filename = f"/Users/matthewgilford/git/soupy/combined/{channel_id}.json"
     message_id = generate_message_id(channel_id, timestamp)
 
     # Prepare the data structure for the message
@@ -359,6 +359,39 @@ async def fetch_message_history(channel, message_author, expanded_keywords):
     solr_results = await perform_tiered_solr_search(message_author, expanded_keywords)
     combined_results = combine_and_rank_results(history, solr_results)
     return combined_results
+
+
+    # Fetch messages in reverse order (newest first)
+    async for message in channel.history(limit=history_length * 2, oldest_first=False):
+        if len(message_history) < history_length and message.content:
+            user_mention = f"{message.author.name}: " if message.author != bot.user else ""
+            role = "assistant" if message.author == bot.user else "user"
+            message_history.insert(0, {"role": role, "content": f"{user_mention}{message.content}"})  # Insert at the beginning
+
+    if topic_words:
+        # Construct Solr query using 'OR'
+        solr_query = f'username:"{message_author}" AND content:(' + ' OR '.join([f'"{word.strip()}"' for word in topic_words]) + ')'
+        print(f"Executing Solr query: {solr_query}")
+
+        try:
+            solr_results = solr.search(solr_query, **{"rows": 10})
+            # Debugging: Print out raw results
+            print(f"Raw Solr Results: {solr_results.docs}")
+            print(f"Number of results: {len(solr_results)}")
+            for idx, result in enumerate(solr_results):
+                print(f"Result {idx + 1}: {result}")
+                if isinstance(result.get('username'), list) and isinstance(result.get('content'), list):
+                    username = result['username'][0]
+                    content = result['content'][0]
+                    formatted_result = f"{username}: {content}"
+                    message_history.append({"role": "user", "content": formatted_result})
+                else:
+                    print("Warning: Unexpected data structure in Solr result")
+        except Exception as e:
+            print(f"Error querying Solr: {e}")
+
+    return message_history
+
 
 # Function to remove redundant messages
 def remove_redundant_messages(messages):
@@ -458,8 +491,9 @@ async def on_ready():
                 print(Fore.RED + f"Channel {channel.name} (ID: {channel.id}) was not processed." + Style.RESET_ALL)
 
 # New command to fetch and display the current time in a specified city
-@bot.command()
-async def time_command(ctx, *, location_query: str):
+# New command to fetch and display the current time in a specified city
+@bot.command(name='whattime')
+async def whattime(ctx, *, location_query: str):
     try:
         geolocator = Nominatim(user_agent="discord_bot_yourbotname")
         location = geolocator.geocode(location_query, addressdetails=True, language='en', timeout=10)
@@ -492,10 +526,12 @@ async def time_command(ctx, *, location_query: str):
 
     except ValueError as e:
         await ctx.send(str(e))
-        print(Fore.RED + f"[!time Command Error] {e}" + Style.RESET_ALL)
+        print(Fore.RED + f"[!whattime Command Error] {e}" + Style.RESET_ALL)
     except Exception as e:
         await ctx.send("Sorry, I'm unable to process your request at the moment.")
-        print(Fore.YELLOW + f"[!time Command Exception] An error occurred: {e}" + Style.RESET_ALL)
+        print(Fore.YELLOW + f"[!whattime Command Exception] An error occurred: {e}" + Style.RESET_ALL)
+
+
 
 # Command to generate an image based on a text prompt
 @bot.command()
