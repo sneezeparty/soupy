@@ -41,7 +41,7 @@ Once installed, Solr must be properly configured with certain fields.
 
 Once all this is complete, it works pretty darn consistently.  It is likely that soupy-solr.py won't run at all without solr properly in place.
 
-There is one absolute directory in the script.  Change it to as you please.  It's on line 89.
+There are a couple of absolute directory locations.  Change it to as you please.  Search for ``scriptlocation``.
 
 ## IMPORTANT
 
