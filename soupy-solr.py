@@ -84,7 +84,7 @@ def index_all_json_files(directory):
                 print(Fore.YELLOW + f"No new entries to index from file: {json_file_path}" + Style.RESET_ALL)
 
 # Process and index the data
-index_all_json_files("/Users/matthewgilford/git/soupy/combined/")
+index_all_json_files("scriptlocation")
 
 # Commit changes to make sure data is indexed
 solr.commit()
@@ -195,7 +195,7 @@ async def get_expanded_keywords(message):
 
 async def save_channel_history_to_json(channel):
     start_time = time.time()  # Use time.time() instead of datetime.now()
-    filename = f"/Users/matthewgilford/git/soupy/combined/{channel.id}.json"
+    filename = f"/scriptlocation/{channel.id}.json"
     existing_data = []
     new_message_count = 0
 
@@ -261,7 +261,7 @@ async def save_channel_history_to_json(channel):
 
 # Add new messages to the json and update the index.
 def save_message_to_json_and_index_solr(channel_id, username, content, timestamp):
-    filename = f"/Users/matthewgilford/git/soupy/combined/{channel_id}.json"
+    filename = f"/scriptlocation{channel_id}.json"
     message_id = generate_message_id(channel_id, timestamp)
 
     # Prepare the data structure for the message
