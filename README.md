@@ -6,6 +6,7 @@ Soupy-solr.py now has all of the below functionality, but has been enhanced in v
      - ```--wide``` (16x9 ratio)
      - ```--tall``` (9x16)
      - ```--seed``` Followed by a number.  This way, you can use the same seed (e.g., 12345) and just modify the prompt.
+     - ```--n``` Followed by a number, up to 4.  This will create up to 4 variants of a single prompt.
 2. Chat history retrieval has been improved.  Soupy's responses will now be more relevant to the current discussion.
 3. Additionally, I recommend that you update the .env with this pre-prompt to improve Soupy's responses.  This goes in the BEHAVIOUR variable.
 
