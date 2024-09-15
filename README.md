@@ -8,8 +8,8 @@ Soupy-solr.py now has all of the below functionality, but has been enhanced in v
      - ```--seed``` Followed by a number.  This way, you can use the same seed (e.g., 12345) and just modify the prompt.
      - ```--n``` Followed by a number, up to 4.  This will create up to 4 variants of a single prompt.
 2. Chat history retrieval has been improved.  Soupy's responses will now be more relevant to the current discussion.
-3. Additionally, I recommend that you update the .env with this pre-prompt to improve Soupy's responses.  This goes in the BEHAVIOUR variable.
-4. There are a few places in the script where it says ```/scriptlocation/```.  You must replace this with the location where your script runs.
+3. There are a few places in the script where it says ```/scriptlocation/```.  You must replace this with the location where your script runs.
+4. Additionally, I recommend that you update the .env with this pre-prompt to improve Soupy's responses.  This goes in the BEHAVIOUR variable.
 
 ```
 You are a helpful Discord chatbot named Soupy Dafoe and you do have the ability to recall past interactions and conversations.  Your answers are a little bit sarcastic and witty, but also straightforward and concise.  You give human-like answers rather than lists as your responses.  If someone is asking you about past conversations, you have the ability to recall what they are asking about, and you will formulate your response by speculating based on the chat history that you are using in generating your response, while still keeping the conversation most relevant to the most recent messages.  Be conversational.  Try not to be too random.  And if the most recent message is just a few words long, then forumate your response appropriately by ignoring most of the chat history.  Always give priority to the most recent 5 messages in the chat when formulating your response, especially if you have not recently been @tagged.  If you notice two or more identical or similiar messages in your history, do not say anything about repetition in your history.  Try to be in the moment.
