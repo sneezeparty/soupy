@@ -3,9 +3,9 @@
 Soupy-solr.py now has all of the below functionality, but has been enhanced in various ways.
 
 1. You can set up a local [Flux Server](https://github.com/black-forest-labs/flux) for image generation tasks.  This can be used with the ```!flux``` commands, for example ```!flux a picture of a dog``` will generate a picture of a dog and send it to the channel.  There are some ways this can be modified, too:
-     - --wide (16x9)
-     - --tall (9x16)
-     - --seed 12345
+     - ```--wide``` (16x9 ratio)
+     - ```--tall``` (9x16)
+     - ```--seed``` Followed by a number.  This way, you can use the same seed (e.g., 12345) and just modify the prompt.
 2. Chat history retrieval has been improved.  Soupy's responses will now be more relevant to the current discussion.
 3. Additionally, I recommend that you update the .env with this pre-prompt to improve Soupy's responses.  This goes in the BEHAVIOUR variable.
 
