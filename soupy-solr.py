@@ -14,6 +14,7 @@ import pysolr
 import glob
 import datetime
 import pytz
+from asyncio import Queue
 from geopy.geocoders import Nominatim
 from timezonefinder import TimezoneFinder
 from openai import OpenAI
@@ -23,6 +24,7 @@ from PIL import Image
 from io import BytesIO
 from colorama import init, Fore, Style
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
 
 # Initialize colorama for colored console output in the terminal
@@ -84,7 +86,7 @@ def index_all_json_files(directory):
                 print(Fore.YELLOW + f"No new entries to index from file: {json_file_path}" + Style.RESET_ALL)
 
 # Process and index the data
-index_all_json_files("scriptlocation")
+index_all_json_files("/scriptlocation/")
 
 # Commit changes to make sure data is indexed
 solr.commit()
@@ -156,7 +158,7 @@ def should_bot_respond_to_message(message):
     if message.author == bot.user or "Generated Image" in message.content:
         return False, False
 
-    is_random_response = random.random() < 0.01
+    is_random_response = random.random() < 0.015
     is_mentioned = bot.user in [mention for mention in message.mentions]
     if is_mentioned or is_random_response or message.channel.id in allowed_channel_ids:
         return True, is_random_response
@@ -204,7 +206,7 @@ async def save_channel_history_to_json(channel):
     days_to_look_back = 15 if file_exists_for_channel else 365
 
     try:
-        if file_exists_for_channel:
+        if (file_exists_for_channel):
             with open(filename, "r", encoding='utf-8') as file:
                 existing_data = json.load(file)
             existing_data_count = len(existing_data)
@@ -261,7 +263,7 @@ async def save_channel_history_to_json(channel):
 
 # Add new messages to the json and update the index.
 def save_message_to_json_and_index_solr(channel_id, username, content, timestamp):
-    filename = f"/scriptlocation{channel_id}.json"
+    filename = f"/scriptlocation/{channel_id}.json"
     message_id = generate_message_id(channel_id, timestamp)
 
     # Prepare the data structure for the message
@@ -316,7 +318,12 @@ def split_message(message_content, min_length=1500):
 
 def combine_and_rank_results(history, solr_results):
     combined_results = []
-    combined_results.extend(history)
+
+    # Add a preface to indicate these are past messages
+    preface = {"role": "system", "content": "Below are messages from the past that may be relevant to the current conversation:"}
+    combined_results.append(preface)
+
+    # Add Solr results first, sorted by tier
     for tier, results in solr_results.items():
         for result in results:
             if isinstance(result.get('username'), list) and isinstance(result.get('content'), list):
@@ -325,9 +332,12 @@ def combine_and_rank_results(history, solr_results):
                 combined_results.append({"role": "user", "content": f"{username}: {content}", "tier": tier})
             else:
                 print("Warning: Unexpected data structure in Solr result")
-    # Rank based on tier (Tier 1 > Tier 2 > history)
-    ranked_results = sorted(combined_results, key=lambda x: ("tier" not in x, x.get("tier", ""), x.get("timestamp", "")))
-    return ranked_results
+
+    # Append the recent chat history after the Solr results
+    combined_results.extend(history)
+
+    return combined_results
+
 
 # Asynchronous function for getting chat completions from OpenAI's API
 async def async_chat_completion(*args, **kwargs):
@@ -355,10 +365,14 @@ async def perform_tiered_solr_search(message_author, expanded_keywords):
 
 # Retrieve a specified number of recent messages from a channel for context
 async def fetch_message_history(channel, message_author, expanded_keywords):
+    # Fetch recent channel messages
     history = await fetch_recent_messages(channel, history_length=15)
+    # Perform Solr search with expanded keywords
     solr_results = await perform_tiered_solr_search(message_author, expanded_keywords)
+    # Combine and rank results, ensuring Solr results are prioritized
     combined_results = combine_and_rank_results(history, solr_results)
     return combined_results
+
 
 
     # Fetch messages in reverse order (newest first)
@@ -413,6 +427,9 @@ def parse_image_size(prompt):
     elif "--square" in prompt:
         size = "1024x1024"
         prompt = prompt.replace("--square", "").strip()
+    elif "--tall" in prompt:
+        size = "1024x1792"
+        prompt = prompt.replace("--tall", "").strip()
     else:
         size = "1024x1024"
     return prompt, size
@@ -443,7 +460,7 @@ async def encode_discord_image(image_url):
 # Analyze an image and return the AI's description
 async def analyze_image(base64_image, instructions):
     payload = {
-        "model": "gpt-4o",
+        "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": [{"type": "text", "text": instructions}, {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}]}],
         "max_tokens": 400
     }
@@ -490,9 +507,48 @@ async def on_ready():
             if channel.id not in processed_channels:
                 print(Fore.RED + f"Channel {channel.name} (ID: {channel.id}) was not processed." + Style.RESET_ALL)
 
+# List of possible Magic 8-Ball responses
+magic_8ball_responses = [
+    "It is certain.",
+    "It is decidedly so.",
+    "Without a doubt.",
+    "Yes – definitely.",
+    "You may rely on it.",
+    "As I see it, yes.",
+    "Most likely.",
+    "Outlook good.",
+    "Yes.",
+    "Signs point to yes.",
+    "Reply hazy, try again.",
+    "Ask again later.",
+    "Better not tell you now.",
+    "Cannot predict now.",
+    "Concentrate and ask again.",
+    "Don’t count on it.",
+    "My reply is no.",
+    "My sources say no.",
+    "Outlook not so good.",
+    "Very doubtful."
+]
+
+# Define the !8ball command
+@bot.command(
+    name='8ball',
+    help='Ask the Magic 8-Ball a question and get a response.'
+)
+async def eight_ball(ctx, *, question: str):
+    # Choose a random response from the list
+    response = random.choice(magic_8ball_responses)
+    # Send the response to the channel
+    await ctx.send(f'The 8-Ball says: "{response}"')
+
+
 # New command to fetch and display the current time in a specified city
-# New command to fetch and display the current time in a specified city
-@bot.command(name='whattime')
+@bot.command(
+    name='whattime',
+    help='Fetches and displays the current time in a specified city.\n\n'
+         'Provide the city name as an argument to get the local time there.'
+)
 async def whattime(ctx, *, location_query: str):
     try:
         geolocator = Nominatim(user_agent="discord_bot_yourbotname")
@@ -534,7 +590,15 @@ async def whattime(ctx, *, location_query: str):
 
 
 # Command to generate an image based on a text prompt
-@bot.command()
+@bot.command(
+    name='generate',
+    help='Generates an image using DALL-E 3.\n\n'
+         'Options:\n'
+         '--wide: Generates a wide image (1920x1024).\n'
+         '--tall: Generates a tall image (1024x1920).\n'
+         '--seed <number>: Use a specific seed for image generation.\n\n'
+         'Default size is 1024x1024. The prompt costs $0.04 per image.'
+)
 async def generate(ctx, *, prompt: str):
     try:
         prompt, size = parse_image_size(prompt)  # Parse the prompt for size modifiers
@@ -573,7 +637,17 @@ async def generate(ctx, *, prompt: str):
         await ctx.send(f"An error occurred during image generation: {formatted_error}")
         print(Fore.RED + formatted_error + Fore.RESET)
 
-@bot.command()
+@bot.command(
+    name='transform',
+    help='Transforms an image based on instructions.\n\n'
+         'Attach an image and provide instructions to transform it. The command allows\n'
+         'modifying the image description before re-generating the image.\n\n'
+         'Options:\n'
+         '--wide: Generates a wide image (1920x1024).\n'
+         '--tall: Generates a tall image (1024x1920).\n'
+         '--seed <number>: Use a specific seed for image generation.\n\n'
+         'Default size is 1024x1024.'
+)
 async def transform(ctx, *, instructions: str):
     if ctx.message.attachments:
         attachment = ctx.message.attachments[0]  # Consider the first attachment
@@ -609,7 +683,7 @@ async def transform(ctx, *, instructions: str):
 
                     # Use GPT to rewrite the description
                     rewriting_result = await async_chat_completion(
-                        model="gpt-4o",
+                        model="gpt-4o-mini",
                         messages=[{"role": "system", "content": transform_behaviour},
                                   {"role": "user", "content": prompt}],
                         max_tokens=450
@@ -648,7 +722,234 @@ async def transform(ctx, *, instructions: str):
     else:
         await ctx.send("Please attach an image with the !transform command.")
 
-@bot.command()
+
+
+# Define a global lock and queue for the flux command
+flux_lock = asyncio.Lock()
+flux_queue = asyncio.Queue()
+
+async def process_flux_queue():
+    while True:
+        ctx, description = await flux_queue.get()
+        try:
+            await process_flux_image(ctx, description)
+        except Exception as e:
+            await ctx.send(f"An error occurred: {str(e)}")
+        flux_queue.task_done()
+
+async def process_flux_image(ctx, description):
+    try:
+        # Log the incoming prompt in the terminal
+        print(Fore.GREEN + f"Processing !flux command from {ctx.author.name} in channel {ctx.channel.name}" + Style.RESET_ALL)
+        print(Fore.CYAN + f"  Prompt    : {Fore.YELLOW}{description}" + Style.RESET_ALL)
+
+        # Default image dimensions
+        width = 1024
+        height = 1024
+        is_fancy = False
+
+        # Set the default number of iterations
+        num_iterations = 1
+
+        # Check for the --number flag
+        number_match = re.search(r'--n (\d+)', description)
+        if number_match:
+            num_iterations = int(number_match.group(1))
+            if num_iterations > 4:
+                await ctx.send("Error: The maximum number of iterations allowed is 4. Please try again with --n set to 4 or less.")
+                print(Fore.RED + "Error: Requested more than 4 iterations. Command aborted." + Style.RESET_ALL)
+                return  # Abort the process if more than 4 iterations are requested
+            description = description.replace(f"--n {num_iterations}", "").strip()
+            print(Fore.CYAN + f"  Number    : {Fore.YELLOW}{num_iterations} iterations" + Style.RESET_ALL)
+
+        # Check for modifiers in the description
+        if "--wide" in description:
+            width = 1920
+            height = 1024
+            description = description.replace("--wide", "").strip()
+            print(Fore.CYAN + f"  Modifier  : {Fore.YELLOW}Wide (1920x1024)" + Style.RESET_ALL)
+        elif "--tall" in description:
+            width = 1024
+            height = 1920
+            description = description.replace("--tall", "").strip()
+            print(Fore.CYAN + f"  Modifier  : {Fore.YELLOW}Tall (1024x1920)" + Style.RESET_ALL)
+        else:
+            print(Fore.CYAN + f"  Modifier  : {Fore.YELLOW}Default (1024x1024)" + Style.RESET_ALL)
+
+        # Check for the fancy option
+        if "--fancy" in description:
+            is_fancy = True
+            description = description.replace("--fancy", "").strip()
+            print(Fore.CYAN + f"  Modifier  : {Fore.YELLOW}Fancy (elaborate the prompt)" + Style.RESET_ALL)
+
+        num_steps = 4
+        guidance = 3.5
+        seed = -1  # Use -1 to indicate random seed
+
+        # Check if a specific seed is provided in the description
+        seed_match = re.search(r'--seed (\d+)', description)
+        if seed_match:
+            seed = int(seed_match.group(1))
+            description = description.replace(f"--seed {seed}", "").strip()
+            print(Fore.CYAN + f"  Seed      : {Fore.YELLOW}{seed} (specific)" + Style.RESET_ALL)
+        else:
+            # Generate a random seed if none is provided
+            seed = random.randint(0, 2**32 - 1)
+            print(Fore.CYAN + f"  Seed      : {Fore.YELLOW}{seed} (random)" + Style.RESET_ALL)
+
+        # If the --fancy flag was detected, use OpenAI to elaborate the description
+        if is_fancy:
+            prompt = (
+                f"This is an image prompt. Turn this simple image prompt into something more detailed "
+                f"that consists of no more than 75 tokens. The new description should be more creative "
+                f"and more detailed than the original description, but it should stay within the original "
+                f"prompt's spirit. The new prompt should be CLIP-based. The prompt you are elaborating on is: {description}"
+            )
+
+            # Sending the request to OpenAI's API for elaboration
+            response = await async_chat_completion(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": prompt}],
+                max_tokens=75,
+            )
+
+            if response and response.choices:
+                # Extract the elaborated prompt from the response
+                elaborated_description = response.choices[0].message.content.strip()
+                print(Fore.GREEN + "Elaborated Description: " + elaborated_description + Fore.RESET)
+                description = elaborated_description
+
+        # Iterate the image generation process based on the number of iterations specified
+        for i in range(num_iterations):
+            # Generate a random seed for each iteration unless a specific seed is provided
+            if seed == -1:
+                iteration_seed = random.randint(0, 2**32 - 1)
+            else:
+                iteration_seed = seed + i  # Slightly modify the specific seed for each iteration
+
+            # Log the seed being used for this iteration
+            print(Fore.CYAN + f"  Iteration {i+1}/{num_iterations} Seed      : {Fore.YELLOW}{iteration_seed}" + Style.RESET_ALL)
+
+            # Construct the JSON payload for POST request
+            payload = {
+                "data": [
+                    description,   # 1st parameter (prompt)
+                    num_steps,     # 2nd parameter (steps)
+                    guidance,      # 3rd parameter (guidance)
+                    width,         # 4th parameter (width)
+                    height,        # 5th parameter (height)
+                    iteration_seed # 6th parameter (seed)
+                ]
+            }
+
+            # Make the bot show "Typing..." in the channel
+            async with ctx.typing():
+                # Send a POST request to the Gradio image generation bot with a timeout
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+                    async with session.post("http://192.168.1.96:7860/api/predict", json=payload) as response:
+                        if response.status == 200:
+                            result = await response.json()
+
+                            # Extract key parts of the response for clarity
+                            image_url = result['data'][0]['url'] if 'data' in result else None
+                            duration = result.get('duration', 0)
+                            path = result['data'][0].get('path', 'N/A').replace("\\", "/")
+                            prompt_used = description
+
+                            # Human-readable formatted API response
+                            print(Fore.GREEN + "API Response Details:" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  Path      : {Fore.YELLOW}{path}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  Duration  : {Fore.YELLOW}{duration:.1f} seconds" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  Image URL : {Fore.YELLOW}{image_url}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  Prompt    : {Fore.YELLOW}{prompt_used}" + Style.RESET_ALL)
+
+                            if image_url:
+                                # Fetch the image from the URL
+                                async with session.get(image_url) as image_response:
+                                    if image_response.status == 200:
+                                        image_bytes = await image_response.read()
+
+                                        # Generate a unique filename
+                                        random_number = random.randint(100000, 999999)
+                                        filename = f"{random_number}_{description[:40].replace(' ', '_')}.webp"
+
+                                        # Prepare the image to be sent to Discord
+                                        image_file = discord.File(io.BytesIO(image_bytes), filename=filename)
+
+                                        # Send the image to the channel with a recap and duration, including seed and queue status
+                                        queue_size = flux_queue.qsize()
+
+                                        # Construct the queue message based on the current queue size
+                                        if queue_size > 0:
+                                            queue_message = f"{queue_size} more in queue"
+                                        else:
+                                            queue_message = "Nothing queued"
+
+                                        recap_message = (
+                                            f"```{description}```"
+                                            f"``Seed: {iteration_seed}`` "
+                                            f"``n: {i+1} of {num_iterations}`` "
+                                            f"``{queue_message}`` "
+                                            f"``{duration:.1f} seconds``")
+                                        await ctx.send(content=recap_message, file=image_file)
+                                    else:
+                                        await ctx.send("Failed to fetch the generated image from the provided URL.")
+                            else:
+                                await ctx.send("Failed to extract image URL from the response.")
+                        else:
+                            await ctx.send(f"Failed to generate image. Status code: {response.status}")
+
+    except Exception as e:
+        await ctx.send(f"An error occurred: {str(e)}")
+        print(Fore.RED + f"Error in process_image: {str(e)}" + Style.RESET_ALL)
+
+
+# Checks to see if the flux server is currently online
+async def is_flux_server_online(url):
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=5) as response:
+                return response.status == 200
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return False
+
+@bot.command(
+    name='flux',
+    help='Generates an image using the Flux model.\n\nOptions:\n'
+         '--wide: Generates a wide image (1920x1024).\n'
+         '--tall: Generates a tall image (1024x1920).\n'
+         '--seed <number>: Use a specific seed for image generation.\n'
+         '--n <number>: Specify the number of iterations you want.\n'
+         '--fancy: Elaborates the prompt to be more creative and detailed.\n\n'
+         'Default size is 1024x1024.'
+)
+async def flux_image(ctx, *, description: str):
+    flux_server_url = "http://192.168.1.96:7860"
+    
+    if not await is_flux_server_online(flux_server_url):
+        await ctx.send("The !flux command is currently offline. Suck it.")
+        return
+    
+    # Enqueue the task
+    await flux_queue.put((ctx, description))
+
+    # Process the queue if no other task is currently processing
+    if flux_lock.locked():
+        return
+
+    async with flux_lock:
+        await process_flux_queue()
+
+
+
+
+
+@bot.command(
+    name='analyze',
+    help='Analyzes an attached image and provides a description.\n\n'
+         'Attach an image (PNG, JPG, JPEG, WEBP) to the command, and the bot will\n'
+         'analyze the image and provide a detailed description based on AI.'
+)
 async def analyze(ctx):
     # Check if there is an attachment in the message
     if ctx.message.attachments:
@@ -681,7 +982,7 @@ async def analyze(ctx):
 async def on_message(message):
     # Process any commands that might be part of the message
     await bot.process_commands(message)
-   
+
     # Prevent duplicate processing for commands
     if message.content.startswith(bot.command_prefix):
         return
@@ -690,10 +991,15 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # Skip indexing and history logging for messages starting with !flux
+    if message.content.startswith("!flux"):
+        print(Fore.CYAN + f"Skipping indexing for message from {message.author.name}: {Fore.YELLOW}'{message.content}'" + Style.RESET_ALL)
+        return
+
     # Print received message with the username
     print(Fore.CYAN + f"Received message from {message.author.name}: {Fore.YELLOW}'{message.content}'" + Style.RESET_ALL)
 
-    # Log every message (user and bot) in the channel
+    # Log every message (user and bot) in the channel, except those starting with !flux
     save_message_to_json_and_index_solr(message.channel.id, message.author.name, message.content, message.created_at)
 
     # Determine if the bot should react to this particular message
@@ -712,7 +1018,7 @@ async def on_message(message):
                         base64_image = await encode_discord_image(attachment.url)
                         instructions = message.content if message.content else "What’s in this image?"
                         analysis_result = await analyze_image(base64_image, instructions)
-                        response_text = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        response_text = analysis_result.get("choices", [{}])[0].get("message", "").get("content", "")
                         if response_text:
                             await message.channel.send(response_text)
                             print(Fore.MAGENTA + "Image analysis result: " + response_text + Fore.RESET)
@@ -737,6 +1043,19 @@ async def on_message(message):
         # Fetch message history and Solr results with expanded keywords
         messages_with_solr = await fetch_message_history(message.channel, message.author.name, expanded_keywords)
 
+        # Prepare the messages for sending to OpenAI
+        system_message = {"role": "system", "content": chatgpt_behaviour}
+        current_user_message = {"role": "user", "content": f"{message.author.name}: {message.content}"}
+        assistant_prompt = {"role": "assistant", "content": "What is your reply? Keep the current conversation going, but utilize the chat history if it seems appropriate and relevant."}
+
+        # Order the messages: System behavior, Solr results, Recent chat history, Current user message, Assistant prompt
+        messages_for_openai = [system_message] + messages_with_solr + [current_user_message, assistant_prompt]
+
+        # Log the chat history for debugging
+        print('Chat history for OpenAI:')
+        for msg in messages_for_openai:
+            print(f'{Fore.GREEN}{msg["role"].capitalize()}: {Fore.YELLOW}{msg["content"]}{Fore.RESET}')
+
         # Initialize variables to store the response
         airesponse_chunks = []
         response = {}
@@ -745,25 +1064,13 @@ async def on_message(message):
         try:
             async with message.channel.typing():
                 # Remove redundant messages from channel and Solr history
-                filtered_messages = remove_redundant_messages(messages_with_solr)
-
-                # Prepare the messages for sending to OpenAI
-                system_message = {"role": "system", "content": chatgpt_behaviour}
-                current_user_message = {"role": "user", "content": f"{message.author.name}: {message.content}"}
-                assistant_prompt = {"role": "assistant", "content": "What is your reply? Keep the current conversation going, but utilize the chat history if it seems appropriate and relevant."}
-
-                messages_for_openai = [system_message] + filtered_messages + [current_user_message, assistant_prompt]
-
-                # Log the chat history for debugging
-                print('Chat history for OpenAI:')
-                for msg in messages_for_openai:
-                    print(f'{Fore.GREEN}{msg["role"].capitalize()}: {Fore.YELLOW}{msg["content"]}{Fore.RESET}')
+                filtered_messages = remove_redundant_messages(messages_for_openai)
 
                 # Set the max_tokens based on the type of response
                 max_tokens = int(os.getenv("MAX_TOKENS_RANDOM")) if is_random_response else int(os.getenv("MAX_TOKENS"))
 
                 # Generate a response using the OpenAI API
-                response = await async_chat_completion(model=os.getenv("MODEL_CHAT"), messages=messages_for_openai, temperature=1.5, top_p=0.9, max_tokens=max_tokens)
+                response = await async_chat_completion(model=os.getenv("MODEL_CHAT"), messages=filtered_messages, temperature=1.5, top_p=0.9, max_tokens=max_tokens)
 
                 # Extract and print the token usage information
                 if hasattr(response, 'usage') and hasattr(response.usage, 'total_tokens'):
@@ -808,11 +1115,14 @@ async def on_message(message):
     # Process any commands included in the message
     await bot.process_commands(message)
 
+
+
+
+
 # Initialize the bot with the Discord token from environment variables
 discord_bot_token = os.getenv("DISCORD_TOKEN")
 if discord_bot_token is None:
     raise ValueError("No Discord bot token found. Make sure to set the DISCORD_BOT_TOKEN environment variable.")
 bot.run(discord_bot_token)
-
 
 
