@@ -1,3 +1,5 @@
+buymeacoffee.com/sneezeparty
+
 # MAJOR UPDATE 9/15/2024
 
 Soupy-solr.py now has all of the below functionality, but has been enhanced in various ways.
