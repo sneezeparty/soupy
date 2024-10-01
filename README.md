@@ -1,4 +1,4 @@
-buymeacoffee.com/sneezeparty
+[Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.
 
 # MAJOR UPDATE 9/15/2024
 
