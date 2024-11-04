@@ -5,6 +5,8 @@ Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to h
 # Soupy
 Soupy is a chatbot for Discord that can generate images with a local image generator (Flux) and/or with DALL-E 3.  For chatting, it uses a combination of JSONs, ChatGPT, and a local search engine to engage in conversation with its users.  It will index your user's chat messages, and use those messages to create profiles of users.  It will also index every channel on your server to which it has access.  
 
+Soupy will learn about you and the users on your server.  You should let them know that Soupy collects their information.  All of this will be stored on whatever device you're running Soupy on.  The gather and create this data, Soupy sends your user's chats to OpenAI, where their statements are turns into profiles, stored as JSONs.  
+
 ---
 ### IMPORTANT - READ THIS, OR ELSE!!
 Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat portion of Soupy uses *real money*.  The DALL-E 3 image generation does, too.  You can skip DALL-E 3 generation and only use Flux locally.
@@ -325,6 +327,7 @@ Generate an image using DALL-E 3 based on a text prompt with optional modifiers.
 Analyze an attached image based on provided instructions, such as translating text within the image or identifying objects and their attributes.
 
 **Usage**:
+
 ![analyze](https://i.imgur.com/EFGRIh3.png)
 
 ```
@@ -339,6 +342,7 @@ Analyze an attached image based on provided instructions, such as translating te
 #### `!8ball`
 
 Ask the Magic 8-Ball a question.  Does not use an LLM or any ML.
+
 ![8ball](https://i.imgur.com/3AACKkx.png)
 
 **Usage**:
@@ -350,6 +354,7 @@ Ask the Magic 8-Ball a question.  Does not use an LLM or any ML.
 #### `!whattime`
 
 Fetch and display the current time in a specified city.
+
 ![whattime](https://i.imgur.com/qAgBrLn.png)
 
 **Usage**:
