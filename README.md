@@ -199,6 +199,19 @@ http://localhost:8983/solr/soupy/schema \
   }
 }'
 ```
+or this one
+```
+curl -X POST -H "Content-Type: application/json" \
+  "http://localhost:8983/solr/soupy/schema" \
+  -d '{
+    "add-field":{
+      "name":"user_problems",
+      "type":"text_general",
+      "indexed":true,
+      "stored":true
+    }
+  }'
+```
    
  #### Define Fields
 
