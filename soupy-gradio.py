@@ -69,8 +69,19 @@ class ModelConfig:
     """
     Configuration for model repository and revision details.
     """
+    
+    # REPO_NAME = "Freepik/flux.1-lite-8B-alpha"
+    # REVISION = None
+    
     REPO_NAME = "black-forest-labs/FLUX.1-schnell"
     REVISION = "refs/pr/1"
+    
+    # REPO_NAME = "black-forest-labs/FLUX.1-dev"
+    
+    # REPO_NAME = "sayakpaul/FLUX.1-merged"
+    # REVISION = None
+    # REPO_NAME = "ostris/OpenFLUX.1"
+    # REVISION = None
 
 # Model Loading and Setup
 def load_scheduler(repo, revision):
@@ -243,7 +254,7 @@ def setup_gradio_interface(pipeline):
     inputs = [
         gr.Textbox(label="Prompt", lines=2, placeholder="Enter your image prompt here..."),
         gr.Number(label="Number of Steps", value=4, precision=0),
-        gr.Number(label="Guidance Scale", value=3.5, precision=1),
+        gr.Number(label="Guidance Scale", value=3, precision=1),
         gr.Slider(label="Width", minimum=0, maximum=1920, value=1024, step=2),
         gr.Slider(label="Height", minimum=0, maximum=1920, value=1024, step=2),
         gr.Number(label="Seed (-1 for random)", value=-1, precision=0)
