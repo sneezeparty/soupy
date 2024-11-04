@@ -5,7 +5,7 @@ Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to h
 # Soupy
 Soupy is a chatbot for Discord that can generate images with a local image generator (Flux) and/or with DALL-E 3.  For chatting, it uses a combination of JSONs, ChatGPT, and a local search engine to engage in conversation with its users.  It will index your user's chat messages, and use those messages to create profiles of users.  It will also index every channel on your server to which it has access.  
 
-Soupy will learn about you and the users on your server.  You should let them know that Soupy collects their information.  All of this will be stored on whatever device you're running Soupy on.  The gather and create this data, Soupy sends your user's chats to OpenAI, where their statements are turns into profiles, stored as JSONs.  
+Soupy will learn about you and the users on your server.  You should let your users know that Soupy collects their information.  All of this will be stored on whatever device you're running Soupy on.  It gathers and creates this data, Soupy sends your user's chats to OpenAI, where their statements are turned into profiles, which are then stored as JSONs.  
 
 ---
 ### IMPORTANT - READ THIS, OR ELSE!!
