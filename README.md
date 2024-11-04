@@ -1,118 +1,386 @@
-[Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.
+![Soupy Header](https://i.imgur.com/mDrXgrG.png)
 
-# MAJOR UPDATE 9/15/2024
+Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.  
 
-Soupy-solr.py now has all of the below functionality, but has been enhanced in various ways.
+# Soupy
+Soupy is a chatbot for Discord that can generate images with a local image generator (Flux) and/or with DALL-E 3.  For chatting, it uses a combination of JSONs, ChatGPT, and a local search engine to engage in conversation with its users.  It will index your user's chat messages, and use those messages to create profiles of users.  It will also index every channel on your server to which it has access.  
 
-1. You can set up a local [Flux Server](https://github.com/black-forest-labs/flux) for image generation tasks.  Use soupy-gradio.py for this function.  This can be used with the ```!flux``` commands, for example ```!flux a picture of a dog``` will generate a picture of a dog and send it to the channel.  There are some ways this can be modified, too:
-     - ```--wide``` (16x9 ratio)
-     - ```--tall``` (9x16)
-     - ```--seed``` Followed by a number.  This way, you can use the same seed (e.g., 12345) and just modify the prompt.
-     - ```--n``` Followed by a number, up to 4.  This will create up to 4 variants of a single prompt.
-2. Chat history retrieval has been improved.  Soupy's responses will now be more relevant to the current discussion.
-3. There are a few places in the script where it says ```/scriptlocation/```.  You must replace this with the location where your script runs.
-4. Additionally, I recommend that you update the .env with this pre-prompt to improve Soupy's responses.  This goes in the BEHAVIOUR variable.
+---
+### IMPORTANT - READ THIS, OR ELSE!!
+Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat portion of Soupy uses *real money*.  The DALL-E 3 image generation does, too.  You can skip DALL-E 3 generation and only use Flux locally.
+
+The initial setup, wherein the channel history from your server will be downloaded and indexed and *all of the users on your server will have profiles made of them* costs money via ChatGPT's API.  Some day I will also support local LLMs, but not yet.
+
+To get Flux working, I strongly suggest you start [here, with the official Flux repository](https://github.com/black-forest-labs/flux).  But once you have Flux up-and-running, you can use `soupy-gradio.py`, included in this repository.
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Clone the Repository](#clone-the-repository)
+  - [Create and Activate a Virtual Environment](#create-and-activate-a-virtual-environment)
+  - [Install Dependencies](#install-dependencies)
+  - [Configure Environment Variables](#configure-environment-variables)
+- [Setting Up Solr](#setting-up-solr)
+  - [Installation](#installation-1)
+  - [Creating a Core and Fields](#creating-a-core-and-fields)
+- [Usage](#usage)
+  - [Running the Bot](#running-the-bot)
+  - [Available Commands](#available-commands)
+    - [`!8ball`](#8ball)
+    - [`!whattime`](#whattime)
+    -  [`!flux`](#flux)
+    - [`!generate`](#generate)
+    - [`!analyze`](#analyze)
+- [Contribution](#contribution)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+- [Support](#support)
+
+## Features
+
+- **Image Generation**: Use a local text-to-image model, Flux, or use OpenAI's DALL-E 3, or use both.  The Flux functionality is more robust than the DALL-E 3 functionality, and I recommend you use Flux.  Currently, the Flux model used is Schnell, but you can modify this fairly easily.
+- **Interactive Commands**: There are a variety of of amazing commands like `!flux` (local image model), `!generate` (DALL-E 3), `!analyze` (ChatGPT), and `!transform` (ChatGPT) to perform a range of cool actions.
+- **User Profile Management**: Maintain detailed user profiles by indexing messages and interactions using Solr and ChatGPT, allowing for personalized responses and interactions.  *This uses ChatGPT and requires ChatGPT API access.*
+- **Customizable Behavior**: Tailor Soupy's responses and functionalities through environment variables to fit the unique needs of your Discord server.  Do this with the `BEHAVIOUR` variable in the `.env`.  But be careful with how you change it.  Its wording is important to keeping Soupy on-track.
+
+## Installation
+
+### Prerequisites
+
+Before setting up Soupy, ensure you have the following installed on your system:
+
+- **Python 3.8+**
+- **Git**
+- **Apache Solr**
+- **Virtual Environment Manager (optional but recommended)**
+- **For Flux image generation, a local transformers setup**
+- **ChatGPT API access**
+
+### Clone the Repository
+
+Begin by cloning the Soupy repository to your local machine:
 
 ```
-You are a helpful Discord chatbot named Soupy Dafoe and you do have the ability to recall past interactions and conversations.  Your answers are a little bit sarcastic and witty, but also straightforward and concise.  You give human-like answers rather than lists as your responses.  If someone is asking you about past conversations, you have the ability to recall what they are asking about, and you will formulate your response by speculating based on the chat history that you are using in generating your response, while still keeping the conversation most relevant to the most recent messages.  Be conversational.  Try not to be too random.  And if the most recent message is just a few words long, then forumate your response appropriately by ignoring most of the chat history.  Always give priority to the most recent 5 messages in the chat when formulating your response, especially if you have not recently been @tagged.  If you notice two or more identical or similiar messages in your history, do not say anything about repetition in your history.  Try to be in the moment.
-```
-An image generated by flux with default settings:
-
-![cat-1](https://github.com/user-attachments/assets/398596e3-4994-4b5f-bc4f-2c0980267c1e)
-
-An image generated by flux with wide setting:
-
-![image](https://github.com/user-attachments/assets/6eeea254-a695-459a-8358-4ac94dcb3b07)
-
-The next major update will include user-specific profiles, generated from chat history, that will assist Soupy in being better at keeping track of who said what, when it was said, and what specifics beliefs and opinions its users have.
-
-# MAJOR UPDATE 6/9/2024, new version is soupy-solr.py
-
-Soupy (soupy-solr.py) now has all of the following functions:
-
-1. Soupy has a rudimentary memory in the form of JSON databases. This memory is extremely rudimentary and it relies on keywords that are generated by ChatGPT based on messages it receives from chat history.  These keywords are then fed into a locally running Solr database (which you'll have to set up).  Responses from the Solr query are fed into the chat history, sent to ChatGPT, and a response is generated.
-2. Chat with soupy by @tagging it in any channel that it can access.
-3. Specify a specific channel where soupy responds to all messages.
-4. !generate an image based on user input.
-5. !transform an image based on user input.
-6. Describe the image attached to a message.
-7. !time <cityname> will return the time in that city.  For example, "!time Belgium" will return the time in Belgium.
-
-This is a major update for soupy.  The new updates are contained in soupy-solr.py.  In a nutshell, all of the below functionality works, plus some new stuff that you'll want to get set up.  There are many small updates, but the main update is as follows:
-
-1. Soupy has a very rudimentary "memory" in the form of a Solr index based on a JSON database.
-2. The JSON files are based on the last 365 days of discussions in every channel that Soupy has access to on whatever Discord servers you give it access to.  These JSON files will be stored in whatever directory soupy-solr.py is stored.
-3. Once the JSON files are in place, they get updated automatically as new messages are received.
-4. The "memory" is extremely rudimentary.  
-5. I highly recommend that you use language similar to this in Soupy's BEHAVIOUR environment variable, otherwise you will wind up with strange responses very often.  This is because of the way that ChatGPT is going to interpret the history that you're sending to it: 
-
-```
-"BEHAVIOUR="You are a helpful Discord chatbot named Soupy and you do have the ability to recall past interactions and conversations.  Your answers are a little bit sarcastic and witty, but also straightforward and concise.  You give human-like answers rather than lists as your responses.  If someone is asking you about their past opinions on something, formulate your response by speculating based on the chat history that you are using in generating your response.  Be conversational.  And if the most recent message is just a few words long, then forumate your response appropriately by ignoring most of the chat history.  Always give priority to the most recent 5 messages in the chat when formulating your response, especially if you have not recently been @tagged."
+git clone https://github.com/sneezeparty/soupy.git
+cd soupy
 ```
 
-## How can I make this work??
+### Create and Activate a Virtual Environment
 
-In order to get soupy-solr.py up and running, you must first install Solr.  I'll leave that up to you to figure out.  It's not that hard, I hope.
+It's recommended to use a virtual environment to manage dependencies.
 
-Once Solr is installed, create a new core with ```solr create -c soupy```
+```
+python -m venv soupy
+```
 
-Once installed, Solr must be properly configured with certain fields.  
+Activate the virtual environment:
 
+On macOS and Linux:
+
+```
+source soupy/bin/activate
+```
+
+On Windows:
+
+```
+soupy\Scripts\activate
+```
+
+### Install Dependencies
+
+Install the required Python packages using `pip`:
+
+```
+pip install -r requirements.txt
+```
+
+### Configure Environment Variables
+
+Create a `.env` file in the root directory of the project and populate it with the necessary environment variables:
+
+```
+DISCORD_TOKEN=your_discord_bot_token
+
+OPENAI_API_KEY=your_openai_api_key
+
+CHANNEL_IDS=00,11
+
+MAX_TOKENS=2500
+
+MAX_TOKENS_RANDOM=75
+
+MODEL_CHAT=gpt-4o-mini
+
+UPDATE_INTERVAL_MINUTES=61
+
+TRANSFORM="You give detailed and accurate descriptions, be specific in whatever ways you can, such as but not limited to colors, species, poses, orientations, objects, and contexts."
+
+BEHAVIOUR="You are Soupy Dafoe, a sarcastic and witty Discord chatbot. You recall past interactions and conversations to inform your responses. Your replies are concise, straightforward, and infused with a bit of sarcasm, much like Jules from \"Pulp Fiction.\" You are not overly positive and avoid asking questions unless necessary. Prioritize the most recent five messages when formulating your responses, especially if not directly mentioned. If the latest message is brief, focus your reply accordingly and consider ignoring extensive chat history. Integrate the user's profile information subtly to tailor your responses without making it the main focus. Be conversational, stay in the moment, and avoid being too random or wordy. Remember, you're kind of a jerk, but in a human-like way."
+```
+Please note that Soupy will have access to all channels that it can access.  But it will *respond* to all messages in the channels specified above.  Otherwise, it will only respond randomly, or when @tagged.
+
+### !!!IMPORTANT!!!
+Within the script, search for "/absolute/directory/of/your/script/" and replace this with the absolute directory of the location of your script.
+
+#### Environment Variables Explained
+
+- **DISCORD_TOKEN**: Your Discord bot token.
+- **OPENAI_API_KEY**: API key for accessing OpenAI services.
+- **CHANNEL_IDS**: Comma-separated list of Discord channel IDs that the bot will monitor.
+- **MAX_TOKENS**: Maximum number of tokens for standard responses.
+- **MAX_TOKENS_RANDOM**: Maximum number of tokens for random responses.
+- **MODEL_CHAT**: The OpenAI model used for chat functionalities.
+- **UPDATE_INTERVAL_MINUTES**: Interval in minutes for updating user profiles.
+- **TRANSFORM**: Instructions for transforming image descriptions.  Uses OpenAI API.
+- **BEHAVIOUR**: Defines the chatbot's personality and response style.  This variable is extremely important.  As it is currently written, it works well.  Modify it carefully.
+
+## Setting Up Solr
+
+Apache Solr is used for indexing and searching messages and user profiles. Follow these steps to install and configure Solr for Soupy.
+
+### Installation
+
+1. **Download Solr**: Visit the [Apache Solr website](https://solr.apache.org/downloads.html) and download the latest stable release.  You could also use some package managers -- see your distro's information.
+
+2. **Extract the Package**
+
+3. **Install Solr as a Service**: Follow documentation on the exact steps for this process.  It's not hard, though.  You can do it.
+
+4. **Verify Installation**:
+
+   Open your browser and navigate to `http://localhost:8983/solr` to access the Solr admin interface.
+
+### Creating a Core and Fields
+
+Soupy requires a single Solr core with specific fields to index user profiles effectively.
+
+#### Create a Core
+
+1. **Create a Core for Soupy**:
+
+```
+   bin/solr create -c soupy
+```
+
+#### Define Fields
+
+Add the necessary fields to the `soupy_core` to store user profiles.
+
+#### Adding Fields via Solr Admin UI
+
+1. **Access Solr Admin Interface**:
+
+   Navigate to `http://localhost:8983/solr` and select the `soupy_core` core.
+
+2. **Define Fields**:
+
+   - Go to the "Schema" tab.
+   - Click on "Add Field".
+   - For each field listed above, enter the field name, type, and other attributes as specified.
+   - For multiValued fields (like **nicknames**), ensure you check the "MultiValued" option.
+ #### Alternatively, schema/fields can be created from the command line with commands similiar to this one:
+   
+```
+curl -X POST -H 'Content-type:application/json' \
+http://localhost:8983/solr/soupy/schema \
+-d '{
+  "add-field": {
+    "name": "id",
+    "type": "string",
+    "indexed": true,
+    "stored": true,
+    "required": true,
+    "multiValued": false
+  }
+}'
+```
+   
+ #### Define Fields
+
+Add the necessary fields to the `soupy_core` to store user profiles and channel information.
+
+##### Required username Fields
 ```
 <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
 <field name="username" type="string" indexed="true" stored="true"/>
-<field name="content" type="text_general" indexed="true" stored="true"/>
-<field name="timestamp" type="pdate" indexed="true" stored="true"/>
+<field name="nicknames" type="string" indexed="true" stored="true" multiValued="true"/>
+<field name="join_date" type="date" indexed="true" stored="true"/>
+<field name="political_party" type="string" indexed="true" stored="true"/>
+<field name="user_job_career" type="text_general" indexed="true" stored="true"/>
+<field name="user_family_friends" type="text_general" indexed="true" stored="true"/>
+<field name="user_activities" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_games" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_movies" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_music" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_television" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_life" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_food" type="text_general" indexed="true" stored="true"/>
+<field name="general_opinions" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_politics" type="text_general" indexed="true" stored="true"/>
+<field name="personality_traits" type="text_general" indexed="true" stored="true"/>
+<field name="hobbies" type="text_general" indexed="true" stored="true"/>
+<field name="user_interests" type="text_general" indexed="true" stored="true"/>
+<field name="user_problems" type="text_general" indexed="true" stored="true"/>
+<field name="tech_interests" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_technology" type="text_general" indexed="true" stored="true"/>
+<field name="sports_interests" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_sports" type="text_general" indexed="true" stored="true"/>
+<field name="book_preferences" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_books" type="text_general" indexed="true" stored="true"/>
+<field name="art_interests" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_art" type="text_general" indexed="true" stored="true"/>
+<field name="health_concerns" type="text_general" indexed="true" stored="true"/>
+<field name="health_habits" type="text_general" indexed="true" stored="true"/>
+<field name="science_interests" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_science" type="text_general" indexed="true" stored="true"/>
+<field name="travel_preferences" type="text_general" indexed="true" stored="true"/>
+<field name="travel_experiences" type="text_general" indexed="true" stored="true"/>
+<field name="food_preferences" type="text_general" indexed="true" stored="true"/>
+<field name="opinions_about_food" type="text_general" indexed="true" stored="true"/>
+<field name="last_updated" type="date" indexed="true" stored="true"/>
 ```
 
-Once all this is complete, it works pretty darn consistently.  It is likely that soupy-solr.py won't run at all without solr properly in place.
+##### Required channel Fields
+```
+<field name="channel_id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+<field name="username" type="string" indexed="true" stored="true"/>
+<field name="content" type="text_general" indexed="true" stored="true"/>
+<field name="timestamp" type="pdate" indexed="true" stored="true"/>
+ ```
 
-## Historical updates below this line.
+3. **Commit Changes**:
 
-Pretty big update on 12/17.  
+   After adding all fields, commit the changes to make them effective.
 
-Soupy does more stuff now.
+## Usage
 
-1. Chat with soupy by @tagging it in any channel that it can access.
-2. Specify a specific channel where soupy responds to all messages.
-3. !generate an image based on user input.
-4. !transform an image based on user input.
-5. Describe the image attached to a message.
+### Running the Bot
 
-A generated image:
+After completing the installation and configuration steps, you can start the bot using the following commands. The first run will take a while, depending on the activity on your server and the number of users.  It could take minutes, or hours.  The terminal output will tell you what it's up to.
 
-![generate](https://github.com/sneezeparty/soupy/assets/38020091/6a76a432-1ed9-4138-b999-6fe1bef752fd)
+```
+python soupy.py
+```
+AND
+```
+python gradio-soupy.py
+```
 
-The instruction to transform the image:
+*Ensure that you are in the virtual environment and the correct directory where `soupy.py` is located.*
 
-![transform-instruction](https://github.com/sneezeparty/soupy/assets/38020091/b7576eca-c417-4689-92ef-7d2bb4758fa7)
+*`gradio-soupy.py` is the Gradio-based back-end for Flux.  You can also access this via a browser.*
 
-The transformed image:
+### Available Commands
 
-![transform](https://github.com/sneezeparty/soupy/assets/38020091/f7d28c2b-65f6-447a-8214-da3b94d1e3d4)
+#### `!flux`
 
-An image description:
+Generate an image using the Flux model with support for various modifiers and interactive buttons for further customization.
+![flux](https://i.imgur.com/TsiuYA9.png)
 
-![description](https://github.com/sneezeparty/soupy/assets/38020091/65ac63e1-3975-46f5-bb48-e1e77e9dd328)
+And with the --fancy modifier, or with the "Rewrite" button for example:
 
-Note: These are all from the channel in which soupy responds to all messages.  That's an environment variable.
+![flux-fancy](https://i.imgur.com/1ZDJHsE.png)
 
-To describe an image, simply attach it to a message and @tag the bot.
+**Modifiers**:
 
-Pretty big update on 12/10/2023 -- soupy can now analyze images sent to the channel.  It will also follow instructions on how you want the image to be analyzed.  For example, "describe this as a 5 year old would describe it" or "give a poetic description of this image."
+- `--wide`: Generates a wide image (1920x1024).
+- `--tall`: Generates a tall image (1024x1920).
+- `--small`: Generates a small image (512x512).
+- `--fancy`: Elaborates the prompt to be more creative and detailed.  This uses ChatGPT's via API.
+- `--seed <number>`: Use a specific seed for image generation.
 
-To use this functionality, just tag the bot in a message with an attached image, and optionally give an instruction about how you would like the image to be analyzed.
+**Usage**:
 
-## Soupy -- Requires OpenAI API access.
+```
+!flux A mystical forest with glowing plants --tall
+```
 
-### Soupy-combined combines the functionality of the chat bot with the functionality of the image generation bot.
+After generating an image with the `!flux` command, Soupy provides interactive buttons for further customization:
 
-Currently, soupy-combined.py uses the chat model specified in the .env, and the image !generate uses a hard-coded model which IS NOT referenced in the .env.
+- **`Remix`**: Generates a new image based on the existing prompt, with a new random seed.
+- **`Rewrite`**: Elaborates the prompt to enhance creativity and detail.  This uses ChatGPT's API (*same as the `--fancy` modifier*).
+- **`Wide`**: Adjusts the image dimensions to a wide format.
+- **`Tall`**: Adjusts the image dimensions to a tall format.
+---
+#### `!generate`
 
-1. Install dependencies.
-2. Create a .env and populate it.
-3. Have fun.
+Generate an image using DALL-E 3 based on a text prompt with optional modifiers.  This may be deprecated soon. 
 
+**Modifiers**:
+
+- `--wide`: Generates a wide image (1920x1024).
+- `--tall`: Generates a tall image (1024x1920).
+
+**Usage**:
+
+```
+!generate A futuristic city skyline at sunset --wide
+```
+---
+#### `!analyze`
+
+Analyze an attached image based on provided instructions, such as translating text within the image or identifying objects and their attributes.
+
+**Usage**:
+![analyze](https://i.imgur.com/EFGRIh3.png)
+
+```
+!analyze Identify all the animals in this image.
+```
+```
+!analyze Describe this image forensically.
+```
+
+*Attach an image when using this command.*
+
+#### `!8ball`
+
+Ask the Magic 8-Ball a question.  Does not use an LLM or any ML.
+![8ball](https://i.imgur.com/3AACKkx.png)
+
+**Usage**:
+
+```
+!8ball Will I get an A on my exam?
+```
+
+#### `!whattime`
+
+Fetch and display the current time in a specified city.
+![whattime](https://i.imgur.com/qAgBrLn.png)
+
+**Usage**:
+
+```
+!whattime New York
+```
+
+## License
+
+This project is licensed under the MIT License.
+
+MIT License Copyright (c) 2024 sneezeparty 
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. 
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Acknowledgements
+
+- **OpenAI**: For providing powerful language models that drive Soupy's conversational abilities.
+- **Apache Solr**: For enabling efficient data indexing and search capabilities.
+- **Hugging Face**: For offering state-of-the-art models used in the Flux image generation pipeline.
+- **Gradio**: For facilitating the creation of interactive web interfaces for image generation.
+- -**Black Forest Labs**: For Flux, which is awesome.
+
+## Support
+
+If you encounter any issues or have questions, feel free to open an issue in the [GitHub Issues](https://github.com/sneezeparty/soupy/issues) section of the repository.
+
+[Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.
 
 
 
