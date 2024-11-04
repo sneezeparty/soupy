@@ -169,13 +169,13 @@ Soupy requires a single Solr core with specific fields to index user profiles ef
 
 #### Define Fields
 
-Add the necessary fields to the `soupy_core` to store user profiles.
+Add the necessary fields to the `soupy` core to store user profiles.
 
 #### Adding Fields via Solr Admin UI
 
 1. **Access Solr Admin Interface**:
 
-   Navigate to `http://localhost:8983/solr` and select the `soupy_core` core.
+   Navigate to `http://localhost:8983/solr` and select the `soupy` core.
 
 2. **Define Fields**:
 
@@ -202,7 +202,7 @@ http://localhost:8983/solr/soupy/schema \
    
  #### Define Fields
 
-Add the necessary fields to the `soupy_core` to store user profiles and channel information.
+Add the necessary fields to the `soupy` core to store user profiles and channel information.
 
 ##### Required username Fields
 ```
