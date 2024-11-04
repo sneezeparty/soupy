@@ -262,7 +262,7 @@ Add the necessary fields to the `soupy_core` to store user profiles and channel 
 After completing the installation and configuration steps, you can start the bot using the following commands. The first run will take a while, depending on the activity on your server and the number of users.  It could take minutes, or hours.  The terminal output will tell you what it's up to.
 
 ```
-python soupy.py
+python soupy-solr.py
 ```
 AND
 ```
