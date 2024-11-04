@@ -280,6 +280,7 @@ python gradio-soupy.py
 #### `!flux`
 
 Generate an image using the Flux model with support for various modifiers and interactive buttons for further customization.
+
 ![flux](https://i.imgur.com/TsiuYA9.png)
 
 And with the --fancy modifier, or with the "Rewrite" button for example:
