@@ -187,7 +187,7 @@ Add the necessary fields to the `soupy` core to store user profiles.
    - Click on "Add Field".
    - For each field listed above, enter the field name, type, and other attributes as specified.
    - For multiValued fields (like **nicknames**), ensure you check the "MultiValued" option.
- #### Alternatively, THIS IS THE RECOMMENDED METHOD, schema/fields can be created from the command line with commands similiar to this one:  
+ #### Alternatively, schema/fields can be created from the command line with commands similiar to this one:
    
 ```
 curl -X POST -H 'Content-type:application/json' \
@@ -283,12 +283,16 @@ After completing the installation and configuration steps, you can start the bot
 ```
 python soupy-solr.py
 ```
-AND
+**OR**
+```
+python soupy-flux.py
+```
+**AND**
 ```
 python gradio-soupy.py
 ```
 
-*Ensure that you are in the virtual environment and the correct directory where `soupy.py` is located.*
+*Ensure that you are in the virtual environment and the correct directory where `soupy` is located.*
 
 *`gradio-soupy.py` is the Gradio-based back-end for Flux.  You can also access this via a browser.*
 
@@ -404,7 +408,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 If you encounter any issues or have questions, feel free to open an issue in the [GitHub Issues](https://github.com/sneezeparty/soupy/issues) section of the repository.
 
 [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.
-
 
 
 
