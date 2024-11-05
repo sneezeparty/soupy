@@ -7,6 +7,8 @@ Soupy is a chatbot for Discord that can generate images with a local image gener
 
 Soupy will learn about you and the users on your server.  You should let your users know that Soupy collects their information.  All of this will be stored on whatever device you're running Soupy on.  It gathers and creates this data, Soupy sends your user's chats to OpenAI, where their statements are turned into profiles, which are then stored as JSONs.  
 
+*Note:* Soupy-classic does not currently feature the Flux functionality.  It only works with OpenAI/DALL-E 3.  Soon, I will release a simple version of Soupy that only generates images with Flux.
+
 ---
 ### IMPORTANT - READ THIS, OR ELSE!!
 Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat portion of Soupy uses *real money*.  The DALL-E 3 image generation does, too.  You can skip DALL-E 3 generation and only use Flux locally.
