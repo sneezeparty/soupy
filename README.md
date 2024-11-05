@@ -99,11 +99,6 @@ soupy\Scripts\activate
 
 Install the required Python packages using `pip`:
 
-I strongly recommend these specific versions of PyTorch, with regards to soupy-gradio.py:
-```
-pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 torchaudio==2.0.2+cu117 optimum-quanto==0.2.4 --extra-index-url https://download.pytorch.org/whl/cu117
-```
-And then:
 ```
 pip install -r requirements.txt
 ```
