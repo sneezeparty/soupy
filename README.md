@@ -9,7 +9,7 @@ Soupy is a chatbot for Discord that can generate images with a local image gener
 ### IMPORTANT - READ THIS, OR ELSE!!
 There are multiple versions of soupy.
 1. soupy-flux.py: This version of soupy is ONLY the Flux image generation functionality.  It requires soupy-gradio.py to be run simultaneously.
-2. soupy-solr.py: This version features user profiles, requires Solr installation and setup, has chat history logging, and rich interactive chatting.  It also includes Flux image generations, and OpenAI/DALL-E 3 image generation.
+2. soupy-solr.py: This version features user profiles, requires Solr installation and setup, has chat history logging, and rich interactive chatting.  It also includes Flux image generations, and OpenAI/DALL-E 3 image generation.  It requires soupy-gradio.py to be run simultaneously.
 3. soupy-classic.py: This version is only chat and DALL-E 3 image generation.  It does not require Solr and does not create user profiles.
 
 Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat portion of Soupy uses *real money*.  The DALL-E 3 image generation does, too.  You can skip DALL-E 3 generation and only use Flux locally.
