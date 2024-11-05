@@ -5,17 +5,19 @@ Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to h
 # Soupy
 Soupy is a chatbot for Discord that can generate images with a local image generator (Flux) and/or with DALL-E 3.  For chatting, it uses a combination of JSONs, ChatGPT, and a local search engine to engage in conversation with its users.  It will index your user's chat messages, and use those messages to create profiles of users.  It will also index every channel on your server to which it has access.  
 
-Soupy will learn about you and the users on your server.  You should let your users know that Soupy collects their information.  All of this will be stored on whatever device you're running Soupy on.  It gathers and creates this data, Soupy sends your user's chats to OpenAI, where their statements are turned into profiles, which are then stored as JSONs.  
-
-*Note:* Soupy-classic does not currently feature the Flux functionality.  It only works with OpenAI/DALL-E 3.  Soon, I will release a simple version of Soupy that only generates images with Flux.
-
 ---
 ### IMPORTANT - READ THIS, OR ELSE!!
+There are multiple versions of soupy.
+1. soupy-flux.py: This version of soupy is ONLY the Flux image generation functionality.  It requires soupy-gradio.py to be run simultaneously.
+2. soupy-solr.py: This version features user profiles, requires Solr installation and setup, has chat history logging, and rich interactive chatting.  It also includes Flux image generations, and OpenAI/DALL-E 3 image generation.
+3. soupy-classic.py: This version is only chat and DALL-E 3 image generation.  It does not require Solr and does not create user profiles.
+
 Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat portion of Soupy uses *real money*.  The DALL-E 3 image generation does, too.  You can skip DALL-E 3 generation and only use Flux locally.
 
 The initial setup, wherein the channel history from your server will be downloaded and indexed and *all of the users on your server will have profiles made of them* costs money via ChatGPT's API.  Some day I will also support local LLMs, but not yet.
 
 To get Flux working, I strongly suggest you start [here, with the official Flux repository](https://github.com/black-forest-labs/flux).  But once you have Flux up-and-running, you can use `soupy-gradio.py`, included in this repository.
+
 
 ## Table of Contents
 
@@ -185,7 +187,7 @@ Add the necessary fields to the `soupy` core to store user profiles.
    - Click on "Add Field".
    - For each field listed above, enter the field name, type, and other attributes as specified.
    - For multiValued fields (like **nicknames**), ensure you check the "MultiValued" option.
- #### Alternatively, schema/fields can be created from the command line with commands similiar to this one:
+ #### Alternatively, THIS IS THE RECOMMENDED METHOD, schema/fields can be created from the command line with commands similiar to this one:  
    
 ```
 curl -X POST -H 'Content-type:application/json' \
