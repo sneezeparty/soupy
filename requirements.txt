@@ -17,6 +17,8 @@ aiohttp==3.8.5
 discord.py==2.4.0
 diffusers==0.30.3
 transformers==4.44.2
+gradio==4.44.1
+colorlog==6.9.0
 
 
 
