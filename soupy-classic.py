@@ -1,4 +1,4 @@
-# This is an older version of soupy, but it still works.  It includes all image functions and chat functions, but it does not have a permanent memory function.
+# This is an older version of soupy, but it still works.  It includes all image functions and chat functions, but it does not have a permanent memory function.  It does not use Flux.
 # Importing necessary libraries
 from openai import OpenAI
 import os
