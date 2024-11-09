@@ -102,7 +102,7 @@ BEHAVIOUR="You are Soupy Dafoe, a sarcastic and witty Discord chatbot. You recal
 ```
 Please note that Soupy will have access to all channels that it can access.  But it will *respond* to all messages in the channels specified above.  Otherwise, it will only respond randomly, or when @tagged.
 
-### !!!IMPORTANT!!!
+### !!!IMPORTANT!!! for soupy-solr.py
 Within the script, search for "/absolute/directory/of/your/script/" and replace this with the absolute directory of the location of your script.
 
 #### Environment Variables Explained
