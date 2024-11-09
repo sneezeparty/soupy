@@ -18,32 +18,6 @@ The initial setup, wherein the channel history from your server will be download
 
 To get Flux working, I strongly suggest you start [here, with the official Flux repository](https://github.com/black-forest-labs/flux).  But once you have Flux up-and-running, you can use `soupy-gradio.py`, included in this repository.
 
-
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-  - [Prerequisites](#prerequisites)
-  - [Clone the Repository](#clone-the-repository)
-  - [Create and Activate a Virtual Environment](#create-and-activate-a-virtual-environment)
-  - [Install Dependencies](#install-dependencies)
-  - [Configure Environment Variables](#configure-environment-variables)
-- [Setting Up Solr](#setting-up-solr)
-  - [Installation](#installation-1)
-  - [Creating a Core and Fields](#creating-a-core-and-fields)
-- [Usage](#usage)
-  - [Running the Bot](#running-the-bot)
-  - [Available Commands](#available-commands)
-    - [`!8ball`](#8ball)
-    - [`!whattime`](#whattime)
-    -  [`!flux`](#flux)
-    - [`!generate`](#generate)
-    - [`!analyze`](#analyze)
-- [Contribution](#contribution)
-- [License](#license)
-- [Acknowledgements](#acknowledgements)
-- [Support](#support)
-
 ## Features
 
 - **Image Generation**: Use a local text-to-image model, Flux, or use OpenAI's DALL-E 3, or use both.  The Flux functionality is more robust than the DALL-E 3 functionality, and I recommend you use Flux.  Currently, the Flux model used is Schnell, but you can modify this fairly easily.
