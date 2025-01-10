@@ -112,13 +112,6 @@ It actually runs pretty good.  I do this in my spare time.  I'm not a developer.
 
 ![basic flux image](https://i.imgur.com/ODIR9OT.png)
 
-![removebg](https://i.imgur.com/wrj4iaS.png)
-Hitting the Remove BG button:
-
-![enter image description here](https://i.imgur.com/lSrmd7z.png)
-
-
- 
  
  ![enter image description here](https://i.imgur.com/a1yk985.png) 
  Hitting the Fancy button, which sends the current prompt (e.g., ``a weird animal``), to the LLM for additional processing, which is then sent to Flux:
