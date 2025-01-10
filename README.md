@@ -1,7 +1,149 @@
 ![Soupy Header](https://i.imgur.com/mDrXgrG.png)
 
+![Soupy Remastered Header](https://i.imgur.com/AiCorTA.jpeg)
+
 Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.  
 
+# Soupy Remastered - January 10th, 2025
+Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BLIP-2/Gradio backend for image-related tasks, and an LM Studio backend for chat-related tasks.  It has a number of neat functions, such as:
+
+| Function | Description |
+|--|--|
+| ``/flux <prompt> <modifiers>`` | Generate a new image based on a description given by the user using available modifiers
+| ``/search <query>``|Uses BeautifulSoup to scrape results from Google and feeds them to the LLM for parsing and summary, eventually sending them to the channel |
+|``/whattime <location>``|Provides your local time for a geographic location|
+|``/8ball <query>``|Traditional 8-ball|
+|``/9ball <query>``|Gives LLM-generated 8-ball style answers
+| ![random button](https://i.imgur.com/YGboE7n.png)|Button triggers LLM to generate a "random" prompt based on ``.txt`` documents with keywords|
+|![fancy button](https://i.imgur.com/HGYjGKe.png)|Uses the LLM to take the currently used prompt and elaborate on it for a more creative outcome|
+|![remix button](https://i.imgur.com/vjOnzzB.png)|Re-generates the current image prompt with a new seed|
+|![remove bg](https://i.imgur.com/qQjfeOY.png)|Removes the background from the current image|
+|![edit button](https://i.imgur.com/P6t9l8j.png)|Edit the current prompt, image dimensions, or seed|
+|``/stats``|Displays basic user statistics|
+|``/status``|Reports if the LLM and/or local Flux server are available|
+|**Just talk with it.  It responds to the word soup.**|Talk with the bot by using the word "soup" or calling it soupy.  It will also respond to messages at random, about 3% of them.  There's also an "interject" function which will randomly send a message to your server.|
+
+## IMPORTANT - READ THIS, OR ELSE!!
+There are multiple versions of soupy, some of them are old, some of them use Dall-E and/or ChatGPT.
+1. **soupy-remastered.py**: Newest version of soupy with all of the above functions, totally local.
+2. **soupy-gradio-v2-works.py**: Gradio backend.  Loads the image models, transformers, and so on.  It also has a WebUI, which I mostly use for debugging purposes.  You can easily disable it if you want.
+3. **.env**: This is **extremely important** to the proper functioning of Soupy. 
+4. soupy-flux.py: Older version of this bot that generates images.  No LLM functionality.  Works fine.  Requires soupy-gradio.py.
+5. soupy-solr.py: This version features user profiles, requires Solr installation and setup, has chat history logging, and rich interactive chatting.  It also includes Flux image generations, and OpenAI/DALL-E 3 image generation.
+6. soupy-classic.py: This version is only ChatGPT-based chat and DALL-E 3 image generation.  It does not require Solr and does not create user profiles.
+
+Before setting up Soupy, ensure you have the following installed on your system:
+## Software Requirements
+- [Flux](https://huggingface.co/black-forest-labs/FLUX.1-schnell): Used for generating images.
+- [LM Studio](https://lmstudio.ai): The LLM backend.
+- [BLIP-2](https://huggingface.co/Salesforce/blip2-opt-2.7b): For seeing and responding to images in chat. **This feature is currently commented out**.  If you want to re-enable it, go to line ``456`` and uncomment that whole block.  It is commented out because, on my system, when BLIP is enabled, it slows image generation down by about 300%.  This is due to memory swapping.  It's being worked on.
+- [Gradio](https://www.gradio.app): For loading the backend image-related models.
+- Python 3.8+
+- Virtual Environment Manager (optional but recommended)
+- Transformers
+- Cuda 11.7
+- All the imports/requirements
+
+## Hardware Requirements
+- 32gb of system RAM probably works, 64gb is preferred
+- 24gb GPU.  Maybe a 12gb or 16gb card would work, I don't know for sure.
+- For me, the LLM runs on a different system than the image-related functions.  The LLM is on  a 16gb M1 Mac Mini.  So, your results may vary here.
+
+
+## Installation and Setup
+You will need to open up the .env file and insert your keys and tokens, as appropriate.  Don't mess with the prompts too much, unless you want to, in which case you should mess with them as much as you want.  
+
+Some of the prompting is done in Soupy itself, some of it is in the .env.  Have a look around.  The behaviors are all set in the .env, like the bot's personality and what not.  
+
+Update the necessary .env variables, such as your Discord token and the URLs to your Flux/Gradio setup and the LM Studio setup.  Alternatively, it would not be super hard to make a few changes and use OpenAI as the backend, since LM Studio mimics the OpenAI API.  
+
+Probably the requirements.txt you'll need:
+```
+absl-py==2.1.0
+accelerate==0.33.0
+aiohttp==3.10.11
+aiofiles==24.1.0
+beautifulsoup4==4.12.3
+colorama==0.4.6
+colorlog==6.9.0
+discord.py==2.4.0
+python-dotenv==1.0.0
+fastapi==0.115.6
+geopy==2.4.1
+gradio==4.44.1
+html2text==2024.2.26
+numpy==2.0.0
+openai==1.58.1
+optimum==1.22.0
+pillow==10.4.0
+pytz==2023.3.post1
+requests==2.32.3
+torch==2.4.0+cu118
+torchvision==0.19.0+cu118
+torchaudio==2.4.0+cu118 
+transformers==4.46.3
+trafilatura==2.0.0
+timezonefinder==6.4.1
+uvicorn==0.30.6
+rembg==2.0.61
+grpcio==1.68.0
+```
+
+## Other important information
+Personally, my setup is as such: The image functions run on a system with 64gb of RAM and a 3090.  The LLM runs on an Apple Silicon Mac on the same network.  If you look at the .env, you'll see where to set your URLs and such for your own personal setup.
+
+For the LLM, I personally use [Lexi 8B 5Q GGUF](https://huggingface.co/Orenguteng/Llama-3-8B-Lexi-Uncensored-GGUF) which is based on llama, is reasonably fast, and is pretty compliant with the right prompting.  For the vision processing, I use [Llava Llama Vision GGUF](https://huggingface.co/xtuner/llava-llama-3-8b-v1_1-gguf).
+
+My future plans for Soupy-Remastered are to re-integrate long-term memory, but this time in the form of a little SQL database.  It won't be RAG, but in my opinion you can do RAG-like searches with an LLM-backend and plain text databases more accurately and with fewer resources.  I have no specific timeline for this functionality.
+
+The Gradio script I use is a little funky and takes a while to load.  Just let it do its thing.
+
+You obviously need to know how to set up a Discord bot with the correct permissions.
+
+The ``Random`` button will choose random words and phrases from the three files ``characters.txt``, ``styles.txt``, and ``themes.txt``, and then send them to the LLM for the creation of an image prompt.
+
+
+## Help! Your stupid code doesn't run right.  What kind of developer even are you?
+It actually runs pretty good.  I do this in my spare time.  I'm not a developer.  Installation is the most challenging part.  If you need help, reach out and I'll see if I can help.  
+
+### Examples of Usage
+
+``/flux <prompt>`` image generation:
+
+![basic flux image](https://i.imgur.com/ODIR9OT.png)
+
+![removebg](https://i.imgur.com/wrj4iaS.png)
+Hitting the Remove BG button:
+
+![enter image description here](https://i.imgur.com/lSrmd7z.png)
+
+
+ 
+ 
+ ![enter image description here](https://i.imgur.com/a1yk985.png) 
+ Hitting the Fancy button, which sends the current prompt (e.g., ``a weird animal``), to the LLM for additional processing, which is then sent to Flux:
+
+![enter image description here](https://i.imgur.com/naG52aN.png)
+
+
+![random button](https://i.imgur.com/IjunXaZ.png) 
+The Random button triggers a function that chooses from random keywords located in ``characters.txt``, ``styles.txt``, and ``themes.txt``.  It then sends those results to the LLM for the generation of a new description, which is then sent to Flux.
+
+
+![Random example](https://i.imgur.com/0eFjCSq.png)
+
+``/search <query>``
+An example of the ``/search`` command, which takes your search and sends it to the LLM for processing, and then returns results using BeautifulSoup and natural language processing:
+
+![enter image description here](https://i.imgur.com/UnfRKsC.png)
+
+
+---
+# Old information below this line.  This information is mostly only relevant to the older releases.
+---
+Everything below here applies to the older versions of soupy that are still in this repo.
+---
+---
 # Soupy
 Soupy is a chatbot for Discord that can generate images with a local image generator (Flux) and/or with DALL-E 3.  For chatting, it uses a combination of JSONs, ChatGPT, and a local search engine to engage in conversation with its users.  It will index your user's chat messages, and use those messages to create profiles of users.  It will also index every channel on your server to which it has access.  
 
@@ -9,7 +151,7 @@ Soupy is a chatbot for Discord that can generate images with a local image gener
 ### IMPORTANT - READ THIS, OR ELSE!!
 There are multiple versions of soupy.
 1. soupy-flux.py: This version of soupy is ONLY the Flux image generation functionality.  It requires soupy-gradio.py to be run simultaneously.
-2. soupy-solr.py: This version features user profiles, requires Solr installation and setup, has chat history logging, and rich interactive chatting.  It also includes Flux image generations, and OpenAI/DALL-E 3 image generation.  It requires soupy-gradio.py to be run simultaneously.
+2. soupy-solr.py: This version features user profiles, requires Solr installation and setup, has chat history logging, and rich interactive chatting.  It also includes Flux image generations, and OpenAI/DALL-E 3 image generation.
 3. soupy-classic.py: This version is only chat and DALL-E 3 image generation.  It does not require Solr and does not create user profiles.
 
 Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat portion of Soupy uses *real money*.  The DALL-E 3 image generation does, too.  You can skip DALL-E 3 generation and only use Flux locally.
@@ -17,6 +159,32 @@ Soupy requires OpenAI API access to the ChatGPT models.  Therefore, the chat por
 The initial setup, wherein the channel history from your server will be downloaded and indexed and *all of the users on your server will have profiles made of them* costs money via ChatGPT's API.  Some day I will also support local LLMs, but not yet.
 
 To get Flux working, I strongly suggest you start [here, with the official Flux repository](https://github.com/black-forest-labs/flux).  But once you have Flux up-and-running, you can use `soupy-gradio.py`, included in this repository.
+
+
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Clone the Repository](#clone-the-repository)
+  - [Create and Activate a Virtual Environment](#create-and-activate-a-virtual-environment)
+  - [Install Dependencies](#install-dependencies)
+  - [Configure Environment Variables](#configure-environment-variables)
+- [Setting Up Solr](#setting-up-solr)
+  - [Installation](#installation-1)
+  - [Creating a Core and Fields](#creating-a-core-and-fields)
+- [Usage](#usage)
+  - [Running the Bot](#running-the-bot)
+  - [Available Commands](#available-commands)
+    - [`!8ball`](#8ball)
+    - [`!whattime`](#whattime)
+    -  [`!flux`](#flux)
+    - [`!generate`](#generate)
+    - [`!analyze`](#analyze)
+- [Contribution](#contribution)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+- [Support](#support)
 
 ## Features
 
@@ -73,6 +241,11 @@ soupy\Scripts\activate
 
 Install the required Python packages using `pip`:
 
+I strongly recommend these specific versions of PyTorch, with regards to soupy-gradio.py:
+```
+pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 torchaudio==2.0.2+cu117 optimum-quanto==0.2.4 --extra-index-url https://download.pytorch.org/whl/cu117
+```
+And then:
 ```
 pip install -r requirements.txt
 ```
@@ -102,7 +275,7 @@ BEHAVIOUR="You are Soupy Dafoe, a sarcastic and witty Discord chatbot. You recal
 ```
 Please note that Soupy will have access to all channels that it can access.  But it will *respond* to all messages in the channels specified above.  Otherwise, it will only respond randomly, or when @tagged.
 
-### !!!IMPORTANT!!! for soupy-solr.py
+### !!!IMPORTANT!!!
 Within the script, search for "/absolute/directory/of/your/script/" and replace this with the absolute directory of the location of your script.
 
 #### Environment Variables Explained
