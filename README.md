@@ -36,7 +36,7 @@ Before setting up Soupy, ensure you have the following installed on your system:
 ## Software Requirements
 - [Flux](https://huggingface.co/black-forest-labs/FLUX.1-schnell): Used for generating images.
 - [LM Studio](https://lmstudio.ai): The LLM backend.  I highly recommend you use [Lexi Llama Uncensored](https://huggingface.co/Orenguteng/Llama-3-8B-Lexi-Uncensored-GGUF).  It's what the prompts are tuned to.  You can use whatever you want though, probably to good effect.
-- [BLIP-2](https://huggingface.co/Salesforce/blip2-opt-2.7b): For seeing and responding to images in chat. **This feature is currently commented out**.  If you want to re-enable it, go to line ``456`` and uncomment that whole block.  It is commented out because, on my system, when BLIP is enabled, it slows image generation down by about 300%.  This is due to memory swapping.  It's being worked on.
+- [BLIP-2](https://huggingface.co/Salesforce/blip2-opt-2.7b): For seeing and responding to images in chat. **This feature is currently commented out**.  If you want to re-enable it, go to line ``456`` in **soupy-gradio-v2-works.py** and uncomment that whole block.  It is commented out because, on my system, when BLIP is enabled, it slows image generation down by about 300%.  This is due to memory swapping.  It's being worked on.
 - [Gradio](https://www.gradio.app): For loading the backend image-related models.
 - Python 3.8+
 - Virtual Environment Manager (optional but recommended)
