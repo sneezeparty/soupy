@@ -108,6 +108,9 @@ It actually runs pretty good.  I do this in my spare time.  I'm not a developer.
 
 ### Examples of Usage
 
+``simply chatting``: this is what soupy thinks about its own repo, smdh.  soupy is content-aware of what is behind a url, it browses there.
+![soupy chatting](https://i.imgur.com/RlV9HV6.png)
+
 ``/flux <prompt>`` image generation:
 
 ![basic flux image](https://i.imgur.com/ODIR9OT.png)
