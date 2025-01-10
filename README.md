@@ -92,7 +92,7 @@ grpcio==1.68.0
 ## Other important information
 Personally, my setup is as such: The image functions run on a system with 64gb of RAM and a 3090.  The LLM runs on an Apple Silicon Mac on the same network.  If you look at the .env, you'll see where to set your URLs and such for your own personal setup.
 
-For the LLM, I personally use [Lexi 8B 5Q GGUF](https://huggingface.co/Orenguteng/Llama-3-8B-Lexi-Uncensored-GGUF) which is based on llama, is reasonably fast, and is pretty compliant with the right prompting.  For the vision processing, I use [Llava Llama Vision GGUF](https://huggingface.co/xtuner/llava-llama-3-8b-v1_1-gguf).
+For the LLM, I personally use [Lexi 8B 5Q GGUF](https://huggingface.co/Orenguteng/Llama-3-8B-Lexi-Uncensored-GGUF) which is based on llama, is reasonably fast, and is pretty compliant with the right prompting.
 
 My future plans for Soupy-Remastered are to re-integrate long-term memory, but this time in the form of a little SQL database.  It won't be RAG, but in my opinion you can do RAG-like searches with an LLM-backend and plain text databases more accurately and with fewer resources.  I have no specific timeline for this functionality.
 
