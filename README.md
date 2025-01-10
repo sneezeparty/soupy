@@ -25,7 +25,7 @@ Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BL
 
 ## IMPORTANT - READ THIS, OR ELSE!!
 There are multiple versions of soupy, some of them are old, some of them use Dall-E and/or ChatGPT.
-1. **soupy-remastered.py**: Newest version of soupy with all of the above functions, totally local.  This also **requires** the updated env variables, characters.txt, styles.txt, themes.txt, and interject.py.
+1. **soupy-remastered.py**: Newest version of soupy with all of the above functions, totally local.  This also **requires** the updated env variables, characters.txt, styles.txt, themes.txt, interject.py, and soupy-gradio-v2-works.py.
 2. **soupy-gradio-v2-works.py**: Gradio backend.  Loads the image models, transformers, and so on.  It also has a WebUI, which I mostly use for debugging purposes.  You can easily disable it if you want.
 3. **.env**: This is **extremely important** to the proper functioning of Soupy. 
 4. soupy-flux.py: Older version of this bot that generates images.  No LLM functionality.  Works fine.  Requires soupy-gradio.py.
