@@ -1,4 +1,4 @@
-![Soupy Header](https://i.imgur.com/mDrXgrG.png)
+![Soupy Header](https://i.imgur.com/JNbVjY3.png)
 
 ![Soupy Remastered Header](https://i.imgur.com/AiCorTA.jpeg)
 
