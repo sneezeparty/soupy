@@ -306,6 +306,11 @@ class SoupyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.flux_queue = FluxQueueManager()
+        
+    # Add the async_chat_completion method to the bot class
+    async def async_chat_completion(self, *args, **kwargs):
+        """Wraps the OpenAI chat completion in an async context"""
+        return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
 class FluxQueueManager:
     def __init__(self):
@@ -2737,9 +2742,6 @@ class FluxRemixView(View):
         except Exception as e:
             logger.error(f"Error during tall generation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating tall version.", ephemeral=True)
-
-
-
 
 
 async def generate_flux_image(
