@@ -17,7 +17,6 @@ Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BL
 | ![random button](https://i.imgur.com/YGboE7n.png)|Button triggers LLM to generate a "random" prompt based on ``.txt`` documents with keywords|
 |![fancy button](https://i.imgur.com/HGYjGKe.png)|Uses the LLM to take the currently used prompt and elaborate on it for a more creative outcome|
 |![remix button](https://i.imgur.com/vjOnzzB.png)|Re-generates the current image prompt with a new seed|
-|![remove bg](https://i.imgur.com/qQjfeOY.png)|Removes the background from the current image|
 |![edit button](https://i.imgur.com/P6t9l8j.png)|Edit the current prompt, image dimensions, or seed|
 |``/stats``|Displays basic user statistics|
 |``/status``|Reports if the LLM and/or local Flux server are available|
