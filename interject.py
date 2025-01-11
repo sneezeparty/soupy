@@ -8,8 +8,19 @@ from typing import Optional
 import discord
 from discord.ext import tasks, commands
 import pytz
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
+
+# Add the global client reference
+client = OpenAI(
+    base_url=os.getenv("OPENAI_BASE_URL"),
+    api_key=os.getenv("OPENAI_API_KEY", "lm-studio")
+)
+
+async def async_chat_completion(*args, **kwargs):
+    """Wraps the OpenAI chat completion in an async context"""
+    return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
 class Interjector(commands.Cog):
     def __init__(self, bot):
@@ -25,7 +36,7 @@ class Interjector(commands.Cog):
         self.interject_check.cancel()
 
     async def get_random_response(self) -> Optional[str]:
-        """Get a random response using the bot's existing LLM functionality"""
+        """Get a random response using the LLM functionality"""
         try:
             # Use the bot's BEHAVIOUR setting but add specific interjection guidance
             system_message = (
@@ -36,7 +47,8 @@ class Interjector(commands.Cog):
                 "or response to something someone said earlier."
             )
             
-            response = await self.bot.async_chat_completion(
+            # Use the global async_chat_completion function instead
+            response = await async_chat_completion(
                 model=os.getenv("LOCAL_CHAT"),
                 messages=[
                     {"role": "system", "content": system_message},
@@ -73,7 +85,7 @@ class Interjector(commands.Cog):
                 return
             
             # Only run between 6am and 9pm in configured timezone
-            if 6 <= current_hour < 22:
+            if 4 <= current_hour < 22:
                 if random.random() < self.chance_per_check:
                     await asyncio.sleep(random.randint(0, 60))
                     channel = await self.get_random_channel()
