@@ -508,7 +508,132 @@ async def write_user_stats(data):
         except Exception as e:
             logger.error(f"Error writing to 'user_stats.json': {e}")
 
+def universal_cooldown_check():
+    """
+    One decorator to handle both slash commands (func(interaction, ...))
+    and UI callbacks (func(self, interaction, ...)).
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Figure out if `self` is the first argument or not
+            # Typically, for slash commands, args[0] is `interaction`
+            # For UI callbacks, args[0] is `self`, and args[1] is `interaction`
+            if isinstance(args[0], commands.Bot) or isinstance(args[0], View):
+                # It's a method call, so the real interaction is args[1]
+                interaction = args[1]
+                self_obj = args[0]  # if you need it
+            else:
+                # It's a normal slash command function, so args[0] is the interaction
+                interaction = args[0]
+            
+            # Now that we have `interaction`, do your existing rate-limit logic
+            user_id = interaction.user.id
+            current_time = time.time()
 
+            # Skip if user is owner
+            if user_id in OWNER_IDS:
+                return await func(*args, **kwargs)
+
+            # Remove old timestamps
+            user_interaction_timestamps[user_id] = [
+                ts for ts in user_interaction_timestamps[user_id]
+                if current_time - ts < 60
+            ]
+
+            # Check if user has any exempt roles
+            member = interaction.user
+            is_exempt = False
+            if isinstance(member, discord.Member):
+                user_roles = {role.name.lower() for role in member.roles}
+                if EXEMPT_ROLES.intersection(user_roles):
+                    is_exempt = True
+
+            if not is_exempt and len(user_interaction_timestamps[user_id]) >= MAX_INTERACTIONS_PER_MINUTE:
+                await interaction.response.send_message(
+                    f"❌ You have reached the maximum of {MAX_INTERACTIONS_PER_MINUTE} interactions per minute. Please wait.",
+                    ephemeral=True
+                )
+                logger.warning(f"User {interaction.user} exceeded interaction limit.")
+                return
+
+            user_interaction_timestamps[user_id].append(current_time)
+
+            # Finally, call the wrapped function
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Update the shutdown function
+async def shutdown():
+    """Graceful shutdown procedure."""
+    logger.info("🔄 Initiating graceful shutdown...")
+    
+    try:
+        # Create shutdown embed
+        shutdown_embed = discord.Embed(
+            description="Soupy is now going offline.",
+            color=discord.Color.red(),
+            timestamp=datetime.utcnow()  # Add timestamp to embed
+        )
+        
+        # Safely get avatar URL
+        avatar_url = None
+        if bot.user and bot.user.avatar:
+            avatar_url = bot.user.avatar.url
+        
+        shutdown_embed.set_footer(text="Soupy Bot | Shutdown", icon_url=avatar_url)
+        
+        # Notify channels about shutdown and wait for completion
+        logger.info("🔄 Starting channel notifications...")
+        try:
+            # Add a longer timeout for notifications
+            await asyncio.wait_for(notify_channels(embed=shutdown_embed), timeout=5.0)
+            logger.info("✅ Shutdown notifications sent successfully")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Shutdown notifications timed out")
+        except Exception as e:
+            logger.error(f"❌ Error sending shutdown notifications: {e}")
+        
+        # Initiate queue shutdown if it exists
+        if hasattr(bot, 'flux_queue'):
+            await bot.flux_queue.initiate_shutdown()
+        
+        # Close Discord connection
+        logger.info("🔒 Closing the Discord bot connection...")
+        await bot.close()
+        logger.info("✅ Discord bot connection closed.")
+        
+        # Final log message
+        logger.info("🔚 Shutdown process completed.")
+        
+        # Get the current loop and schedule delayed exit
+        loop = asyncio.get_running_loop()
+        
+        # Increased delay to ensure notifications are sent
+        def delayed_exit():
+            sys.exit(0)
+        
+        loop.call_later(3, delayed_exit)  # Increased to 3 seconds
+        
+    except Exception as e:
+        logger.error(f"❌ Error during shutdown: {e}")
+        sys.exit(1)
+
+def handle_signal(signum, frame):
+    """Handle termination signals by scheduling the shutdown coroutine."""
+    logger.info(f"🛑 Received termination signal ({signum}). Initiating shutdown...")
+    
+    # Get the current event loop
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(shutdown())
+        else:
+            loop.run_until_complete(shutdown())
+    except Exception as e:
+        logger.error(f"❌ Error in signal handler: {e}")
+        sys.exit(1)
 
 # Add this new function
 def select_response_style() -> str:
@@ -540,7 +665,7 @@ def get_random_terms():
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
-        elif rand_val < 0.5:  
+        elif rand_val < 0.05: 
             terms['Character Concept'] = "Grey Sphynx Cat"
         else:  # 47.5% chance (0.525 to 1.0)
             terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
@@ -924,38 +1049,48 @@ async def check_chat_functions():
         logger.error(f"Chat functions are offline or encountered an error: {e}")
 
 # Send notifications to all configured channels
-async def notify_channels(message: Optional[str] = None, embed: Optional[discord.Embed] = None):
-    """
-    Sends a specified message and/or embed to all channels listed in CHANNEL_IDS.
-    """
-    logger.info("🔄 Starting channel notifications...")
-    for channel_id in CHANNEL_IDS:
-        channel = bot.get_channel(channel_id)
-        if channel:
-            try:
-                logger.info(f"📨 Sending notification to channel {channel_id}...")
-                await channel.send(content=message, embed=embed)
-                logger.info(f"✅ Successfully sent notification to channel {channel_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to send to channel {channel_id}: {e}")
-        else:
-            logger.warning(f"⚠️ Channel ID {channel_id} not found")
-    logger.info("✅ Channel notifications complete")
+async def notify_channels(embed: discord.Embed = None):
+    """Notify designated channels with an embed."""
+    if not bot.is_ready():
+        logger.warning("⚠️ Bot is not ready, cannot send notifications")
+        return False
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"🛑 Received signal {signum}, initiating shutdown sequence...")
+    channel_ids_str = os.getenv("CHANNEL_IDS", "").strip()
+    if not channel_ids_str:
+        logger.warning("⚠️ No channel IDs configured in environment")
+        return False
+
+    channel_ids = channel_ids_str.split(",")
+    notifications_sent = False
     
-    # Log the current state of tasks
-    running_tasks = len([task for task in asyncio.all_tasks() if not task.done()])
-    logger.info(f"📊 Current running tasks: {running_tasks}")
+    for channel_id in channel_ids:
+        try:
+            if channel_id:  # Skip empty strings
+                channel_id = int(channel_id.strip())
+                channel = bot.get_channel(channel_id)
+                
+                if channel is None:
+                    # Try fetching the channel if get_channel returns None
+                    try:
+                        channel = await bot.fetch_channel(channel_id)
+                    except discord.NotFound:
+                        logger.warning(f"⚠️ Channel ID {channel_id} not found")
+                        continue
+                    except Exception as e:
+                        logger.error(f"❌ Error fetching channel {channel_id}: {e}")
+                        continue
+                
+                if embed:
+                    await channel.send(embed=embed)
+                    notifications_sent = True
+                    logger.info(f"✅ Notification sent to channel {channel_id}")
+        except ValueError:
+            logger.error(f"❌ Invalid channel ID format: {channel_id}")
+        except Exception as e:
+            logger.error(f"❌ Error notifying channel {channel_id}: {e}")
     
-    # Log queue status if applicable
-    if 'flux_queue' in globals():
-        logger.info(f"📋 Remaining items in flux queue: {flux_queue.qsize()}")
-    
-    logger.info("🔄 Starting bot shutdown...")
-    asyncio.create_task(bot.close())
+    logger.info("✅ Channel notifications complete")
+    return notifications_sent
 
 @bot.event
 async def on_close():
@@ -1178,41 +1313,6 @@ async def fetch_summary(url: str) -> str:
         logger.error(f"❌ Error fetching summary for {url}: {e}")
         return "Error fetching summary."
 
-# Decorator to limit slash-command usage per minute
-def command_cooldown_check():
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(interaction: discord.Interaction, *args, **kwargs):
-            # Rate limiting logic
-            # Skip cooldown for owners
-            if interaction.user.id in OWNER_IDS:
-                return await func(interaction, *args, **kwargs)
-                
-            current_time = time.time()
-            user_id = interaction.user.id
-            
-            # Remove timestamps older than 60 seconds
-            user_interaction_timestamps[user_id] = [
-                timestamp for timestamp in user_interaction_timestamps[user_id]
-                if current_time - timestamp < 60
-            ]
-            
-            # Check for exempt roles
-            user_roles = {role.name.lower() for role in interaction.user.roles}
-            is_exempt = bool(user_roles & EXEMPT_ROLES)
-            
-            if not is_exempt and len(user_interaction_timestamps[user_id]) >= MAX_INTERACTIONS_PER_MINUTE:
-                await interaction.response.send_message(
-                    "⏳ You're doing that too often. Please wait a minute before trying again.",
-                    ephemeral=True
-                )
-                return
-            
-            user_interaction_timestamps[user_id].append(current_time)
-            return await func(interaction, *args, **kwargs)
-                
-        return wrapper
-    return decorator
 
 
 async def refine_search_query(original_query: str, max_retries: int = 3) -> Optional[str]:
@@ -1493,7 +1593,7 @@ async def generate_llm_response(search_results: str, query: str) -> str:
     description="Performs a Google search and returns a comprehensive answer based on the top 10 results."
 )
 @app_commands.describe(query="The search query.")
-@command_cooldown_check()
+@universal_cooldown_check()
 async def search_command(interaction: discord.Interaction, query: str):
     logger.info(f"🔍 Slash Google search requested by {interaction.user}: '{query}'")
     
@@ -1961,76 +2061,6 @@ async def user_has_exempt_role(interaction: discord.Interaction) -> bool:
             return True
     return False
 
-def cooldown_check():
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(self, interaction: discord.Interaction, *args, **kwargs):
-            # Skip cooldown check for owners
-            if interaction.user.id in OWNER_IDS:
-                return await func(self, interaction, *args, **kwargs)
-                
-            current_time = time.time()
-            user_id = interaction.user.id
-            
-            # Remove timestamps older than 60 seconds
-            user_interaction_timestamps[user_id] = [
-                timestamp for timestamp in user_interaction_timestamps[user_id]
-                if current_time - timestamp < 60
-            ]
-            
-            # Check if user has any exempt roles
-            user_roles = {role.name.lower() for role in interaction.user.roles}
-            is_exempt = bool(user_roles & EXEMPT_ROLES)
-            
-            if not is_exempt and len(user_interaction_timestamps[user_id]) >= MAX_INTERACTIONS_PER_MINUTE:
-                await interaction.response.send_message(
-                    "⏳ You're doing that too often. Please wait a minute before trying again.",
-                    ephemeral=True
-                )
-                return
-            
-            user_interaction_timestamps[user_id].append(current_time)
-            return await func(self, interaction, *args, **kwargs)
-            
-        return wrapper
-    return decorator
-
-
-def command_cooldown_check():
-    """Decorator to limit slash-command usage per minute, with exemptions."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(interaction: discord.Interaction, *args, **kwargs):
-            try:
-                if await user_has_exempt_role(interaction):
-                    await func(interaction, *args, **kwargs)
-                    return
-
-                current_time = time.time()
-                timestamps = user_interaction_timestamps[interaction.user.id]
-
-                timestamps = [t for t in timestamps if current_time - t < 60]
-                user_interaction_timestamps[interaction.user.id] = timestamps
-
-                if len(timestamps) >= MAX_INTERACTIONS_PER_MINUTE:
-                    await interaction.response.send_message(
-                        f"❌ You have reached the maximum of {MAX_INTERACTIONS_PER_MINUTE} interactions per minute. Please wait.",
-                        ephemeral=True
-                    )
-                    logger.warning(f"User {interaction.user} exceeded interaction limit.")
-                    return
-
-                timestamps.append(current_time)
-                user_interaction_timestamps[interaction.user.id] = timestamps
-                await func(interaction, *args, **kwargs)
-            except Exception as e:
-                if interaction.response.is_done():
-                    await interaction.followup.send("❌ An error occurred while processing your command.", ephemeral=True)
-                else:
-                    await interaction.response.send_message("❌ An error occurred while processing your command.", ephemeral=True)
-                logger.error(f"Error in command_cooldown_check wrapper: {e}")
-        return wrapper
-    return decorator
 
 
 
@@ -2041,157 +2071,8 @@ def generate_unique_filename(prompt, extension=".png"):
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     return f"{base_filename}_{timestamp}{extension}"
 
-# Add this class near other class definitions
-class FluxQueueManager:
-    def __init__(self):
-        self.queue = asyncio.Queue()
-        self.is_shutting_down = False
-        
-    async def put(self, task):
-        if not self.is_shutting_down:
-            await self.queue.put(task)
-    
-    def qsize(self):
-        return self.queue.qsize()
-    
-    async def process_queue(self):
-        """Background task to process queued flux generation or button tasks."""
-        while True:
-            # Check shutdown flag before getting new task
-            if self.is_shutting_down and self.queue.empty():
-                logger.info("🛑 Shutdown flag detected and queue is empty, stopping queue processor")
-                break
-                
-            task = await self.queue.get()
-            try:
-                task_type = task.get('type')
-                logger.debug(f"Processing task of type '{task_type}' for user {task.get('interaction').user if task.get('interaction') else 'Unknown'}.")
-                
-                if task_type == 'flux':
-                    interaction = task.get('interaction')
-                    description = task.get('description')
-                    size = task.get('size')
-                    seed = task.get('seed')
-                    if interaction and isinstance(interaction, discord.Interaction):
-                        await process_flux_image(interaction, description, size, seed)
-                    else:
-                        logger.error("Task missing 'interaction' or 'interaction' is not a discord.Interaction instance for flux task.")
-                elif task_type == 'button':
-                    interaction = task.get('interaction')
-                    action = task.get('action')
-                    prompt = task.get('prompt')
-                    width = task.get('width')
-                    height = task.get('height')
-                    seed = task.get('seed')
-
-                    logger.debug(f"Handling button action '{action}' for user {interaction.user}.")
-
-                    if action == 'random':
-                        # 'random' action does not require 'prompt' or 'seed'
-                        if all([interaction, action, width is not None, height is not None]) and isinstance(interaction, discord.Interaction):
-                            await handle_random(interaction, width, height, self.qsize())
-                        else:
-                            logger.error("Incomplete button task parameters for 'random' action.")
-                            if not interaction.response.is_done():
-                                await interaction.response.send_message("❌ Incomplete task parameters.", ephemeral=True)
-                            else:
-                                await interaction.followup.send("❌ Incomplete task parameters.", ephemeral=True)
-                    elif action in ['remix', 'edit', 'fancy', 'wide', 'tall']:
-                        if all([interaction, action, prompt, width is not None, height is not None]) and isinstance(interaction, discord.Interaction):
-                            if action == 'remix':
-                                await handle_remix(interaction, prompt, width, height, seed, self.qsize())
-                            elif action == 'edit':
-                                await handle_edit(interaction, prompt, width, height, seed, self.qsize())
-                            elif action == 'fancy':
-                                await handle_fancy(
-                                    interaction,
-                                    prompt,
-                                    width,
-                                    height,
-                                    seed,
-                                    self.qsize()
-                                )
-                            elif action == 'wide':
-                                await handle_wide(interaction, prompt, width, height, seed, self.qsize())
-                            elif action == 'tall':
-                                await handle_tall(interaction, prompt, width, height, seed, self.qsize())
-                        else:
-                            logger.error(f"Incomplete button task parameters for '{action}' action.")
-                            if not interaction.response.is_done():
-                                await interaction.response.send_message("❌ Incomplete task parameters.", ephemeral=True)
-                            else:
-                                await interaction.followup.send("❌ Incomplete task parameters.", ephemeral=True)
-                    else:
-                        logger.error(f"Unknown button action: {action}")
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(f"Unknown action: {action}", ephemeral=True)
-                        else:
-                            await interaction.followup.send(f"Unknown action: {action}", ephemeral=True)
-                else:
-                    logger.error(f"Unknown task type: {task_type}")
-            except Exception as e:
-                interaction = task.get('interaction')
-                if interaction and isinstance(interaction, discord.Interaction):
-                    try:
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(
-                                f"❌ An error occurred: {str(e)}", ephemeral=True
-                            )
-                        else:
-                            await interaction.followup.send(
-                                f"❌ An error occurred: {str(e)}", ephemeral=True
-                            )
-                    except AttributeError:
-                        logger.error("Failed to send error message: interaction does not have 'response' or 'followup'.")
-                logger.error(f"Error processing task: {e}", exc_info=True)
-            finally:
-                self.queue.task_done()
-                if self.is_shutting_down:
-                    # Clear remaining items from queue
-                    while not self.queue.empty():
-                        try:
-                            dropped_task = self.queue.get_nowait()
-                            interaction = dropped_task.get('interaction')
-                            if interaction and isinstance(interaction, discord.Interaction):
-                                try:
-                                    if not interaction.response.is_done():
-                                        await interaction.response.send_message(
-                                            "❌ Task cancelled due to bot shutdown", 
-                                            ephemeral=True
-                                        )
-                                    else:
-                                        await interaction.followup.send(
-                                            "❌ Task cancelled due to bot shutdown", 
-                                            ephemeral=True
-                                        )
-                                except Exception:
-                                    pass
-                            self.queue.task_done()
-                        except asyncio.QueueEmpty:
-                            break
-                    break
-    
-    async def initiate_shutdown(self):
-        """Initiates the shutdown process for the queue."""
-        self.is_shutting_down = True
-        try:
-            # Wait a reasonable time for current task to complete
-            logger.info("⏳ Waiting for current task to complete...")
-            await asyncio.wait_for(self.queue.join(), timeout=30.0)
-            logger.info("✅ Queue processing completed or timeout reached.")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Timeout waiting for queue to finish, proceeding with shutdown")
-        except Exception as e:
-            logger.error(f"❌ Error while waiting for queue to finish: {e}")
-
-# Update the bot initialization to include the queue manager
-class SoupyBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.flux_queue = FluxQueueManager()
 
 @bot.tree.command(name="flux", description="Generates an image using the Flux model.")
-@command_cooldown_check()
 @app_commands.describe(
     description="Description of the image to generate",  # Removed "(leave empty for random)"
     size="Size of the image",
@@ -2339,170 +2220,6 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
 
 
 
-
-async def process_flux_queue():
-    """Background task to process queued flux generation or button tasks."""
-    while True:
-        task = await bot.flux_queue.queue.get()
-        try:
-            task_type = task.get('type')
-            logger.debug(f"Processing task of type '{task_type}' for user {task.get('interaction').user if task.get('interaction') else 'Unknown'}.")
-    
-            if task_type == 'flux':
-                interaction = task.get('interaction')
-                description = task.get('description')
-                size = task.get('size')
-                seed = task.get('seed')
-                if interaction and isinstance(interaction, discord.Interaction):
-                    await process_flux_image(interaction, description, size, seed)
-                else:
-                    logger.error("Task missing 'interaction' or 'interaction' is not a discord.Interaction instance for flux task.")
-            elif task_type == 'button':
-                interaction = task.get('interaction')
-                action = task.get('action')
-                prompt = task.get('prompt')
-                width = task.get('width')
-                height = task.get('height')
-                seed = task.get('seed')
-
-                logger.debug(f"Handling button action '{action}' for user {interaction.user}.")
-
-                if action == 'random':
-                    # 'random' action does not require 'prompt' or 'seed'
-                    if all([interaction, action, width is not None, height is not None]) and isinstance(interaction, discord.Interaction):
-                        await handle_random(interaction, width, height, bot.flux_queue.qsize())
-                    else:
-                        logger.error("Incomplete button task parameters for 'random' action.")
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message("❌ Incomplete task parameters.", ephemeral=True)
-                        else:
-                            await interaction.followup.send("❌ Incomplete task parameters.", ephemeral=True)
-                elif action in ['remix', 'edit', 'fancy', 'wide', 'tall']:
-                    if all([interaction, action, prompt, width is not None, height is not None]) and isinstance(interaction, discord.Interaction):
-                        if action == 'remix':
-                            await handle_remix(interaction, prompt, width, height, seed, bot.flux_queue.qsize())
-                        elif action == 'edit':
-                            await handle_edit(interaction, prompt, width, height, seed, bot.flux_queue.qsize())
-                        elif action == 'fancy':
-                            await handle_fancy(
-                                interaction,
-                                prompt,
-                                width,
-                                height,
-                                seed,
-                                bot.flux_queue.qsize()
-                            )
-                        elif action == 'wide':
-                            await handle_wide(interaction, prompt, width, height, seed, bot.flux_queue.qsize())
-                        elif action == 'tall':
-                            await handle_tall(interaction, prompt, width, height, seed, bot.flux_queue.qsize())
-                    else:
-                        logger.error(f"Incomplete button task parameters for '{action}' action.")
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message("❌ Incomplete task parameters.", ephemeral=True)
-                        else:
-                            await interaction.followup.send("❌ Incomplete task parameters.", ephemeral=True)
-                else:
-                    logger.error(f"Unknown button action: {action}")
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(f"Unknown action: {action}", ephemeral=True)
-                    else:
-                        await interaction.followup.send(f"Unknown action: {action}", ephemeral=True)
-            else:
-                logger.error(f"Unknown task type: {task_type}")
-        except Exception as e:
-            interaction = task.get('interaction')
-            if interaction and isinstance(interaction, discord.Interaction):
-                try:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            f"❌ An error occurred: {str(e)}", ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            f"❌ An error occurred: {str(e)}", ephemeral=True
-                        )
-                except AttributeError:
-                    logger.error("Failed to send error message: interaction does not have 'response' or 'followup'.")
-            logger.error(f"Error processing task: {e}", exc_info=True)
-        finally:
-            bot.flux_queue.queue.task_done()
-            if bot.flux_queue.is_shutting_down:
-                # Clear remaining items from queue
-                while not bot.flux_queue.queue.empty():
-                    try:
-                        dropped_task = bot.flux_queue.queue.get_nowait()
-                        interaction = dropped_task.get('interaction')
-                        if interaction and isinstance(interaction, discord.Interaction):
-                            try:
-                                if not interaction.response.is_done():
-                                    await interaction.response.send_message(
-                                        "❌ Task cancelled due to bot shutdown", 
-                                        ephemeral=True
-                                    )
-                                else:
-                                    await interaction.followup.send(
-                                        "❌ Task cancelled due to bot shutdown", 
-                                        ephemeral=True
-                                    )
-                            except Exception:
-                                pass
-                        bot.flux_queue.queue.task_done()
-                    except asyncio.QueueEmpty:
-                        break
-                break
-    
-    async def initiate_shutdown(self):
-        """Initiates the shutdown process for the queue."""
-        self.is_shutting_down = True
-        try:
-            # Wait a reasonable time for current task to complete
-            logger.info("⏳ Waiting for current task to complete...")
-            await asyncio.wait_for(self.queue.join(), timeout=30.0)
-            logger.info("✅ Queue processing completed or timeout reached.")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Timeout waiting for queue to finish, proceeding with shutdown")
-        except Exception as e:
-            logger.error(f"❌ Error while waiting for queue to finish: {e}")
-
-# Update the shutdown function
-async def shutdown():
-    logger.info("🔄 Initiating graceful shutdown...")
-    
-    # Create and send shutdown embed
-    shutdown_embed = discord.Embed(
-        description="Soupy is now going offline.",
-        color=discord.Color.red(),
-    )
-    shutdown_embed.set_footer(text="Soupy Bot | Shutdown", icon_url=bot.user.avatar.url if bot.user.avatar else None)
-    
-    try:
-        await notify_channels(embed=shutdown_embed)
-        logger.info("✅ Notified channels about bot shutdown.")
-    except Exception as e:
-        logger.error(f"❌ Failed to notify channels about bot shutdown: {e}")
-    
-    try:
-        # Initiate queue shutdown
-        await bot.flux_queue.initiate_shutdown()
-    except Exception as e:
-        logger.error(f"❌ Error during queue shutdown: {e}")
-    
-    try:
-        logger.info("🔒 Closing the Discord bot connection...")
-        await bot.close()
-        logger.info("✅ Discord bot connection closed.")
-    except Exception as e:
-        logger.error(f"❌ Error while closing the Discord bot: {e}")
-    
-    logger.info("🔚 Shutdown process completed.")
-
-
-
-
-
-
-
 class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
     def __init__(self, prompt: str, width: int, height: int, seed: int = None):
         super().__init__()
@@ -2607,7 +2324,7 @@ class FluxRemixView(View):
         return prompt.strip()
 
     @discord.ui.button(label="✏️ Edit", style=discord.ButtonStyle.success, custom_id="flux_edit_button", row=0)
-    @cooldown_check()
+    @universal_cooldown_check()
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'Edit' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
@@ -2619,7 +2336,7 @@ class FluxRemixView(View):
             await interaction.followup.send("❌ Error opening edit dialog.", ephemeral=True)
 
     @discord.ui.button(label="🪄 Fancy", style=discord.ButtonStyle.primary, custom_id="flux_fancy_button", row=0)
-    @cooldown_check()
+    @universal_cooldown_check()
     async def fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
@@ -2640,7 +2357,7 @@ class FluxRemixView(View):
             await interaction.followup.send("❌ Error during fancy transformation.", ephemeral=True)
 
     @discord.ui.button(label="🌱 Remix", style=discord.ButtonStyle.primary, custom_id="flux_remix_button", row=0)
-    @cooldown_check()
+    @universal_cooldown_check()
     async def remix_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'Remix' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
@@ -2666,7 +2383,7 @@ class FluxRemixView(View):
 
 
     @discord.ui.button(label="🔀 Random", style=discord.ButtonStyle.danger, custom_id="flux_random_button", row=1)
-    @cooldown_check()
+    @universal_cooldown_check()
     async def random_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """
         Handler for the 'Random' button. Generates a new random prompt by selecting
@@ -2702,7 +2419,7 @@ class FluxRemixView(View):
             logger.error(f"🔀 Error queueing random generation for {interaction.user}: {e}")
 
     @discord.ui.button(label="📏 Wide", style=discord.ButtonStyle.primary, custom_id="flux_wide_button", row=1)
-    @cooldown_check()
+    @universal_cooldown_check()
     async def wide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'Wide' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
@@ -2723,7 +2440,7 @@ class FluxRemixView(View):
             await interaction.followup.send("❌ Error generating wide version.", ephemeral=True)
 
     @discord.ui.button(label="📐 Tall", style=discord.ButtonStyle.primary, custom_id="flux_tall_button", row=1)
-    @cooldown_check()
+    @universal_cooldown_check()
     async def tall_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'Tall' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
@@ -3115,9 +2832,23 @@ async def on_message(message):
 
 
 def handle_signal(signum, frame):
+    """Handle termination signals by scheduling the shutdown coroutine."""
     logger.info(f"🛑 Received termination signal ({signum}). Initiating shutdown...")
-    asyncio.create_task(shutdown())
+    
+    # Get the current event loop
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            loop.create_task(shutdown())
+        else:
+            loop.run_until_complete(shutdown())
+    except Exception as e:
+        logger.error(f"❌ Error in signal handler: {e}")
+        sys.exit(1)
 
+
+
+# Shutdown is handled by the signal handler
 signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
 
