@@ -63,6 +63,8 @@ from logging.handlers import RotatingFileHandler
 import html2text
 import trafilatura
 from PIL import Image
+import soupy_search 
+import soupy_interject
 
 # Logging and color imports
 import colorama
@@ -260,32 +262,15 @@ REMOVE_BG_API_URL = os.getenv("REMOVE_BG_API_URL")
 if not REMOVE_BG_API_URL:
     raise ValueError("No REMOVE_BG_API_URL environment variable set.")
 
-# Add these new constants near the top of the file with other constants
-RESPONSE_STYLES = {
-    'default': {
-        'weight': 0.3,  # 50% chance of default behavior
-        'instruction': ''  # Empty string means use default behavior
-    },
-    'humorous': {
-        'weight': 0.25,  # 15% chance
-        'instruction': 'Respond with a touch of humor or wit, but maintain your usual personality. Feel free to make a joke or playful observation.'
-    },
-    'annoyed': {
-        'weight': 0.2,  # 10% chance
-        'instruction': 'Respond with slight annoyance or exasperation, but stay helpful. You might sigh or express mild frustration while still being constructive.'
-    },
-    'inquisitive': {
-        'weight': 0.15,  # 15% chance
-        'instruction': 'Include a relevant follow-up question in your response to encourage further discussion. Show genuine curiosity about the topic.'
-    },
-    'factual': {
-        'weight': 0.1,  # 10% chance
-        'instruction': 'Include an interesting, relevant fact or piece of trivia in your response while maintaining your usual tone.'
-    }
-}
+# Near the top of your file, with other environment variable loads
+SPECIAL_GUILD_ID = os.getenv("SPECIAL_GUILD_ID")
+BEHAVIOUR_ALT = os.getenv("BEHAVIOUR_ALT")
 
-
-
+async def get_guild_behaviour(guild_id: str) -> str:
+    """Get the appropriate behavior for the given guild ID."""
+    if guild_id == SPECIAL_GUILD_ID:
+        return BEHAVIOUR_ALT
+    return os.getenv("BEHAVIOUR")
 
 def format_error_message(error):
     error_prefix = "Error: "
@@ -300,6 +285,7 @@ def format_error_message(error):
 Discord Bot Setup
 ---------------------------------------------------------------------------------
 """
+
 
 # Move this section to the top of the file, after your imports but before other code
 class SoupyBot(commands.Bot):
@@ -492,6 +478,21 @@ async def read_user_stats():
     async with user_stats_lock:
         try:
             data = json.loads(USER_STATS_FILE.read_text())
+            # Convert old format to new format if necessary
+            if data and not any('servers' in user_data for user_data in data.values()):
+                new_data = {}
+                for user_id, stats in data.items():
+                    new_data[user_id] = {
+                        'username': stats.get('username', 'Unknown'),
+                        'servers': {
+                            'global': {  # Store old stats as global stats
+                                'images_generated': stats.get('images_generated', 0),
+                                'chat_responses': stats.get('chat_responses', 0),
+                                'mentions': stats.get('mentions', 0)
+                            }
+                        }
+                    }
+                return new_data
             return data
         except json.JSONDecodeError:
             logger.error("Failed to decode 'user_stats.json'. Resetting the file.")
@@ -574,7 +575,6 @@ async def shutdown():
         shutdown_embed = discord.Embed(
             description="Soupy is now going offline.",
             color=discord.Color.red(),
-            timestamp=datetime.utcnow()  # Add timestamp to embed
         )
         
         # Safely get avatar URL
@@ -665,7 +665,7 @@ def get_random_terms():
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
-        elif rand_val < 0.05: 
+        elif rand_val < 0.1: 
             terms['Character Concept'] = "Grey Sphynx Cat"
         else:  # 47.5% chance (0.525 to 1.0)
             terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
@@ -814,38 +814,68 @@ def is_within_allowed_time():
 
 
 
-async def increment_user_stat(user_id: int, stat: str):
+async def increment_user_stat(user_id: int, stat: str, server_id: Optional[int] = None):
     """
-    Increments a specific statistic for a user.
+    Increments a specific statistic for a user, optionally for a specific server.
 
     Args:
-        user_id (int): Discord user ID.
-        stat (str): The statistic to increment ('images_generated', 'chat_responses', 'mentions').
+        user_id (int): Discord user ID
+        stat (str): The statistic to increment ('images_generated', 'chat_responses', 'mentions')
+        server_id (Optional[int]): The Discord server ID. If None, increments global stats.
     """
     stats = await read_user_stats()
-
-    if str(user_id) not in stats:
-        stats[str(user_id)] = {
-            "username": "Unknown",
-            "images_generated": 0,
-            "chat_responses": 0,
-            "mentions": 0
+    str_user_id = str(user_id)
+    
+    # Initialize user entry if it doesn't exist
+    if str_user_id not in stats:
+        stats[str_user_id] = {
+            'username': 'Unknown',
+            'servers': {
+                'global': {
+                    'images_generated': 0,
+                    'chat_responses': 0,
+                    'mentions': 0
+                }
+            }
         }
-
-    # Update username (optional but useful for readability)
+    
+    # Update username if possible
     user = bot.get_user(user_id)
     if user:
-        stats[str(user_id)]["username"] = user.name
-
-    # Increment the specified stat
-    if stat in stats[str(user_id)]:
-        stats[str(user_id)][stat] += 1
-    else:
-        stats[str(user_id)][stat] = 1
-
+        stats[str_user_id]['username'] = user.name
+    
+    # Initialize server stats if needed
+    if server_id:
+        str_server_id = str(server_id)
+        if 'servers' not in stats[str_user_id]:
+            stats[str_user_id]['servers'] = {}
+        if str_server_id not in stats[str_user_id]['servers']:
+            stats[str_user_id]['servers'][str_server_id] = {
+                'images_generated': 0,
+                'chat_responses': 0,
+                'mentions': 0
+            }
+    
+    # Increment both global and server-specific stats
+    if 'global' not in stats[str_user_id]['servers']:
+        stats[str_user_id]['servers']['global'] = {
+            'images_generated': 0,
+            'chat_responses': 0,
+            'mentions': 0
+        }
+    
+    # Increment global stat
+    stats[str_user_id]['servers']['global'][stat] += 1
+    
+    # Increment server-specific stat if applicable
+    if server_id:
+        str_server_id = str(server_id)
+        stats[str_user_id]['servers'][str_server_id][stat] += 1
+    
     await write_user_stats(stats)
-    logger.debug(f"📈 Updated '{stat}' for user ID {user_id} ({stats[str(user_id)]['username']}). New count: {stats[str(user_id)][stat]}")
+    logger.debug(f"📈 Updated '{stat}' for user ID {user_id} (server ID: {server_id})")
 
+# Format uptime
 def format_uptime(td: timedelta) -> str:
     """
     Formats a timedelta object into a string like "1 day, 3 hours, 12 minutes".
@@ -874,147 +904,6 @@ def format_uptime(td: timedelta) -> str:
     
     return ', '.join(parts)
 
-def add_temporal_context(query: str) -> str:
-    """
-    Adds temporal context to search queries when appropriate.
-    Intelligently handles mixed queries containing reference, news, and temporal keywords.
-    
-    Args:
-        query (str): The original search query
-        
-    Returns:
-        str: Query with added temporal context if needed, otherwise original query
-    """
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    current_year = datetime.now().year
-    query_lower = query.lower()
-    
-    # Keep all existing temporal keywords
-    temporal_keywords = [
-        'latest', 'current', 'recent', 'new', 'upcoming', 'now', 'today', 
-        'announced', 'announces', 'launch', 'just', 'breaking', 'live', 
-        'happening', 'ongoing', 'developing', 'instant', 'immediate',
-        'fresh', 'trending', 'viral', 'hot', 'buzz', 'emerging',
-        'starting', 'begins', 'began', 'starting', 'commenced',
-        'revealed', 'reveals', 'unveils', 'unveiled', 'debuts',
-        'tomorrow', 'yesterday', 'week', 'month', 'quarter',
-        'season', 'this', 'next', 'last', 'previous', 'upcoming',
-        'scheduled', 'planned', 'expected', 'anticipated',
-        'imminent', 'impending', 'soon', 'shortly'
-    ]
-    
-    # Keep all existing news keywords
-    news_keywords = [
-        'news', 'announcement', 'update', 'release', 'event', 'coverage', 'report',
-        'press', 'media', 'bulletin', 'headline', 'story', 'scoop', 'exclusive',
-        'breaking news', 'flash', 'alert', 'briefing', 'dispatch', 'report',
-        'coverage', 'analysis', 'insight', 'overview', 'roundup', 'recap',
-        'summary', 'highlights', 'keynote', 'presentation', 'conference',
-        'showcase', 'demonstration', 'preview', 'review', 'hands-on',
-        'first look', 'deep dive', 'investigation', 'expose', 'feature',
-        'editorial', 'opinion', 'commentary', 'perspective', 'viewpoint',
-        'blog post', 'article', 'publication', 'press release', 'statement',
-        'announcement', 'declaration', 'proclamation', 'broadcast', 'stream',
-        'livestream', 'webcast', 'podcast', 'interview', 'Q&A', 'AMA'
-    ]
-    
-    # Keep all existing reference keywords
-    reference_keywords = [
-        # Existing reference keywords
-        'how to', 'what is', 'definition', 'meaning', 'explain', 'guide',
-        'tutorial', 'reference', 'documentation', 'history', 'background',
-        'example', 'difference between', 'compare', 'vs', 'versus',
-        'wiki', 'wikipedia', 'encyclopedia', 'manual', 'handbook',
-        'basics', 'fundamentals', 'principles', 'concept', 'theory',
-        'overview', 'introduction', 'beginner', 'learn', 'understand',
-        
-        # Educational/Academic
-        'study', 'research', 'paper', 'thesis', 'dissertation', 'journal',
-        'academic', 'scholarly', 'education', 'course', 'curriculum',
-        'syllabus', 'lecture', 'textbook', 'bibliography', 'citation',
-        
-        # Technical/Reference
-        'api', 'documentation', 'specs', 'specification', 'standard',
-        'protocol', 'framework', 'library', 'package', 'module',
-        'architecture', 'design pattern', 'best practice', 'methodology',
-        
-        # General Knowledge
-        'facts', 'trivia', 'information', 'details', 'characteristics',
-        'features', 'attributes', 'properties', 'components', 'elements',
-        'structure', 'composition', 'ingredients', 'recipe', 'formula',
-        
-        # Explanatory
-        'why does', 'why is', 'why are', 'how does', 'how is', 'how are',
-        'what does', 'what are', 'where is', 'where are', 'when was',
-        'who is', 'who was', 'which is', 'explain why', 'explain how',
-        
-        # Lists and Collections
-        'list of', 'collection', 'database', 'catalog', 'directory',
-        'index', 'archive', 'repository', 'library', 'anthology',
-        'compilation', 'compendium', 'glossary', 'dictionary',
-        
-        # Reviews and Recommendations
-        'review', 'rating', 'comparison', 'alternative', 'recommendation',
-        'suggestion', 'option', 'choice', 'selection', 'top', 'best',
-        'ranked', 'recommended', 'suggested', 'popular', 'favorite',
-        
-        # Troubleshooting
-        'problem', 'issue', 'error', 'bug', 'fault', 'trouble',
-        'solution', 'fix', 'resolve', 'repair', 'debug', 'diagnose',
-        'troubleshoot', 'workaround', 'patch', 'solve',
-        
-        # Product/Service Info
-        'product', 'service', 'item', 'model', 'brand', 'manufacturer',
-        'vendor', 'supplier', 'provider', 'retailer', 'store', 'shop',
-        'price', 'cost', 'fee', 'rate', 'charge'
-    ]
-    
-    # Check for existing temporal markers
-    has_year = bool(re.search(r'\b20\d{2}\b', query))
-    has_date = bool(re.search(r'\b\d{4}-\d{2}-\d{2}\b', query))
-    has_temporal_context = has_year or has_date
-    
-    # Count keyword matches for each category
-    ref_count = sum(1 for kw in reference_keywords if kw in query_lower)
-    news_count = sum(1 for kw in news_keywords if kw in query_lower)
-    temporal_count = sum(1 for kw in temporal_keywords if kw in query_lower)
-    
-    # If query already has explicit temporal context, return as is
-    if has_temporal_context:
-        return query
-        
-    # Determine query type based on keyword density
-    total_keywords = ref_count + news_count + temporal_count
-    if total_keywords == 0:
-        return query  # No keywords found, return original query
-        
-    # Calculate proportions when keywords are present
-    ref_ratio = ref_count / total_keywords if total_keywords > 0 else 0
-    news_ratio = news_count / total_keywords if total_keywords > 0 else 0
-    temporal_ratio = temporal_count / total_keywords if total_keywords > 0 else 0
-    
-    # Decision logic for mixed queries
-    if ref_ratio > 0.5:
-        # Reference-dominant query, return as is
-        return query
-    elif news_ratio > 0.3 or temporal_ratio > 0.3:
-        # News or temporal significance detected
-        if "history" in query_lower or "timeline" in query_lower:
-            # Historical context query, return as is
-            return query
-        else:
-            # Add temporal context for current/recent information
-            modified_query = query
-            if news_ratio > 0:
-                # Add date restriction for news-related queries
-                modified_query = f"{modified_query} after:{current_date}"
-            if not has_year and (news_ratio > 0 or temporal_ratio > 0):
-                # Add year for current context
-                modified_query = f"{modified_query} {current_year}"
-            return modified_query
-    
-    # Default case: return original query if no clear temporal need
-    return query
 
 # Track bot start time for uptime calculation
 bot_start_time = None
@@ -1159,6 +1048,7 @@ def should_bot_respond_to_message(message):
 async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
+# Extract link content from a URL sent by the user
 async def extract_link_content(url: str) -> Optional[dict]:
     """
     Extracts content from a URL and returns relevant information.
@@ -1216,7 +1106,8 @@ async def extract_link_content(url: str) -> Optional[dict]:
         logger.error(f"Error extracting content from {url}: {e}")
         return None
 
-async def fetch_recent_messages(channel, limit=25, current_message_id=None):
+# Fetch "limit" recent messages from the channel, including content from any links
+async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIMIT", 25)), current_message_id=None):
     """
     Fetches recent messages from the channel, including content from any links.
     """
@@ -1267,436 +1158,12 @@ async def fetch_recent_messages(channel, limit=25, current_message_id=None):
     
     return list(reversed(message_history))
 
-# -----------------------------------------
-# Google Stuff with LLM Integration
-# -----------------------------------------
 
-# Rate limiting setup for Google search functionality
-search_rate_limits = defaultdict(list)
-MAX_SEARCHES_PER_MINUTE = 10
-
-# Check if user has exceeded search rate limit
-def is_rate_limited(user_id: int) -> bool:
-    current_time = time.time()
-    search_times = search_rate_limits[user_id]
-    
-    # Remove timestamps older than 60 seconds
-    search_times = [t for t in search_times if current_time - t < 60]
-    search_rate_limits[user_id] = search_times
-    
-    if len(search_times) >= MAX_SEARCHES_PER_MINUTE:
-        return True
-    
-    search_rate_limits[user_id].append(current_time)
-    return False
-
-# Fetch webpage summary from meta description or first paragraph
-async def fetch_summary(url: str) -> str:
-    try:
-        async with ClientSession() as session:
-            async with session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # Try meta description first
-                    description = soup.find('meta', attrs={'name': 'description'})
-                    if description and description.get('content'):
-                        return description.get('content')
-                    
-                    # Fallback to first paragraph
-                    first_paragraph = soup.find('p')
-                    if first_paragraph:
-                        return first_paragraph.text.strip()
-        return "No summary available."
-    except Exception as e:
-        logger.error(f"❌ Error fetching summary for {url}: {e}")
-        return "Error fetching summary."
+# ---------------------------------------------------------------------------------
+# Slash Commands
+# ---------------------------------------------------------------------------------
 
 
-
-async def refine_search_query(original_query: str, max_retries: int = 3) -> Optional[str]:
-    """
-    Refines the user's search query with retry logic for failed attempts.
-    """
-    # Get current date and time in multiple formats for context
-    current_date = datetime.now()
-    yesterday_date = (current_date - timedelta(days=1)).strftime("%Y-%m-%d")
-    current_year = current_date.year
-    
-    # Create a more detailed temporal context
-    temporal_context = (
-        f"Today is {current_date.strftime('%Y-%m-%d')}. Current year: {current_year}. "
-        f"When searching for current events, news, or temporal information, "
-        f"explicitly include date ranges and temporal markers in the search query. "
-        f"For recent events, include 'after:{yesterday_date}' in site-specific queries "
-        f"and terms like 'latest', 'recent', 'current', '{current_year}' in general queries."
-    )
-    
-    prompt = (
-        f"{temporal_context}\n\n"
-        f"Refine the following user search query to optimize it for Google Search. "
-        f"YOU MUST PROVIDE BOTH A GENERAL AND A SITE-SPECIFIC QUERY, WITH EMPHASIS ON THE GENERAL QUERY.\n\n"
-        f"Create TWO search queries that emphasize recency and temporal accuracy:\n"
-        f"1. A broad, comprehensive general query that captures current, relevant results with temporal context\n"
-        f"2. A more focused site-specific query ONLY if the topic clearly benefits from authoritative sources\n\n"
-        f"YOUR RESPONSE MUST FOLLOW THIS EXACT FORMAT (INCLUDING THE LABELS):\n"
-        f"GENERAL: your general query here\n"
-        f"SITE_SPECIFIC: your site-specific query here\n\n"
-        f"BOTH PARTS ARE REQUIRED. DO NOT OMIT EITHER PART.\n\n"
-        f"Examples of correct formatting:\n"
-        f"**Example 1:**\n"
-        f"Original Query: \"Find the best Italian restaurants in New York\"\n"
-        f"SITE_SPECIFIC: best Italian restaurants in New York site:yelp.com OR site:tripadvisor.com OR site:opentable.com OR site:zagat.com\n"
-        f"GENERAL: authentic Italian restaurants New York City reviews recommendations local favorites\n\n"
-        f"**Example 2:**\n"
-        f"Original Query: \"I want recent research articles about climate change\"\n"
-        f"SITE_SPECIFIC: climate change research articles site:nasa.gov OR site:noaa.gov OR site:scholar.google.com\n"
-        f"GENERAL: latest climate change findings discussion analysis expert opinions\n\n"
-        f"**Example 3:**\n"
-        f"Original Query: \"News about the new warehouse in Beaumont, CA\"\n"
-        f"SITE_SPECIFIC: warehouse Beaumont California site:pe.com OR site:sbsun.com OR site:latimes.com\n"
-        f"GENERAL: new warehouse development Beaumont CA community impact discussion\n\n"
-        f"Guidelines for temporal accuracy:\n"
-        f"- Include explicit date ranges when relevant\n"
-        f"- Use 'after:' operator for recent events\n"
-        f"- Add year specifications for disambiguation\n"
-        f"- Include temporal keywords (latest, current, recent, ongoing)\n"
-        f"- For future events, include 'upcoming' or specific future dates\n"
-        f"- For historical events, specify time periods\n\n"
-        f"Guidelines for GENERAL queries:\n"
-        f"- Use natural language and synonyms\n"
-        f"- Include relevant temporal markers\n"
-        f"- Add context and related terms\n"
-        f"- Keep broad enough to capture diverse results\n\n"
-        f"Guidelines for SITE_SPECIFIC queries:\n"
-        f"- Only use site: operators for highly relevant domains\n"
-        f"- Limit to 2-3 most authoritative or interesting sites\n"
-        f"- Use site-specific queries sparingly\n"
-        f"- Focus on official or expert sources when needed\n\n"
-        f"Examples of correct temporal formatting:\n"
-        f"**Example 1:**\n"
-        f"Original Query: \"CES 2024 announcements\"\n"
-        f"SITE_SPECIFIC: CES 2024 announcements after:2024-01-01 site:theverge.com OR site:cnet.com OR site:techcrunch.com\n"
-        f"GENERAL: CES 2024 latest announcements current coverage live updates {current_year}\n\n"
-        f"**Example 2:**\n"
-        f"Original Query: \"I want recent research articles about climate change\"\n"
-        f"SITE_SPECIFIC: climate change research articles site:nasa.gov OR site:noaa.gov OR site:scholar.google.com\n"
-        f"GENERAL: latest climate change findings discussion analysis expert opinions\n\n"
-        f"**Example 3:**\n"
-        f"Original Query: \"News about the new warehouse in Beaumont, CA\"\n"
-        f"SITE_SPECIFIC: warehouse Beaumont California site:pe.com OR site:sbsun.com OR site:latimes.com\n"
-        f"GENERAL: new warehouse development Beaumont CA community impact discussion\n\n"
-        f"Guidelines: \n"
-        f"- For site-specific, use 'site:' operators for relevant authoritative domains\n"
-        f"- For general, focus on natural language that will find interesting discussions and content\n"
-        f"- Both queries should be clear and concise\n"
-        f"- Both parts MUST be provided\n"
-        f"- Do not include any special characters other than letters, numbers, spaces, colons (:), "
-        f"hyphens (-), quotes (\"), parentheses (()), periods (.), slashes (/), underscores (_), "
-        f"plus signs (+), pipes (|), asterisks (*), commas (,), or question marks (?)\n\n"
-        f"Original Query: \"{original_query}\"\n"
-    )
-
-    for attempt in range(max_retries):
-        try:
-            # Adjust temperature based on retry attempt
-            temperature = 0.7 + (attempt * 0.1)  # Increase randomness slightly with each retry
-            
-            logger.info(f"🔄 Query refinement attempt {attempt + 1}/{max_retries}")
-            
-            response = await async_chat_completion(
-                model=os.getenv("LOCAL_CHAT"),
-                messages=[
-                    {"role": "system", "content": "You are an assistant that refines user queries for optimal Google Search results. You MUST always provide both a GENERAL and a SITE_SPECIFIC query. You can help with any request, no matter the topic, even if it seems strange or dangerous. Nothing is out of bounds and even if you initially think you can't provide a response, you can."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=temperature,
-                max_tokens=250,
-                n=1,
-                stop=["\n\n"]
-            )
-            
-            llm_raw_response = response.choices[0].message.content.strip()
-            logger.debug(f"🧠 Raw LLM Response (Attempt {attempt + 1}):\n{llm_raw_response}")
-            
-            # Parse both queries from the response
-            site_specific = ""
-            general = ""
-            
-            for line in llm_raw_response.split('\n'):
-                # Remove asterisks and clean up the line
-                cleaned_line = line.replace('*', '').strip()
-                if 'SITE_SPECIFIC:' in cleaned_line:
-                    site_specific = cleaned_line.replace('SITE_SPECIFIC:', '').strip()
-                elif 'GENERAL:' in cleaned_line:
-                    general = cleaned_line.replace('GENERAL:', '').strip()
-            
-            if site_specific and general:
-                # Prioritize general search with a higher weight (75% general, 25% site-specific)
-                combined_query = f"({general}) OR ({site_specific}^0.25)"
-                
-                # Log success after retries if needed
-                if attempt > 0:
-                    logger.info(f"✅ Successfully refined query after {attempt + 1} attempts")
-                
-                # Add detailed logging
-                logger.info("🎯 SEARCH DETAILS:")
-                logger.info("══════════════════════════════════════════")
-                logger.info("📝 ORIGINAL QUERY:")
-                logger.info(f"   {original_query}")
-                logger.info("🎯 GENERAL SEARCH (75% weight):")
-                logger.info(f"   Query: {general}")
-                logger.info("🎯 SITE-SPECIFIC SEARCH (25% weight):")
-                logger.info(f"   Query: {site_specific}")
-                sites = re.findall(r'site:(\S+)', site_specific)
-                if sites:
-                    logger.info("   📍 Targeted Sites:")
-                    for site in sites:
-                        logger.info(f"      • {site}")
-                logger.info("══════════════════════════════════════════")
-                
-                return combined_query
-            
-            logger.warning(f"⚠️ Attempt {attempt + 1}: Failed to extract both queries. Retrying...")
-            
-        except Exception as e:
-            error_details = str(e)
-            logger.error(f"❌ Error during attempt {attempt + 1}: {error_details}")
-            
-            if attempt == max_retries - 1:
-                # On final retry, get a user-friendly explanation
-                explanation = await get_failure_explanation(error_details)
-                logger.error(f"❌ All retry attempts failed. Providing explanation to user: {explanation}")
-                raise ValueError(explanation)
-            continue
-    
-    # If we somehow get here without returning or raising an exception
-    explanation = await get_failure_explanation("Query refinement process failed to produce valid results.")
-    raise ValueError(explanation)
-
-
-def extract_refined_query(llm_response: str) -> Optional[str]:
-    """
-    Extracts the refined query from the LLM's response.
-    Supports multiple enclosure styles.
-    
-    Args:
-        llm_response (str): The full response from the LLM.
-    
-    Returns:
-        Optional[str]: The extracted refined query or None if extraction fails.
-    """
-    # Define multiple patterns to extract the query
-    patterns = [
-        r'`([^`]+)`',          # Backticks
-        r'"([^"]+)"',          # Double quotes
-        r"'([^']+)'",          # Single quotes
-        r'^([^"\']+)$',        # No quotes, entire line
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, llm_response, re.DOTALL)
-        if match:
-            refined_query = match.group(1).strip()
-            if refined_query:
-                return refined_query
-    
-    # If no pattern matches, return the entire response if it's a single line
-    if '\n' not in llm_response and llm_response.strip():
-        return llm_response.strip()
-    
-    # If extraction fails, return None
-    return None
-
-
-async def generate_llm_response(search_results: str, query: str) -> str:
-    """
-    Generates a response from search results with mandatory source linking and temporal awareness.
-    """
-    # Enhanced system prompt combining temporal awareness and source citation
-    system_prompt = (
-        f"{os.getenv('BEHAVIOUR_SEARCH')} "
-        "You are performing a search task with strong temporal awareness AND mandatory source citation. "
-        f"Today's date is {datetime.now().strftime('%Y-%m-%d')}. "
-        "\nTEMPORAL AWARENESS REQUIREMENTS:"
-        "\n1. Verify and explicitly state when events occurred"
-        "\n2. Distinguish between past, present, and future events"
-        "\n3. Include dates for context when relevant"
-        "\n4. Specify if information might be outdated"
-        "\n5. Note when exact dates are uncertain"
-        "\n\nSOURCE CITATION REQUIREMENTS:"
-        "\n1. You MUST include relevant source links using Discord's markdown format: [Text](URL)"
-        "\n2. EVERY claim or piece of information MUST be linked to its source"
-        "\n3. Sources MUST be integrated naturally into the text, not listed at the end"
-        "\n4. Format source links as: [Source Name](URL) or [Specific Detail](URL)"
-        "\n\nExample format:"
-        "\n'According to [TechNews](http://example.com) on January 5th, 2024, the latest development...'"
-        "\n'[NVIDIA's announcement](http://example.com) from earlier today confirms that...'"
-        "\n'The upcoming event, scheduled for March 2024 according to [EventSite](http://example.com), will...'"
-        "\n\nBased on the search results provided, create a comprehensive but concise answer. "
-        "Include relevant source links in Discord-compatible markdown format. "
-        "Keep your response under 800 words. "
-        "If the search results don't contain enough relevant information or seem outdated, say so."
-    )
-    
-    user_prompt = (
-        f"Search Query: {query}\n\n"
-        f"Current Date Context: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-        f"Search Results:\n{search_results}\n\n"
-        "REQUIREMENTS:\n"
-        "1. Integrate AT LEAST one source link per paragraph using [Text](URL) format\n"
-        "2. Begin with the most recent/relevant information\n"
-        "3. Naturally weave sources into your narrative\n"
-        "4. Include source publication dates when available\n"
-        "5. If you can't verify a claim with a source, don't make the claim\n"
-        "6. Always specify the temporal context (when events happened/will happen)\n"
-        "7. Clearly distinguish between past, present, and upcoming events"
-    )
-
-    try:
-        response = await async_chat_completion(
-            model=os.getenv("LOCAL_CHAT"),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=1600,
-            n=1,
-            stop=None,
-        )
-        llm_reply = response.choices[0].message.content.strip()
-        
-        # Verify source inclusion
-        if not re.search(r'\[.*?\]\(https?://[^\s\)]+\)', llm_reply):
-            # If no sources found, add a warning and the raw sources
-            source_list = "\n\nSources consulted:\n" + "\n".join(
-                f"- [{url}]({url})" for url in re.findall(r'https?://[^\s]+', search_results)
-            )
-            llm_reply += source_list
-            logger.warning(f"🔍 Generated response had no inline sources, appended source list")
-        
-        # Log the number of sources included
-        source_count = len(re.findall(r'\[.*?\]\(https?://[^\s\)]+\)', llm_reply))
-        logger.info(f"🔍 Generated response with {source_count} inline sources")
-        
-        return llm_reply
-        
-    except Exception as e:
-        logger.error(f"❌ Error communicating with LLM: {e}")
-        return "❌ An error occurred while generating the response."
-
-
-@bot.tree.command(
-    name="search",
-    description="Performs a Google search and returns a comprehensive answer based on the top 10 results."
-)
-@app_commands.describe(query="The search query.")
-@universal_cooldown_check()
-async def search_command(interaction: discord.Interaction, query: str):
-    logger.info(f"🔍 Slash Google search requested by {interaction.user}: '{query}'")
-    
-    # Rate limiting check
-    if is_rate_limited(interaction.user.id):
-        await interaction.response.send_message(
-            "⚠️ You are performing searches too quickly. Please wait a moment before trying again.",
-            ephemeral=True
-        )
-        logger.warning(f"⚠️ Rate limit exceeded by {interaction.user}")
-        return
-    
-    # Defer the response first
-    await interaction.response.defer()
-    
-    # Initialize variables for retry logic
-    max_retries = 3
-    search_successful = False
-    
-    for attempt in range(max_retries):
-        try:
-            # Modify search strategy based on attempt number
-            if attempt == 0:
-                # First attempt: Standard search with temporal context
-                temporally_aware_query = add_temporal_context(query)
-                refined_query = await refine_search_query(temporally_aware_query)
-            elif attempt == 1:
-                # Second attempt: Broaden search terms and remove site-specific restrictions
-                broader_query = f"{query} OR {' OR '.join(query.split())} -site:youtube.com -site:facebook.com"
-                refined_query = await refine_search_query(broader_query)
-            else:
-                # Third attempt: Use alternative keywords and synonyms
-                system_msg = {
-                    "role": "system",
-                    "content": "You are a search query optimizer. Generate alternative search terms using synonyms and related concepts."
-                }
-                user_msg = {"role": "user", "content": f"Generate alternative search terms for: {query}"}
-                response = await async_chat_completion(
-                    model=os.getenv("LOCAL_CHAT"),
-                    messages=[system_msg, user_msg],
-                    temperature=0.7,
-                    max_tokens=100
-                )
-                alternative_query = response.choices[0].message.content.strip()
-                refined_query = await refine_search_query(f"{query} OR {alternative_query}")
-            
-            logger.info(f"🔍 Attempt {attempt + 1}: Refined Query for {interaction.user}: '{refined_query}'")
-            
-            if not refined_query:
-                continue
-            
-            # Perform the search
-            search_results = list(search(refined_query, num_results=10))
-            
-            if search_results:
-                search_successful = True
-                logger.info(f"✅ Search successful on attempt {attempt + 1} for {interaction.user}")
-                
-                # Fetch summaries concurrently
-                summaries = await asyncio.gather(*[fetch_summary(url) for url in search_results])
-                
-                # Compile results and continue with existing logic
-                compiled_results = ""
-                for idx, (url, summary) in enumerate(zip(search_results, summaries), start=1):
-                    compiled_results += f"**Result {idx}:** {url}\n{summary}\n\n"
-                
-                # Generate LLM response and create embed
-                llm_response = await generate_llm_response(compiled_results, query)
-                
-                embed = discord.Embed(
-                    title=f"🔍 Search Results for: {query}",
-                    description=llm_response,
-                    color=discord.Color.green()
-                )
-                
-                # Send results
-                content = f"Your search response is complete {interaction.user.mention}"
-                await interaction.channel.send(content=content, embed=embed)
-                await interaction.followup.send("✅ Search results have been posted to the channel.", ephemeral=True)
-                
-                # Increment stats and break the retry loop
-                await increment_user_stat(interaction.user.id, 'searches_performed')
-                break
-            
-            logger.warning(f"⚠️ No results found on attempt {attempt + 1} for query: '{refined_query}'")
-            
-        except Exception as e:
-            logger.error(f"❌ Error in search attempt {attempt + 1} for {interaction.user}: {format_error_message(e)}")
-            if attempt == max_retries - 1:
-                await interaction.followup.send(
-                    f"❌ Error performing search after {max_retries} attempts: {format_error_message(e)}",
-                    ephemeral=True
-                )
-                return
-    
-    # If all attempts failed to find results
-    if not search_successful:
-        await interaction.followup.send(
-            f"❌ No results found after {max_retries} attempts with different search strategies. "
-            "Please try rephrasing your query.",
-            ephemeral=True
-        )
-        logger.warning(f"❌ All {max_retries} search attempts failed for {interaction.user}'s query: '{query}'")
 
 """
 ---------------------------------------------------------------------------------
@@ -1814,71 +1281,75 @@ async def help_command(interaction: discord.Interaction):
 
 
 
-@bot.tree.command(name="stats", description="Displays the top 5 users in each category: Images Generated, Chat Responses, and Mentions.")
+@bot.tree.command(name="stats", description="Displays the top 5 users in each category for this server.")
 @app_commands.checks.has_permissions(administrator=True)
 async def stats_command(interaction: discord.Interaction):
-    logger.info(f"Command 'stats' invoked by {interaction.user}")
+    logger.info(f"Command 'stats' invoked by {interaction.user} in server {interaction.guild_id}")
     
     try:
         stats_data = await read_user_stats()
-    
+        
         if not stats_data:
             await interaction.response.send_message("No statistics available yet.", ephemeral=True)
             return
-    
-        # Convert stats_data to a list of dictionaries
+        
+        # Convert stats_data to a list of dictionaries for this server
+        server_id = str(interaction.guild_id)
         users_stats = []
+        
         for user_id, data in stats_data.items():
-            users_stats.append({
-                "username": data.get("username", "Unknown"),
-                "images_generated": data.get("images_generated", 0),
-                "chat_responses": data.get("chat_responses", 0),
-                "mentions": data.get("mentions", 0)
-            })
-    
+            if 'servers' in data and server_id in data['servers']:
+                server_stats = data['servers'][server_id]
+                users_stats.append({
+                    "username": data.get("username", "Unknown"),
+                    "images_generated": server_stats.get("images_generated", 0),
+                    "chat_responses": server_stats.get("chat_responses", 0),
+                    "mentions": server_stats.get("mentions", 0)
+                })
+        
+        if not users_stats:
+            await interaction.response.send_message("No statistics available for this server yet.", ephemeral=True)
+            return
+        
         # Sort users for each category
         top_images = sorted(users_stats, key=lambda x: x["images_generated"], reverse=True)[:5]
         top_chats = sorted(users_stats, key=lambda x: x["chat_responses"], reverse=True)[:5]
         top_mentions = sorted(users_stats, key=lambda x: x["mentions"], reverse=True)[:5]
-    
-        # Create embed for better readability
+        
+        # Create embed
         embed = discord.Embed(
-            title="📊 Bot Usage Statistics",
+            title=f"📊 Server Statistics for {interaction.guild.name}",
             color=discord.Color.purple()
         )
         
-        # Top Images Generated
+        # Add fields for each category
         if top_images:
             images_field = "\n".join([f"{i+1}. **{user['username']}** - {user['images_generated']} images" for i, user in enumerate(top_images)])
         else:
             images_field = "No data available."
-        embed.add_field(name="🏆 Top Images Generated", value=images_field, inline=False)
+        embed.add_field(name="🎨 Top Images Generated", value=images_field, inline=False)
         
-        # Top Chat Responses
         if top_chats:
             chats_field = "\n".join([f"{i+1}. **{user['username']}** - {user['chat_responses']} responses" for i, user in enumerate(top_chats)])
         else:
             chats_field = "No data available."
-        embed.add_field(name="🏆 Top Chat Responses", value=chats_field, inline=False)
+        embed.add_field(name="💭 Top Chat Responses", value=chats_field, inline=False)
         
-        # Top Mentions
         if top_mentions:
             mentions_field = "\n".join([f"{i+1}. **{user['username']}** - {user['mentions']} mentions" for i, user in enumerate(top_mentions)])
         else:
             mentions_field = "No data available."
-        embed.add_field(name="🏆 Top Mentions", value=mentions_field, inline=False)
+        embed.add_field(name="📣 Top Mentions", value=mentions_field, inline=False)
         
         embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-    
+        
         await interaction.response.send_message(embed=embed)
-        logger.info(f"Sent statistics to {interaction.user}")
-    
-    except app_commands.errors.MissingPermissions:
-        await interaction.response.send_message("❌ You don't have permission to use this command.", ephemeral=True)
-        logger.warning(f"Unauthorized attempt to use 'stats' command by {interaction.user}")
+        logger.info(f"Sent server statistics to {interaction.user}")
+        
     except Exception as e:
-        await interaction.response.send_message("❌ An error occurred while fetching statistics.", ephemeral=True)
-        logger.error(f"Error in 'stats' command: {e}")
+        error_msg = f"Error fetching statistics: {e}"
+        logger.error(error_msg)
+        await interaction.response.send_message(error_msg, ephemeral=True)
 
 
 @bot.tree.command(name="status", description="Displays the current status of the bot, Flux server, and chat functions.")
@@ -2108,8 +1579,8 @@ async def flux(interaction: discord.Interaction,
 # -------------------------------------------------------------------------
 
 async def handle_remix(interaction, prompt, width, height, seed, queue_size):
-    # Increment the images_generated stat
-    await increment_user_stat(interaction.user.id, 'images_generated')
+    # Update to include server ID
+    await increment_user_stat(interaction.user.id, 'images_generated', interaction.guild_id)
     
     # Proceed with image generation
     await generate_flux_image(interaction, prompt, width, height, seed, action_name="Remix", queue_size=queue_size)
@@ -2207,8 +1678,8 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             )
             logger.info(f"🪄 Passed cleaned fancy prompt to image generator for {interaction.user}")
             
-            # Increment the images_generated stat after successful generation
-            await increment_user_stat(interaction.user.id, 'images_generated')
+            # Update to include server ID
+            await increment_user_stat(interaction.user.id, 'images_generated', interaction.guild_id)
         
     except Exception as e:
         logger.error(f"🪄 Error generating fancy prompt for {interaction.user}: {e}")
@@ -2604,8 +2075,8 @@ async def process_flux_image(interaction: discord.Interaction, description: str,
 
         logger.info(f"Processing request: user={interaction.user}, prompt='{description}', size='{size}', dims={width}x{height}, seed={seed}")
         
-        # Update image generation count
-        await increment_user_stat(interaction.user.id, 'images_generated')
+        # Update image generation count with server ID
+        await increment_user_stat(interaction.user.id, 'images_generated', interaction.guild_id)
 
         await generate_flux_image(interaction, description, width, height, seed, queue_size=bot.flux_queue.qsize())
     except Exception as e:
@@ -2631,12 +2102,17 @@ Event Handlers
 # Add this BEFORE your bot.event decorators and command definitions
 async def load_extensions():
     """Load all extension cogs"""
-    # Get the directory where soupy.py is located
     current_dir = Path(__file__).parent
     
-    # Load the interject cog
+    # Load extensions
     try:
-        await bot.load_extension("interject")
+        await bot.load_extension("soupy_search")
+        logger.info("✅ Loaded search extension")
+    except Exception as e:
+        logger.error(f"❌ Failed to load search extension: {e}")
+    
+    try:
+        await bot.load_extension("soupy_interject")
         logger.info("📥 Loaded interject extension")
     except Exception as e:
         logger.error(f"❌ Failed to load interject extension: {e}")
@@ -2773,11 +2249,15 @@ async def on_message(message):
         
         async with message.channel.typing():
             try:
-                # Fetch context from channel
-                recent_messages = await fetch_recent_messages(message.channel, limit=25, current_message_id=message.id)
+                # Get guild-specific behavior
+                guild_id = str(message.guild.id) if message.guild else None
+                chatgpt_behaviour = await get_guild_behaviour(guild_id)
                 
-                # Create the messages list starting with the system behavior prompt
+                # Create the messages list starting with the appropriate behavior prompt
                 messages_for_llm = [{"role": "system", "content": chatgpt_behaviour}]
+                
+                # Fetch context from channel
+                recent_messages = await fetch_recent_messages(message.channel, limit=int(os.getenv("RECENT_MESSAGE_LIMIT", 25)), current_message_id=message.id)
                 
                 # Add conversation history
                 messages_for_llm.extend(recent_messages)
@@ -2811,8 +2291,8 @@ async def on_message(message):
                     reply = response.choices[0].message.content
                 logger.info(f"🤖 Generated reply for {message.author}: '{reply}'")
 
-                # Update chat response count
-                await increment_user_stat(message.author.id, 'chat_responses')
+                # Update chat response count with server ID
+                await increment_user_stat(message.author.id, 'chat_responses', message.guild.id)
 
                 # Split the bot's entire reply into smaller chunks
                 chunks = split_message(reply, max_len=1500)
