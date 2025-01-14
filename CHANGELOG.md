@@ -1,6 +1,6 @@
 ## Changelog
 
-## 0.8.1
+## [0.8.1] - 1-13-2025
 ### Fixed
 - Corrected shutdown behavior
 
