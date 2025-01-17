@@ -4,7 +4,7 @@
 ### Fixed
 - Modified the BLIP behavior in the Gradio backend.  It now loads on-demand and unloads when not needed, which speeds up image generation tasks by freeing up system resources.
 - Interject was not properly integrating message history, and was not properly using the INTERJECT .env variable.
-- Modified /search method to return more relevant returns.
+- Modified /search method to return more relevant results.
 
 ## [0.8.1] - 1-13-2025
 ### Fixed
