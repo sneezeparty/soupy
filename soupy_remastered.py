@@ -278,7 +278,7 @@ def format_error_message(error):
         return f"{error_prefix}An OpenAI API error occurred: {str(error)}"
     return f"{error_prefix}{str(error)}"
 
-
+image_history = {}  # Dictionary to store recent image descriptions
 
 """
 ---------------------------------------------------------------------------------
@@ -321,7 +321,7 @@ class FluxQueueManager:
             task = await self.queue.get()
             try:
                 task_type = task.get('type')
-                logger.debug(f"Processing task of type '{task_type}' for user {task.get('interaction').user if task.get('interaction') else 'Unknown'}.")
+                logger.info(f"Processing task of type '{task_type}' for user {task.get('interaction').user if task.get('interaction') else 'Unknown'}.")
                 
                 if task_type == 'flux':
                     interaction = task.get('interaction')
@@ -665,7 +665,7 @@ def get_random_terms():
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
-        elif rand_val < 0.1: 
+        elif rand_val < 0.33: 
             terms['Character Concept'] = "Grey Sphynx Cat"
         else:  # 47.5% chance (0.525 to 1.0)
             terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
@@ -1106,10 +1106,10 @@ async def extract_link_content(url: str) -> Optional[dict]:
         logger.error(f"Error extracting content from {url}: {e}")
         return None
 
-# Fetch "limit" recent messages from the channel, including content from any links
+# Fetch "limit" recent messages from the channel, including content from any images.
 async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIMIT", 25)), current_message_id=None):
     """
-    Fetches recent messages from the channel, including content from any links.
+    Fetches recent messages from the channel, including content from any images and links.
     """
     message_history = []
     seen_messages = set()
@@ -1127,15 +1127,11 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
         if current_message_id and msg.id == current_message_id:
             continue
         
-        # Create unique message identifier
-        message_key = f"{msg.author.name}:{msg.content}"
-        if message_key in seen_messages:
-            continue
-            
-        seen_messages.add(message_key)
+        # Create base message content
+        message_content = msg.content
         
         # Extract URLs from message
-        urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', msg.content)
+        urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', message_content)
         
         # Process each URL in the message
         link_contents = []
@@ -1145,24 +1141,99 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
                 link_info = f"\nLink Content [{content_info['type']}]: {content_info['title']}\n{content_info['content']}"
                 link_contents.append(link_info)
         
+        # Check if this message has a stored image description
+        if msg.id in image_history:
+            img_info = image_history[msg.id]
+            # If the message is empty (just an image), use only the image description
+            if not message_content.strip():
+                message_content = f"[shares an image: {img_info['description']}]"
+            # If there's existing content, append the image description
+            else:
+                message_content = f"{message_content} [shares an image: {img_info['description']}]"
+        
         # Combine message content with link contents
-        full_content = msg.content
         if link_contents:
-            full_content += '\n' + '\n'.join(link_contents)
+            message_content += '\n' + '\n'.join(link_contents)
         
-        # Format message with role assignment
+        # Create unique message identifier
+        message_key = f"{msg.author.name}:{message_content}"
+        if message_key in seen_messages:
+            continue
+            
+        seen_messages.add(message_key)
+        
+        # Format message with role assignment and author
         role = "assistant" if msg.author == bot.user else "user"
-        message_content = f"{msg.author.name}: {full_content}"
-        
-        message_history.append({"role": role, "content": message_content})
+        formatted_content = f"{msg.author.name}: {message_content}"
+        message_history.append({"role": role, "content": formatted_content})
+    
+    # Clean up old entries from image_history (optional)
+    current_time = datetime.utcnow()
+    old_messages = [msg_id for msg_id, info in image_history.items() 
+                   if (current_time - info['timestamp']).total_seconds() > 3600]  # 1 hour
+    for msg_id in old_messages:
+        del image_history[msg_id]
     
     return list(reversed(message_history))
 
 
-# ---------------------------------------------------------------------------------
-# Slash Commands
-# ---------------------------------------------------------------------------------
+"""
+---------------------------------------------------------------------------------
+Image processing - creates a description of the image and stores it in image_history
+---------------------------------------------------------------------------------
+"""
 
+async def process_image_attachment(attachment, message):
+    """
+    Process an image attachment and store its description in image_history.
+    Returns the description if successful, None otherwise.
+    """
+    if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Download the image
+                async with session.get(attachment.url) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Failed to download image: HTTP {resp.status}")
+                        return None
+                    
+                    image_data = await resp.read()
+                    
+                    # Create form data
+                    form_data = aiohttp.FormData()
+                    form_data.add_field('file',
+                        image_data,
+                        filename='image.png',
+                        content_type='image/png'
+                    )
+                    
+                    # Send to analysis endpoint
+                    async with session.post(
+                        os.getenv('ANALYZE_IMAGE_API_URL'),
+                        data=form_data
+                    ) as analysis_resp:
+                        if analysis_resp.status == 200:
+                            result = await analysis_resp.json()
+                            description = result.get('description', 'No description available')
+                            
+                            # Store in image history with timestamp
+                            image_history[message.id] = {
+                                'description': description,
+                                'author': message.author.name,
+                                'timestamp': datetime.utcnow(),
+                                'channel_id': message.channel.id
+                            }
+                            
+                            logger.info(f"Stored image description for {message.author}: {description}")
+                            return description
+                        
+                        logger.error(f"Failed to analyze image: HTTP {analysis_resp.status}")
+                        return None
+                        
+        except Exception as e:
+            logger.error(f"Error processing image attachment: {e}")
+            return None
+    return None
 
 
 """
@@ -2190,6 +2261,10 @@ def split_message(msg: str, max_len=1500):
 
 @bot.event
 async def on_message(message):
+    # Clear previous image descriptions at the start of each message
+    global image_descriptions
+    image_descriptions = []
+    
     # Skip bot messages
     if message.author == bot.user:
         return
@@ -2200,48 +2275,19 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    # Initialize image_descriptions list to store any image analysis results
-    image_descriptions = []
-
-    # Check for image attachments and analyze them silently
+    # Process any image attachments
     if message.attachments:
-        for idx, attachment in enumerate(message.attachments, 1):
-            # Check if the attachment is an image
-            if any(attachment.filename.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
-                try:
-                    # Download the image
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(attachment.url) as resp:
-                            if resp.status == 200:
-                                image_data = await resp.read()
-                                
-                                # Create form data with the image
-                                form_data = aiohttp.FormData()
-                                form_data.add_field('file',
-                                    image_data,
-                                    filename='image.png',
-                                    content_type='image/png'
-                                )
-                                
-                                # Send to analysis endpoint
-                                async with session.post(
-                                    os.getenv('ANALYZE_IMAGE_API_URL'),
-                                    data=form_data
-                                ) as analysis_resp:
-                                    if analysis_resp.status == 200:
-                                        result = await analysis_resp.json()
-                                        description = result.get('description', 'No description available')
-                                        # Format the description as a user message
-                                        formatted_desc = f"{message.author.name}: [shares an image: {description}]"
-                                        image_descriptions.append(formatted_desc)
-                                        logger.info(f"Generated image description for {message.author}: {description}")
-                                    else:
-                                        logger.error(f"Failed to analyze image: HTTP {analysis_resp.status}")
-                            else:
-                                logger.error(f"Failed to download image: HTTP {resp.status}")
-                except Exception as e:
-                    logger.error(f"Error analyzing image: {e}")
+        for attachment in message.attachments:
+            description = await process_image_attachment(attachment, message)
+            if description:
+                # Format the description as a user message
+                formatted_desc = f"{message.author.name}: [shares an image: {description}]"
+                image_descriptions.append(formatted_desc)
+                logger.info(f"Processed image from {message.author}: {description}")
 
+    # Remove the duplicate image processing block here
+    # The rest of the message handling remains the same...
+    
     # Continue with existing message handling
     should_respond = should_bot_respond_to_message(message) or should_randomly_respond(probability=0.03)
     if should_respond:
