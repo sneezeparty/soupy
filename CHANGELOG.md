@@ -1,5 +1,14 @@
 ## Changelog
 
+## [0.8.2] - 1-17-2025
+### Fixed
+- Modified the BLIP behavior in the Gradio backend.  It now loads on-demand and unloads when not needed, which speeds up image generation tasks by freeing up system resources.
+- Interject was not properly integrating message history, and was not properly using the INTERJECT .env variable.
+- Modified /search method to return more relevant returns.
+
+### Added
+- Created new .env variable for Soupy to have two different BEHAVIORS in different guilds using the same instance of soupy_remastered.py.  SPECIAL_GUILD_ID and BEHAVIOUR_ALT define this.
+
 ## [0.8.1] - 1-13-2025
 ### Fixed
 - Corrected shutdown behavior
