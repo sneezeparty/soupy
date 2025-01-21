@@ -1,5 +1,9 @@
 ## Changelog
 
+##[0.8.21] - 1-21-2025
+### Fixed
+- Completely revamped the search functionality to use DuckDuckGo instead of Google.
+
 ## [0.8.2] - 1-17-2025
 ### Fixed
 - Modified the BLIP behavior in the Gradio backend.  It now loads on-demand and unloads when not needed, which speeds up image generation tasks by freeing up system resources.
