@@ -56,15 +56,14 @@ from discord.ext import commands, tasks
 from discord.ui import View, Modal, TextInput
 from dotenv import load_dotenv
 from geopy.geocoders import Nominatim
-from googlesearch import search
 from openai import OpenAI, OpenAIError
 from timezonefinder import TimezoneFinder
 from logging.handlers import RotatingFileHandler
 import html2text
 import trafilatura
 from PIL import Image
-import soupy_search 
 import soupy_interject
+import soupy_search
 
 # Logging and color imports
 import colorama
@@ -571,6 +570,8 @@ async def shutdown():
     logger.info("🔄 Initiating graceful shutdown...")
     
     try:
+        # Commented out notification code
+        '''
         # Create shutdown embed
         shutdown_embed = discord.Embed(
             description="Soupy is now going offline.",
@@ -594,7 +595,7 @@ async def shutdown():
             logger.warning("⚠️ Shutdown notifications timed out")
         except Exception as e:
             logger.error(f"❌ Error sending shutdown notifications: {e}")
-        
+        '''
         # Initiate queue shutdown if it exists
         if hasattr(bot, 'flux_queue'):
             await bot.flux_queue.initiate_shutdown()
@@ -1052,6 +1053,7 @@ async def async_chat_completion(*args, **kwargs):
 async def extract_link_content(url: str) -> Optional[dict]:
     """
     Extracts content from a URL and returns relevant information.
+    Improved to better handle different content types and extract more complete content.
     """
     try:
         # Parse the domain
@@ -1066,40 +1068,83 @@ async def extract_link_content(url: str) -> Optional[dict]:
         }
         
         # Use trafilatura to download and extract content
-        downloaded = trafilatura.fetch_url(url)
+        downloaded = trafilatura.fetch_url(url)  # Removed timeout parameter
         if not downloaded:
+            logger.warning(f"Failed to download content from {url}")
             return None
             
-        # Extract main content
-        content = trafilatura.extract(downloaded, include_links=False, include_images=False)
+        # Extract main content with more complete settings
+        content = trafilatura.extract(
+            downloaded,
+            include_links=True,
+            include_images=False,
+            include_tables=True,
+            no_fallback=False,
+            target_language='en',
+            favor_precision=True,
+            include_comments=False
+        )
+        
         if not content:
+            logger.warning(f"No content extracted from {url}")
             return None
             
         # Parse with BeautifulSoup for additional metadata
         soup = BeautifulSoup(downloaded, 'html.parser')
         
-        # Get title
-        title = soup.find('title')
-        if title:
-            content_info['title'] = title.text.strip()
+        # Get title - try multiple sources
+        title = None
+        # Try OpenGraph title first
+        og_title = soup.find('meta', property='og:title')
+        if og_title:
+            title = og_title.get('content')
         
-        # Determine content type based on URL and metadata
+        # If no OG title, try Twitter card
+        if not title:
+            twitter_title = soup.find('meta', {'name': 'twitter:title'})
+            if twitter_title:
+                title = twitter_title.get('content')
+        
+        # Finally, fall back to regular title tag
+        if not title:
+            title_tag = soup.find('title')
+            if title_tag:
+                title = title_tag.text.strip()
+        
+        content_info['title'] = title
+        
+        # Determine content type and handle accordingly
         if 'twitter.com' in domain or 'x.com' in domain:
             content_info['type'] = 'social_post'
+            # For tweets, we want the full content
+            content_info['content'] = content
         elif 'youtube.com' in domain or 'youtu.be' in domain:
             content_info['type'] = 'video'
-            # Try to get video title from meta tags
-            meta_title = soup.find('meta', property='og:title')
-            if meta_title:
-                content_info['title'] = meta_title['content']
+            # For YouTube, try to get description
+            description = soup.find('meta', {'name': 'description'})
+            if description:
+                content_info['content'] = description.get('content')
+            else:
+                content_info['content'] = content
         elif any(news_domain in domain for news_domain in ['news', 'article', 'blog']):
             content_info['type'] = 'article'
+            # For articles, include a substantial portion of the content
+            content_info['content'] = content[:2000] + '...' if len(content) > 2000 else content
         else:
             content_info['type'] = 'webpage'
+            # For general webpages, include a reasonable amount of content
+            content_info['content'] = content[:1500] + '...' if len(content) > 1500 else content
         
-        # Clean and truncate content
-        content_info['content'] = ' '.join(content.split())[:500] + '...' if len(content) > 500 else content
+        # Clean up the content
+        if content_info['content']:
+            # Remove excessive whitespace while preserving paragraphs
+            content_info['content'] = '\n\n'.join(
+                ' '.join(paragraph.split())
+                for paragraph in content_info['content'].split('\n')
+                if paragraph.strip()
+            )
         
+        logger.info(f"Successfully extracted content from {url} ({content_info['type']})")
         return content_info
         
     except Exception as e:
@@ -1109,7 +1154,8 @@ async def extract_link_content(url: str) -> Optional[dict]:
 # Fetch "limit" recent messages from the channel, including content from any images.
 async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIMIT", 25)), current_message_id=None):
     """
-    Fetches recent messages from the channel, including content from any images and links.
+    Fetches recent messages from the channel, including content from any images.
+    URL parsing has been disabled.
     """
     message_history = []
     seen_messages = set()
@@ -1130,17 +1176,6 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
         # Create base message content
         message_content = msg.content
         
-        # Extract URLs from message
-        urls = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', message_content)
-        
-        # Process each URL in the message
-        link_contents = []
-        for url in urls:
-            content_info = await extract_link_content(url)
-            if content_info:
-                link_info = f"\nLink Content [{content_info['type']}]: {content_info['title']}\n{content_info['content']}"
-                link_contents.append(link_info)
-        
         # Check if this message has a stored image description
         if msg.id in image_history:
             img_info = image_history[msg.id]
@@ -1150,10 +1185,6 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
             # If there's existing content, append the image description
             else:
                 message_content = f"{message_content} [shares an image: {img_info['description']}]"
-        
-        # Combine message content with link contents
-        if link_contents:
-            message_content += '\n' + '\n'.join(link_contents)
         
         # Create unique message identifier
         message_key = f"{msg.author.name}:{message_content}"
@@ -2211,23 +2242,6 @@ async def on_ready():
     # Set the bot start time
     bot_start_time = datetime.utcnow()
     logger.info(f"Bot start time set to {bot_start_time} UTC")
-    
-    # Create the online embed
-    online_embed = discord.Embed(
-        # title="Soupy is online.",
-        description="Soupy is now online.",
-        color=discord.Color.green(),
-    )
-    online_embed.set_footer(text="Soupy Bot | Online", icon_url=bot.user.avatar.url if bot.user.avatar else None)
-    
-    # Notify designated channels that the bot is online with the embed
-    try:
-        await notify_channels(embed=online_embed)
-        logger.info("✅ Notified channels about bot startup.")
-    except Exception as e:
-        logger.error(f"❌ Failed to notify channels about bot startup: {e}")
-    
-    logger.info("Flux server monitor task has been started.")
 
 
 
