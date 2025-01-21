@@ -1,6 +1,6 @@
 ## Changelog
 
-##[0.8.21] - 1-21-2025
+## [0.8.21] - 1-21-2025
 ### Fixed
 - Completely revamped the search functionality to use DuckDuckGo instead of Google.
 
