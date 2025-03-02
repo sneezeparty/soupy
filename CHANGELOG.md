@@ -4,6 +4,8 @@
 ### Fixed
 - Fancy button was broken during last update, it works again now
 - Too many grey sphynx cats were being generated
+- Significantly improved /soupysearch functionality by limiting the context size, adding URL validation and ranking system, and just making the whole thing actually work
+- Gave soupy the ability to parse URLs in chat in order to integrate the content of those URLs into its chat history during conversation
 
 ## [0.8.3] - 3/1/2025
 ### Fixed
