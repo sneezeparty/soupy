@@ -14,7 +14,7 @@ Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BL
 | Function | Description |
 |--|--|
 | ``/flux <prompt> <modifiers>`` | Generate a new image based on a description given by the user using available modifiers
-| ``/soupysearch <query>``|Uses DuckDuckGo API (no key or login required) search results and feeds them to the LLM for parsing and summary, eventually sending them to the channel.  This functionality is a little flaky, because it's very token-heavy and if you are using a small context window, it will choke |
+| ``/soupysearch <query>``|Uses DuckDuckGo API (no key or login required) search results and feeds them to the LLM for parsing and summary, eventually sending them to the channel.  |
 |``/whattime <location>``|Provides your local time for a geographic location|
 |``/8ball <query>``|Traditional 8-ball|
 |``/9ball <query>``|Gives LLM-generated 8-ball style answers
@@ -133,7 +133,7 @@ The Random button triggers a function that chooses from random keywords located 
 ![Random example](https://i.imgur.com/0eFjCSq.png)
 
 ``/soupysearch <query>``
-An example of the ``/search`` command, which takes your search and sends it to the LLM for processing, and then returns results using BeautifulSoup and natural language processing.  This feature is a little unreliable currently, because it requires a huge context window.  I guess if you have the necessary RAM, it would work fine.
+An example of the ``/search`` command, which takes your search and sends it to the LLM for processing, and then returns results using BeautifulSoup and natural language processing. 
 
 ![enter image description here](https://i.imgur.com/UnfRKsC.png)
 
