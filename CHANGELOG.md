@@ -1,5 +1,10 @@
 ## Changelog
 
+## [0.8.3] - 3/1/2025
+### Fixed
+- Redid the queue system so that it will cope better with different types of requests simultaneously.
+- Fixed a problem where sometimes the Random button would be ignored.
+
 ## [0.8.21] - 1-21-2025
 ### Fixed
 - Completely revamped the search functionality to use DuckDuckGo instead of Google.
