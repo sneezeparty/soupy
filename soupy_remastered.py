@@ -637,7 +637,7 @@ def get_random_terms():
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
-        elif rand_val < 0.33: 
+        elif rand_val < 0.05: 
             terms['Character Concept'] = "Grey Sphynx Cat"
         else:  # 47.5% chance (0.525 to 1.0)
             terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
@@ -1694,82 +1694,164 @@ fancy_instructions = os.getenv("FANCY", "")
 
 
 async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
-    """
-    1) Uses the local LLM to rewrite the current prompt as something more detailed and 'fancy.'
-    2) Strips any unwanted prefix from the newly minted fancy prompt using regex.
-    3) Calls generate_flux_image() with the cleaned fancy prompt.
-    4) Calculates total duration including prompt rewriting and image generation.
-    """
+    """Handle the 'Fancy' button click."""
     try:
-        # Use typing context manager for consistent behavior
-        async with interaction.channel.typing():
-            # Start timing for prompt rewriting
-            prompt_start_time = time.perf_counter()
-
-            # Step 1: Fetch your fancy instructions from the .env variable
-            fancy_instructions = os.getenv("FANCY", "")
-            logger.debug(f"📜 Retrieved 'FANCY' instructions: {fancy_instructions}")
-
-            # Combine them with the user's prompt
-            rewriting_instructions = (
-                f"{fancy_instructions}\n\n"
-                f"The prompt you are elaborating on is: {prompt}"
-            )
-            logger.debug(f"📜 Combined rewriting instructions for {interaction.user}: {rewriting_instructions}")  # Fixed variable name here
-
-            system_prompt = {"role": "system", "content": rewriting_instructions}
-            user_prompt = {"role": "user", "content": "Please rewrite the above prompt accordingly."}
-
-            # We'll gather these into a message list
-            messages_for_llm = [system_prompt, user_prompt]
-
-            # Add DEBUG Logging Here
-            formatted_messages = format_messages(messages_for_llm)
-            logger.debug(f"📜 Sending the following messages to LLM (Fancy):\n{formatted_messages}")
-
-            # Call your local LLM with these messages
-            response = await async_chat_completion(
-                model=os.getenv("LOCAL_CHAT"),
-                messages=messages_for_llm,
-                temperature=0.7,
-                max_tokens=150
-            )
-
-            # Extract the fancy prompt from the LLM's response
-            fancy_prompt = response.choices[0].message.content.strip()
-            logger.info(f"🪄 Fancy prompt generated for {interaction.user}: '{fancy_prompt}'")
-
-            # Calculate prompt rewriting duration
-            prompt_end_time = time.perf_counter()
-            prompt_duration = prompt_end_time - prompt_start_time
-            logger.info(f"⏱️ Prompt rewriting time for {interaction.user}: {prompt_duration:.2f} seconds")
-
-            # Step 2: Apply regex removal to clean the fancy prompt
-            fancy_prompt_cleaned = remove_all_before_colon(fancy_prompt)
-            logger.debug(f"🪄 Cleaned fancy prompt for {interaction.user}: '{fancy_prompt_cleaned}'")
-
-            # Step 3: Pass the cleaned fancy prompt to generate_flux_image
-            await generate_flux_image(
-                interaction,
-                fancy_prompt_cleaned,  # Use the cleaned fancy prompt
-                width,
-                height,
-                seed,
-                action_name="Fancy",  # So your logs show it's from the Fancy button
-                queue_size=queue_size,
-                pre_duration=prompt_duration  # Pass the prompt rewriting duration
-            )
-            logger.info(f"🪄 Passed cleaned fancy prompt to image generator for {interaction.user}")
-            
-            # Update to include server ID
-            await increment_user_stat(interaction.user.id, 'images_generated', interaction.guild_id)
+        logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{prompt}'")
         
-    except Exception as e:
-        logger.error(f"🪄 Error generating fancy prompt for {interaction.user}: {e}")
+        # If this is a new interaction (not a followup), defer it
         if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ Error generating fancy prompt: {e}", ephemeral=True)
+            await interaction.response.defer()  # Remove thinking=True to make it visible to channel
+
+        # Get the fancy instructions
+        fancy_instructions = os.getenv("FANCY", "")
+        logger.debug(f"📜 Retrieved 'FANCY' instructions: {fancy_instructions}")
+
+        # Combine instructions with prompt
+        combined_instructions = f"{fancy_instructions}\n\nThe prompt you are elaborating on is: {prompt}"
+        logger.debug(f"📜 Combined rewriting instructions for {interaction.user}: {combined_instructions}")
+
+        # Start timing for prompt generation
+        prompt_start_time = time.perf_counter()
+
+        # Generate fancy prompt
+        messages = [
+            {"role": "system", "content": combined_instructions},
+            {"role": "user", "content": "Please rewrite the above prompt accordingly."}
+        ]
+
+        logger.debug(f"📜 Sending the following messages to LLM (Fancy):\n{format_messages(messages)}")
+
+        response = await async_chat_completion(
+            model=os.getenv("LOCAL_CHAT"),
+            messages=messages,
+            temperature=0.7,
+            max_tokens=150
+        )
+
+        fancy_prompt = response.choices[0].message.content.strip()
+        logger.info(f"🪄 Fancy prompt generated for {interaction.user}: '{fancy_prompt}'")
+
+        # Calculate prompt rewriting duration
+        prompt_end_time = time.perf_counter()
+        prompt_duration = prompt_end_time - prompt_start_time
+        logger.info(f"⏱️ Prompt rewriting time for {interaction.user}: {prompt_duration:.2f} seconds")
+
+        # Clean the prompt
+        cleaned_prompt = clean_response(fancy_prompt)
+        logger.debug(f"🪄 Cleaned fancy prompt for {interaction.user}: '{cleaned_prompt}'")
+
+        # Generate the image with the fancy prompt
+        await generate_flux_image(
+            interaction=interaction,
+            prompt=cleaned_prompt,
+            width=width,
+            height=height,
+            seed=seed,
+            action_name="Fancy",
+            queue_size=queue_size,
+            pre_duration=prompt_duration
+        )
+
+        logger.info(f"🪄 Passed cleaned fancy prompt to image generator for {interaction.user}")
+
+    except Exception as e:
+        error_msg = f"Error handling fancy button: {str(e)}"
+        logger.error(error_msg)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(error_msg, ephemeral=True)
         else:
-            await interaction.followup.send(f"❌ Error generating fancy prompt: {e}", ephemeral=True)
+            await interaction.followup.send(error_msg, ephemeral=True)
+
+async def generate_flux_image(
+    interaction,
+    prompt,
+    width,
+    height,
+    seed,
+    action_name="Flux",
+    queue_size=0,
+    pre_duration=0,
+    selected_terms: Optional[str] = None
+):
+    """Generate an image using the Flux API."""
+    try:
+        start_time = time.perf_counter()
+        
+        # Prepare the request data
+        request_data = {
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "seed": seed
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(FLUX_SERVER_URL + "/flux", json=request_data) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"API returned status {response.status}: {error_text}")
+                
+                image_data = await response.read()
+
+        # Calculate total duration
+        end_time = time.perf_counter()
+        image_duration = end_time - start_time
+        total_duration = image_duration + pre_duration
+
+        # Create a BytesIO object from the image data
+        image_bytes = BytesIO(image_data)
+
+        # Generate a filename based on the prompt
+        safe_prompt = re.sub(r'[^a-zA-Z0-9]', '', prompt[:30].lower())
+        random_prefix = random.randint(100000, 999999)
+        filename = f"{random_prefix}_{safe_prompt}.png"
+
+        # Create the file object
+        image_file = discord.File(image_bytes, filename=filename)
+
+        # Create embeds
+        description_embed = create_description_embed(prompt, interaction.user)
+        details_embed = create_details_embed(
+            width, height, seed, total_duration, pre_duration, 
+            queue_size, selected_terms
+        )
+
+        # Create view with buttons
+        new_view = ImageButtons(prompt, width, height, seed)
+
+        # Send the message with embeds and view
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                content=f"{interaction.user.mention} 🖼️ Generated Image:",
+                embeds=[description_embed, details_embed],
+                file=image_file,
+                view=new_view
+            )
+        else:
+            await interaction.response.send_message(
+                content=f"{interaction.user.mention} 🖼️ Generated Image:",
+                embeds=[description_embed, details_embed],
+                file=image_file,
+                view=new_view
+            )
+
+        logger.info(f"🖼️ Image generation completed for {interaction.user}: "
+                   f"filename='{filename}', total_duration={total_duration:.2f}s")
+
+        # Update user stats
+        await increment_user_stat(
+            interaction.user.id, 
+            'images_generated',
+            interaction.guild_id if interaction.guild else None
+        )
+
+    except Exception as e:
+        error_msg = f"Error generating image: {str(e)}"
+        logger.error(error_msg)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(error_msg, ephemeral=True)
+        else:
+            await interaction.followup.send(error_msg, ephemeral=True)
 
 
 
@@ -2293,9 +2375,6 @@ async def on_message(message):
                 image_descriptions.append(formatted_desc)
                 logger.info(f"Processed image from {message.author}: {description}")
 
-    # Remove the duplicate image processing block here
-    # The rest of the message handling remains the same...
-    
     # Continue with existing message handling
     should_respond = should_bot_respond_to_message(message) or should_randomly_respond()
     if should_respond:
@@ -2348,7 +2427,6 @@ async def on_message(message):
                 # Update chat response count with server ID
                 await increment_user_stat(message.author.id, 'chat_responses', message.guild.id)
 
-                # Split the bot's entire reply into smaller chunks
                 # Split the bot's entire reply into smaller chunks
                 chunks = split_message(reply, max_len=1500)
 
