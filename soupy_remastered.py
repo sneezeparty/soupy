@@ -290,154 +290,125 @@ Discord Bot Setup
 class SoupyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.flux_queue = FluxQueueManager()
+        self.flux_queue = FluxQueue()
         
     # Add the async_chat_completion method to the bot class
     async def async_chat_completion(self, *args, **kwargs):
         """Wraps the OpenAI chat completion in an async context"""
         return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
-class FluxQueueManager:
+# First, let's add a proper Queue class to manage the image generation queue
+class FluxQueue:
     def __init__(self):
-        self.queue = asyncio.Queue()
-        self.is_shutting_down = False
-        
-    async def put(self, task):
-        if not self.is_shutting_down:
-            await self.queue.put(task)
-    
+        self._queue = asyncio.Queue()
+        self._processing = False
+        self._shutdown = False
+        self.current_size = 0
+
+    async def put(self, item):
+        self.current_size += 1
+        await self._queue.put(item)
+
+    async def get(self):
+        item = await self._queue.get()
+        self.current_size -= 1
+        return item
+
     def qsize(self):
-        return self.queue.qsize()
-    
-    async def process_queue(self):
-        """Background task to process queued flux generation or button tasks."""
-        while True:
-            # Check shutdown flag before getting new task
-            if self.is_shutting_down and self.queue.empty():
-                logger.info("🛑 Shutdown flag detected and queue is empty, stopping queue processor")
-                break
-                
-            task = await self.queue.get()
-            try:
-                task_type = task.get('type')
-                logger.info(f"Processing task of type '{task_type}' for user {task.get('interaction').user if task.get('interaction') else 'Unknown'}.")
-                
-                if task_type == 'flux':
-                    interaction = task.get('interaction')
-                    description = task.get('description')
-                    size = task.get('size')
-                    seed = task.get('seed')
-                    if interaction and isinstance(interaction, discord.Interaction):
-                        await process_flux_image(interaction, description, size, seed)
-                    else:
-                        logger.error("Task missing 'interaction' or 'interaction' is not a discord.Interaction instance for flux task.")
-                elif task_type == 'button':
-                    interaction = task.get('interaction')
-                    action = task.get('action')
-                    prompt = task.get('prompt')
-                    width = task.get('width')
-                    height = task.get('height')
-                    seed = task.get('seed')
+        return self.current_size
 
-                    logger.debug(f"Handling button action '{action}' for user {interaction.user}.")
-
-                    if action == 'random':
-                        # 'random' action does not require 'prompt' or 'seed'
-                        if all([interaction, action, width is not None, height is not None]) and isinstance(interaction, discord.Interaction):
-                            await handle_random(interaction, width, height, self.qsize())
-                        else:
-                            logger.error("Incomplete button task parameters for 'random' action.")
-                            if not interaction.response.is_done():
-                                await interaction.response.send_message("❌ Incomplete task parameters.", ephemeral=True)
-                            else:
-                                await interaction.followup.send("❌ Incomplete task parameters.", ephemeral=True)
-                    elif action in ['remix', 'edit', 'fancy', 'wide', 'tall']:
-                        if all([interaction, action, prompt, width is not None, height is not None]) and isinstance(interaction, discord.Interaction):
-                            if action == 'remix':
-                                await handle_remix(interaction, prompt, width, height, seed, self.qsize())
-                            elif action == 'edit':
-                                await handle_edit(interaction, prompt, width, height, seed, self.qsize())
-                            elif action == 'fancy':
-                                await handle_fancy(
-                                    interaction,
-                                    prompt,
-                                    width,
-                                    height,
-                                    seed,
-                                    self.qsize()
-                                )
-                            elif action == 'wide':
-                                await handle_wide(interaction, prompt, width, height, seed, self.qsize())
-                            elif action == 'tall':
-                                await handle_tall(interaction, prompt, width, height, seed, self.qsize())
-                        else:
-                            logger.error(f"Incomplete button task parameters for '{action}' action.")
-                            if not interaction.response.is_done():
-                                await interaction.response.send_message("❌ Incomplete task parameters.", ephemeral=True)
-                            else:
-                                await interaction.followup.send("❌ Incomplete task parameters.", ephemeral=True)
-                    else:
-                        logger.error(f"Unknown button action: {action}")
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(f"Unknown action: {action}", ephemeral=True)
-                        else:
-                            await interaction.followup.send(f"Unknown action: {action}", ephemeral=True)
-                else:
-                    logger.error(f"Unknown task type: {task_type}")
-            except Exception as e:
-                interaction = task.get('interaction')
-                if interaction and isinstance(interaction, discord.Interaction):
-                    try:
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(
-                                f"❌ An error occurred: {str(e)}", ephemeral=True
-                            )
-                        else:
-                            await interaction.followup.send(
-                                f"❌ An error occurred: {str(e)}", ephemeral=True
-                            )
-                    except AttributeError:
-                        logger.error("Failed to send error message: interaction does not have 'response' or 'followup'.")
-                logger.error(f"Error processing task: {e}", exc_info=True)
-            finally:
-                self.queue.task_done()
-                if self.is_shutting_down:
-                    # Clear remaining items from queue
-                    while not self.queue.empty():
-                        try:
-                            dropped_task = self.queue.get_nowait()
-                            interaction = dropped_task.get('interaction')
-                            if interaction and isinstance(interaction, discord.Interaction):
-                                try:
-                                    if not interaction.response.is_done():
-                                        await interaction.response.send_message(
-                                            "❌ Task cancelled due to bot shutdown", 
-                                            ephemeral=True
-                                        )
-                                    else:
-                                        await interaction.followup.send(
-                                            "❌ Task cancelled due to bot shutdown", 
-                                            ephemeral=True
-                                        )
-                                except Exception:
-                                    pass
-                            self.queue.task_done()
-                        except asyncio.QueueEmpty:
-                            break
-                    break
-    
     async def initiate_shutdown(self):
-        """Initiates the shutdown process for the queue."""
-        self.is_shutting_down = True
-        try:
-            # Wait a reasonable time for current task to complete
-            logger.info("⏳ Waiting for current task to complete...")
-            await asyncio.wait_for(self.queue.join(), timeout=30.0)
-            logger.info("✅ Queue processing completed or timeout reached.")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Timeout waiting for queue to finish, proceeding with shutdown")
-        except Exception as e:
-            logger.error(f"❌ Error while waiting for queue to finish: {e}")
+        self._shutdown = True
+        # Clear the queue
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+
+    async def process_queue(self):
+        """Process items in the queue."""
+        while not self._shutdown:
+            try:
+                if self._processing:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                self._processing = True
+                item = await self.get()
+
+                if item['type'] == 'flux':
+                    await process_flux_image(
+                        item['interaction'],
+                        item['description'],
+                        item['size'],
+                        item['seed']
+                    )
+                elif item['type'] == 'button':
+                    if item['action'] == 'remix':
+                        await handle_remix(
+                            item['interaction'],
+                            item['prompt'],
+                            item['width'],
+                            item['height'],
+                            item['seed'],
+                            self.qsize()
+                        )
+                    elif item['action'] == 'fancy':
+                        await handle_fancy(
+                            item['interaction'],
+                            item['prompt'],
+                            item['width'],
+                            item['height'],
+                            item['seed'],
+                            self.qsize()
+                        )
+                    elif item['action'] == 'wide':
+                        await handle_wide(
+                            item['interaction'],
+                            item['prompt'],
+                            item['width'],
+                            item['height'],
+                            item['seed'],
+                            self.qsize()
+                        )
+                    elif item['action'] == 'tall':
+                        await handle_tall(
+                            item['interaction'],
+                            item['prompt'],
+                            item['width'],
+                            item['height'],
+                            item['seed'],
+                            self.qsize()
+                        )
+                    elif item['action'] == 'random':
+                        await handle_random(
+                            item['interaction'],
+                            item['width'],
+                            item['height'],
+                            self.qsize()
+                        )
+                    elif item['action'] == 'edit':
+                        await handle_edit(
+                            item['interaction'],
+                            item['prompt'],
+                            item['width'],
+                            item['height'],
+                            item['seed'],
+                            self.qsize()
+                        )
+
+            except Exception as e:
+                logger.error(f"Error processing queue item: {e}")
+            finally:
+                self._processing = False
+
+# Modify the bot initialization to include the queue
+class SoupyBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.flux_queue = FluxQueue()
 
 # Then your bot initialization can use the SoupyBot class
 intents = discord.Intents.default()
@@ -666,7 +637,7 @@ def get_random_terms():
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
-        elif rand_val < 0.05: 
+        elif rand_val < 0.33: 
             terms['Character Concept'] = "Grey Sphynx Cat"
         else:  # 47.5% chance (0.525 to 1.0)
             terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
@@ -744,7 +715,7 @@ async def handle_random(interaction, width, height, queue_size):
         response = await async_chat_completion(
             model=os.getenv("LOCAL_CHAT"),
             messages=messages_for_llm,
-            temperature=0.9,
+            temperature=0.8,
             max_tokens=325          
         )
         random_prompt = response.choices[0].message.content.strip()
@@ -1047,7 +1018,17 @@ def should_bot_respond_to_message(message):
 
 # Wrap LLM calls in an asyncio thread for concurrency
 async def async_chat_completion(*args, **kwargs):
-    return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
+    """Wraps the OpenAI chat completion in an async context and cleans the response."""
+    response = await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
+    # Clean the response text before returning
+    response.choices[0].message.content = clean_response(response.choices[0].message.content)
+    return response
+
+def clean_response(text: str) -> str:
+    text = text.strip()
+    while (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        text = text[1:-1].strip()
+    return text
 
 # Extract link content from a URL sent by the user
 async def extract_link_content(url: str) -> Optional[dict]:
@@ -2045,18 +2026,23 @@ async def generate_flux_image(
     pre_duration=0,
     selected_terms: Optional[str] = None  # New parameter
 ):
-    flux_server_url = FLUX_SERVER_URL.rstrip('/')  # Ensure no trailing slash
-    num_steps = 4
-    guidance = 3.5
-    payload = {
-        "prompt": prompt,
-        "steps": str(num_steps),
-        "guidance_scale": str(guidance),
-        "width": str(width),
-        "height": str(height),
-        "seed": str(seed)
-    }
     try:
+        # Check if we need to send an initial response
+        if not interaction.response.is_done():
+            await interaction.response.defer(thinking=True)
+
+        flux_server_url = FLUX_SERVER_URL.rstrip('/')  # Ensure no trailing slash
+        num_steps = 4
+        guidance = 3.5
+        payload = {
+            "prompt": prompt,
+            "steps": str(num_steps),
+            "guidance_scale": str(guidance),
+            "width": str(width),
+            "height": str(height),
+            "seed": str(seed)
+        }
+
         # Use typing context manager for consistent behavior
         async with interaction.channel.typing():
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
@@ -2109,13 +2095,21 @@ async def generate_flux_image(
                             prompt=prompt, width=width, height=height, seed=seed
                         )
 
-                        # Send the generated image to the Discord channel
-                        await interaction.channel.send(
-                            content=f"{interaction.user.mention} 🖼️ Generated Image:",
-                            embeds=[description_embed, details_embed],
-                            file=image_file,
-                            view=new_view
-                        )
+                        # When sending the final message, use followup if the initial response was deferred
+                        if interaction.response.is_done():
+                            await interaction.followup.send(
+                                content=f"{interaction.user.mention} 🖼️ Generated Image:",
+                                embeds=[description_embed, details_embed],
+                                file=image_file,
+                                view=new_view
+                            )
+                        else:
+                            await interaction.channel.send(
+                                content=f"{interaction.user.mention} 🖼️ Generated Image:",
+                                embeds=[description_embed, details_embed],
+                                file=image_file,
+                                view=new_view
+                            )
                         logger.info(
                             f"🖼️ Image generation completed for {interaction.user}: filename='{filename}', total_duration={total_duration:.2f}s"
                         )
@@ -2188,9 +2182,9 @@ async def process_flux_image(interaction: discord.Interaction, description: str,
 
 
 
-def should_randomly_respond(probability=0.03) -> bool:
+def should_randomly_respond(probability=0.015) -> bool:
     """
-    Returns True with the given probability (e.g., 3%).
+    Returns True with the given probability (e.g., 1.5%).
     """
     return random.random() < probability
 
@@ -2303,7 +2297,7 @@ async def on_message(message):
     # The rest of the message handling remains the same...
     
     # Continue with existing message handling
-    should_respond = should_bot_respond_to_message(message) or should_randomly_respond(probability=0.03)
+    should_respond = should_bot_respond_to_message(message) or should_randomly_respond()
     if should_respond:
         logger.info(f"📝 Processing message from {message.author}: '{message.content}'")
         
@@ -2355,11 +2349,14 @@ async def on_message(message):
                 await increment_user_stat(message.author.id, 'chat_responses', message.guild.id)
 
                 # Split the bot's entire reply into smaller chunks
+                # Split the bot's entire reply into smaller chunks
                 chunks = split_message(reply, max_len=1500)
-                
+
                 for chunk in chunks:
-                    # Remove everything before the first colon and any quotation marks
+                    # Remove everything before the first colon
                     cleaned_chunk = remove_all_before_colon(chunk)
+                    # Now remove any surrounding quotation marks
+                    cleaned_chunk = clean_response(cleaned_chunk)
                     logger.debug(f"✂️ Sending cleaned chunk to {message.channel}: '{cleaned_chunk}'")
                     await message.channel.send(cleaned_chunk)
                     await asyncio.sleep(RATE_LIMIT)
