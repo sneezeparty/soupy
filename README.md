@@ -132,8 +132,8 @@ The Random button triggers a function that chooses from random keywords located 
 
 ![Random example](https://i.imgur.com/0eFjCSq.png)
 
-``/search <query>``
-An example of the ``/search`` command, which takes your search and sends it to the LLM for processing, and then returns results using BeautifulSoup and natural language processing:
+``/soupysearch <query>``
+An example of the ``/search`` command, which takes your search and sends it to the LLM for processing, and then returns results using BeautifulSoup and natural language processing.  This feature is a little unreliable currently, because it requires a huge context window.  I guess if you have the necessary RAM, it would work fine.
 
 ![enter image description here](https://i.imgur.com/UnfRKsC.png)
 
