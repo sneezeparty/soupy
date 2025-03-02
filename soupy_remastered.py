@@ -42,7 +42,7 @@ from datetime import datetime, timedelta, time as datetime_time
 from functools import wraps
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Tuple
 from urllib.parse import urlparse
 
 # Third party imports
@@ -72,6 +72,73 @@ from colorlog import ColoredFormatter
 
 # Initialize colorama
 colorama.init(autoreset=True)
+
+# URL processing cache and constants
+url_cache: Dict[str, Tuple[Optional[str], float]] = {}
+URL_CACHE_TTL = 3600  # 1 hour in seconds
+
+def extract_urls(text: str) -> List[str]:
+    """
+    Extracts URLs from text, supporting common URL formats.
+    Returns a list of URLs, limited by MAX_URLS_PER_MESSAGE.
+    """
+    url_pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+'
+    urls = re.findall(url_pattern, text)
+    max_urls = int(os.getenv('MAX_URLS_PER_MESSAGE', 3))
+    return urls[:max_urls]  # Limit number of URLs processed per message
+
+async def extract_url_content(url: str, session: aiohttp.ClientSession) -> Optional[str]:
+    """
+    Extracts relevant content from a URL, with safety checks and timeout.
+    Returns a concise summary of the content or None if extraction fails.
+    """
+    try:
+        # Get timeout from env or default to 10 seconds
+        timeout = aiohttp.ClientTimeout(total=float(os.getenv('URL_FETCH_TIMEOUT', 10000)) / 1000)
+        
+        async with session.get(url, timeout=timeout) as response:
+            if response.status != 200:
+                logger.warning(f"Failed to fetch URL {url}: HTTP {response.status}")
+                return None
+                
+            # Check content type
+            content_type = response.headers.get('Content-Type', '').lower()
+            if not content_type.startswith('text/html'):
+                logger.debug(f"Skipping non-HTML content type: {content_type} for {url}")
+                return None
+            
+            # Get text content
+            html = await response.text()
+            
+            # Use trafilatura for main content extraction
+            content = trafilatura.extract(html, include_links=False, include_images=False, 
+                                        include_tables=False, no_fallback=True)
+            
+            if not content:
+                # Fallback to html2text if trafilatura fails
+                h = html2text.HTML2Text()
+                h.ignore_links = True
+                h.ignore_images = True
+                h.ignore_tables = True
+                content = h.handle(html).strip()
+            
+            if not content:
+                logger.debug(f"No content extracted from {url}")
+                return None
+            
+            # Clean and limit content length
+            content = ' '.join(content.split())  # Normalize whitespace
+            if len(content) > 500:  # Limit to reasonable summary length
+                content = content[:497] + "..."
+            
+            return f"[URL content: {content}]"
+            
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout while fetching {url}")
+        return None
+    except Exception as e:
+        logger.error(f"Error processing URL {url}: {e}")
+        return None
 
 """
 ---------------------------------------------------------------------------------
@@ -637,7 +704,7 @@ def get_random_terms():
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
-        elif rand_val < 0.05: 
+        elif rand_val < 0.33: 
             terms['Character Concept'] = "Grey Sphynx Cat"
         else:  # 47.5% chance (0.525 to 1.0)
             terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
@@ -1030,163 +1097,99 @@ def clean_response(text: str) -> str:
         text = text[1:-1].strip()
     return text
 
-# Extract link content from a URL sent by the user
-async def extract_link_content(url: str) -> Optional[dict]:
-    """
-    Extracts content from a URL and returns relevant information.
-    Improved to better handle different content types and extract more complete content.
-    """
-    try:
-        # Parse the domain
-        domain = urlparse(url).netloc
-        
-        # Initialize default response
-        content_info = {
-            'title': None,
-            'content': None,
-            'type': 'unknown',
-            'domain': domain
-        }
-        
-        # Use trafilatura to download and extract content
-        downloaded = trafilatura.fetch_url(url)  # Removed timeout parameter
-        if not downloaded:
-            logger.warning(f"Failed to download content from {url}")
-            return None
-            
-        # Extract main content with more complete settings
-        content = trafilatura.extract(
-            downloaded,
-            include_links=True,
-            include_images=False,
-            include_tables=True,
-            no_fallback=False,
-            target_language='en',
-            favor_precision=True,
-            include_comments=False
-        )
-        
-        if not content:
-            logger.warning(f"No content extracted from {url}")
-            return None
-            
-        # Parse with BeautifulSoup for additional metadata
-        soup = BeautifulSoup(downloaded, 'html.parser')
-        
-        # Get title - try multiple sources
-        title = None
-        # Try OpenGraph title first
-        og_title = soup.find('meta', property='og:title')
-        if og_title:
-            title = og_title.get('content')
-        
-        # If no OG title, try Twitter card
-        if not title:
-            twitter_title = soup.find('meta', {'name': 'twitter:title'})
-            if twitter_title:
-                title = twitter_title.get('content')
-        
-        # Finally, fall back to regular title tag
-        if not title:
-            title_tag = soup.find('title')
-            if title_tag:
-                title = title_tag.text.strip()
-        
-        content_info['title'] = title
-        
-        # Determine content type and handle accordingly
-        if 'twitter.com' in domain or 'x.com' in domain:
-            content_info['type'] = 'social_post'
-            # For tweets, we want the full content
-            content_info['content'] = content
-        elif 'youtube.com' in domain or 'youtu.be' in domain:
-            content_info['type'] = 'video'
-            # For YouTube, try to get description
-            description = soup.find('meta', {'name': 'description'})
-            if description:
-                content_info['content'] = description.get('content')
-            else:
-                content_info['content'] = content
-        elif any(news_domain in domain for news_domain in ['news', 'article', 'blog']):
-            content_info['type'] = 'article'
-            # For articles, include a substantial portion of the content
-            content_info['content'] = content[:2000] + '...' if len(content) > 2000 else content
-        else:
-            content_info['type'] = 'webpage'
-            # For general webpages, include a reasonable amount of content
-            content_info['content'] = content[:1500] + '...' if len(content) > 1500 else content
-        
-        # Clean up the content
-        if content_info['content']:
-            # Remove excessive whitespace while preserving paragraphs
-            content_info['content'] = '\n\n'.join(
-                ' '.join(paragraph.split())
-                for paragraph in content_info['content'].split('\n')
-                if paragraph.strip()
-            )
-        
-        logger.info(f"Successfully extracted content from {url} ({content_info['type']})")
-        return content_info
-        
-    except Exception as e:
-        logger.error(f"Error extracting content from {url}: {e}")
-        return None
 
 # Fetch "limit" recent messages from the channel, including content from any images.
 async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIMIT", 25)), current_message_id=None):
     """
-    Fetches recent messages from the channel, including content from any images.
-    URL parsing has been disabled.
+    Fetches recent messages from the channel, including content from any images and URLs.
+    Optimized for maintaining conversation context.
     """
     message_history = []
     seen_messages = set()
+    current_topic_messages = []  # Track messages in current topic
+    background_messages = []     # Track older context messages
     
-    async for msg in channel.history(limit=limit, oldest_first=False):
-        # Skip command messages
-        if msg.content.startswith("!"):
-            continue
-        
-        # Skip bot's own messages containing "Generated Image"
-        if msg.author == bot.user and "Generated Image" in msg.content:
-            continue
-        
-        # Skip current message if provided
-        if current_message_id and msg.id == current_message_id:
-            continue
-        
-        # Create base message content
-        message_content = msg.content
-        
-        # Check if this message has a stored image description
-        if msg.id in image_history:
-            img_info = image_history[msg.id]
-            # If the message is empty (just an image), use only the image description
-            if not message_content.strip():
-                message_content = f"[shares an image: {img_info['description']}]"
-            # If there's existing content, append the image description
-            else:
-                message_content = f"{message_content} [shares an image: {img_info['description']}]"
-        
-        # Create unique message identifier
-        message_key = f"{msg.author.name}:{message_content}"
-        if message_key in seen_messages:
-            continue
+    # Create a single session for all URL requests
+    async with aiohttp.ClientSession() as session:
+        async for msg in channel.history(limit=limit, oldest_first=False):
+            # Skip command messages and bot's image generation messages
+            if msg.content.startswith("!") or (msg.author == bot.user and "Generated Image" in msg.content):
+                continue
+                
+            # Skip current message if provided
+            if current_message_id and msg.id == current_message_id:
+                continue
             
-        seen_messages.add(message_key)
-        
-        # Format message with role assignment and author
-        role = "assistant" if msg.author == bot.user else "user"
-        formatted_content = f"{msg.author.name}: {message_content}"
-        message_history.append({"role": role, "content": formatted_content})
+            # Create base message content
+            message_content = msg.content
+            
+            # Process URLs in the message
+            urls = extract_urls(message_content)
+            url_contents = []
+            
+            for url in urls:
+                # Check cache first
+                current_time = time.time()
+                if url in url_cache:
+                    cached_content, timestamp = url_cache[url]
+                    if current_time - timestamp < URL_CACHE_TTL:
+                        if cached_content:  # Only add if there was actual content
+                            url_contents.append(cached_content)
+                        continue
+                
+                # Fetch and process URL content
+                content = await extract_url_content(url, session)
+                url_cache[url] = (content, current_time)
+                if content:
+                    url_contents.append(content)
+            
+            # Add URL contents to message
+            if url_contents:
+                message_content = f"{message_content}\n{' '.join(url_contents)}"
+            
+            # Add image descriptions if available
+            if msg.id in image_history:
+                img_info = image_history[msg.id]
+                if not message_content.strip():
+                    message_content = f"[shares an image: {img_info['description']}]"
+                else:
+                    message_content = f"{message_content} [shares an image: {img_info['description']}]"
+            
+            # Create unique message identifier
+            message_key = f"{msg.author.name}:{message_content}"
+            if message_key in seen_messages:
+                continue
+                
+            seen_messages.add(message_key)
+            
+            # Format message with role assignment and author
+            role = "assistant" if msg.author == bot.user else "user"
+            formatted_content = f"{msg.author.name}: {message_content}"
+            formatted_message = {"role": role, "content": formatted_content}
+            
+            # Add to appropriate list based on position
+            if len(current_topic_messages) < 5:  # Keep most recent 5 messages for current topic
+                current_topic_messages.append(formatted_message)
+            else:
+                background_messages.append(formatted_message)
     
-    # Clean up old entries from image_history (optional)
+    # Clean up old entries from image_history
     current_time = datetime.utcnow()
     old_messages = [msg_id for msg_id, info in image_history.items() 
                    if (current_time - info['timestamp']).total_seconds() > 3600]  # 1 hour
     for msg_id in old_messages:
         del image_history[msg_id]
     
-    return list(reversed(message_history))
+    # Clean up old URL cache entries
+    current_time = time.time()
+    expired_urls = [url for url, (_, timestamp) in url_cache.items() 
+                   if current_time - timestamp > URL_CACHE_TTL]
+    for url in expired_urls:
+        del url_cache[url]
+    
+    # Combine messages with current topic first, then relevant background
+    message_history = current_topic_messages + background_messages
+    return list(reversed(message_history))  # Maintain chronological order
 
 
 """
