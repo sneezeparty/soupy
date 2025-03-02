@@ -1,5 +1,10 @@
 ## Changelog
 
+## [0.8.31] - 3/2/2025
+### Fixed
+- Fancy button was broken during last update, it works again now
+- Too many grey sphynx cats were being generated
+
 ## [0.8.3] - 3/1/2025
 ### Fixed
 - Redid the queue system so that it will cope better with different types of requests simultaneously.
