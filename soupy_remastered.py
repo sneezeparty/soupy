@@ -44,8 +44,6 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from urllib.parse import urlparse
-
-# Third party imports
 import aiohttp
 import discord
 import pytz
@@ -64,8 +62,6 @@ import trafilatura
 from PIL import Image
 import soupy_interject
 import soupy_search
-
-# Logging and color imports
 import colorama
 from colorama import Fore, Style
 from colorlog import ColoredFormatter
