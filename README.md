@@ -15,6 +15,7 @@ Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/Gr
 |--|--|
 | ``/flux <prompt> <modifiers>`` | Generate a new image based on a description given by the user using available modifiers
 | ``/soupysearch <query>``|Uses DuckDuckGo API (no key or login required) search results and feeds them to the LLM for parsing and summary, eventually sending them to the channel.  |
+|``/soupyimage <query>`` |Uses DuckDuckGo API to search for an image.  Returns a random image from the top 300 results. |
 |``/whattime <location>``|Provides your local time for a geographic location|
 |``/8ball <query>``|Traditional 8-ball|
 |``/9ball <query>``|Gives LLM-generated 8-ball style answers
