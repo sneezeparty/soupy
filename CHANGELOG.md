@@ -1,5 +1,12 @@
 ## Changelog
 
+## [0.8.4] - 3/15/2025
+### Fixed
+- The queueing system for the Random button would sometimes lose items due to how the back-end was functioning
+- Changed the behavior of the Random button in the following way: 50% of the time it will now choose keywords and send the naked keywords to the Flux backend for generation, rather than using the LLM for elaboration.  The results of this are pretty cool, and in some ways more varied than the LLM-generated responses
+- Updated the Gradio backend to use slightly less memory during generation... probably. There is also a new gradio backend that is 100% on the GPU and doesn't have CPU fallback, if you'd like
+- Small bug fixes
+
 ## [0.8.31] - 3/2/2025
 ### Fixed
 - Fancy button was broken during last update, it works again now
