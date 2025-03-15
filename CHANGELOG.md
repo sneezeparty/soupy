@@ -3,6 +3,7 @@
 ## [0.8.4] - 3/15/2025
 ### Changed or added
 - Changed the behavior of the Random button in the following way: 50% of the time it will now choose keywords and send the naked keywords to the Flux backend for generation, rather than using the LLM for elaboration.  The results of this are pretty cool, and in some ways more varied than the LLM-generated responses
+- Added a new command, /soupyimage <query>, which uses the DuckDuckGo API to search for an image.  It will choose a random image from the top 300 results and send that image to the channel.
 - Removed BLIP functionality because it takes up too much memory and doesn't add much functionality
 - Added a new version of the gradio backend that is 100% GPU without and CPU/RAM fallback
 
