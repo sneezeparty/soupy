@@ -9,7 +9,7 @@ Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to h
 View the [Changelog](CHANGELOG.md).
 
 # Soupy Remastered - Updated March 15th, 2025
-Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BLIP-2/Gradio backend for image-related tasks, and an LM Studio backend for chat-related tasks.  It has a number of neat functions, such as:
+Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/Gradio backend for image-related tasks, and an LM Studio backend for chat-related tasks.  It has a number of neat functions, such as:
 
 | Function | Description |
 |--|--|
