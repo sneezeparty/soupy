@@ -41,9 +41,6 @@ from threading import Lock
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-# Import BLIP-2 for image analysis
-from transformers import Blip2Processor, Blip2ForConditionalGeneration
-
 # Initialize Colorama for Colored Logging in Windows
 init(autoreset=True)
 
@@ -131,63 +128,6 @@ class ModelConfig:
 # =======================
 # Vision Configuration and Image Analysis
 # =======================
-class VisionConfig:
-    """Configuration for vision model."""
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    MODEL_ID = "Salesforce/blip2-opt-2.7b"
-    
-    _processor = None
-    _model = None
-    _lock = threading.Lock()
-    
-    @classmethod
-    def load_vision_model(cls):
-        """Loads BLIP-2 processor and model if not already loaded."""
-        with cls._lock:
-            if cls._processor is None or cls._model is None:
-                logging.info("Loading BLIP-2 vision model...")
-                try:
-                    cls._processor = Blip2Processor.from_pretrained(
-                        cls.MODEL_ID,
-                        cache_dir="./model_cache",
-                        trust_remote_code=True
-                    )
-                    
-                    cls._model = Blip2ForConditionalGeneration.from_pretrained(
-                        cls.MODEL_ID,
-                        torch_dtype=torch.float16 if cls.DEVICE == "cuda" else torch.float32,
-                        cache_dir="./model_cache",
-                        trust_remote_code=True,
-                        device_map="auto"
-                    )
-                    
-                    logging.info(f"BLIP-2 vision model loaded successfully on {cls.DEVICE}")
-                except Exception as e:
-                    logging.error(f"Failed to load BLIP-2 model: {str(e)}")
-                    raise RuntimeError(f"Failed to initialize vision model: {str(e)}")
-            
-            return cls._processor, cls._model
-    
-    @classmethod
-    def unload_vision_model(cls):
-        """Unloads BLIP-2 model to free up memory."""
-        with cls._lock:
-            if cls._model is not None:
-                # Delete the model
-                del cls._model
-                cls._model = None
-                
-                # Also clear the processor
-                if cls._processor is not None:
-                    del cls._processor
-                    cls._processor = None
-                
-                # Force CUDA cache cleanup
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.ipc_collect()  # Additional CUDA cleanup
-                
-                logging.info("BLIP-2 vision model and processor fully unloaded")
 
 # Model Loading and Setup
 def load_scheduler(repo, revision):
@@ -442,10 +382,6 @@ async def lifespan(app: FastAPI):
             transformer_model
         )
 
-        # Load BLIP-2 vision model
-        global vision_processor, vision_model
-        vision_processor, vision_model = VisionConfig.load_vision_model()
-
         logging.info("Flux Image Generation and Background Removal API is ready to receive requests.")
         yield  # Indicates that the startup phase is complete
 
@@ -478,92 +414,6 @@ executor = ThreadPoolExecutor(max_workers=1)  # Limit to 1 worker to prevent GPU
 # =======================
 # Endpoint Definitions
 # =======================
-
-def analyze_image(image: Image.Image) -> str:
-    
-    # Analyzes an image using BLIP-2 and returns a detailed description.
-    
-    try:
-        if not vision_processor or not vision_model:
-            logging.error("Vision models not initialized")
-            return "Error: Vision models not initialized"
-
-        # Prepare image for model
-        inputs = vision_processor(
-            image, 
-            return_tensors="pt"
-        ).to(VisionConfig.DEVICE)
-        
-        # Use a more specific prompt to get detailed descriptions
-        prompt = "Provide a detailed description of this image, including artistic style and subject matter details:"
-        
-        # Generate description with adjusted parameters
-        with torch.no_grad():
-            generated_ids = vision_model.generate(
-                **inputs,
-                do_sample=True,  # Enable sampling for more creative descriptions
-                max_length=120,  
-                min_length=60, 
-                top_p=0.9,    
-                temperature=0.8,
-                repetition_penalty=1.7,
-                length_penalty=1.9,
-                num_beams=5 
-            )
-        
-        description = vision_processor.batch_decode(
-            generated_ids, 
-            skip_special_tokens=True
-        )[0].strip()
-        
-        logging.info("Image analysis completed")
-        return description
-        
-    except Exception as e:
-        logging.error(f"Error analyzing image: {e}")
-        raise Exception(f"Error analyzing image: {e}")
-
-
-@app.post("/analyze_image", summary="Analyze an image using BLIP-2")
-async def analyze_image_endpoint(
-    file: UploadFile = File(..., description="The image file to analyze.")
-):
-    try:
-        contents = await file.read()
-        image = Image.open(BytesIO(contents)).convert("RGB")
-        
-        # Load model only when needed
-        processor, model = VisionConfig.load_vision_model()
-        
-        try:
-            # Use the model for analysis
-            inputs = processor(image, return_tensors="pt").to(VisionConfig.DEVICE)
-            prompt = "Provide a detailed description of this image, including artistic style and subject matter details:"
-            
-            with torch.no_grad():
-                generated_ids = model.generate(
-                    **inputs,
-                    do_sample=True,
-                    max_length=120,
-                    min_length=60,
-                    top_p=0.9,
-                    temperature=0.8,
-                    repetition_penalty=1.7,
-                    length_penalty=1.9,
-                    num_beams=5
-                )
-            
-            description = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            
-        finally:
-            # Always unload the model after use
-            VisionConfig.unload_vision_model()
-        
-        return {"description": description}
-        
-    except Exception as e:
-        logging.error(f"Error analyzing image: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/flux")
 async def flux_endpoint(
