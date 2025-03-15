@@ -44,6 +44,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from urllib.parse import urlparse
+
+# Third party imports
 import aiohttp
 import discord
 import pytz
@@ -62,6 +64,9 @@ import trafilatura
 from PIL import Image
 import soupy_interject
 import soupy_search
+import soupy_imagesearch
+
+# Logging and color imports
 import colorama
 from colorama import Fore, Style
 from colorlog import ColoredFormatter
@@ -409,7 +414,16 @@ class FluxQueue:
                         item['seed']
                     )
                 elif item['type'] == 'button':
-                    if item['action'] == 'remix':
+                    if item['action'] == 'random':
+                        # Pass the prompt directly to handle_random if it exists
+                        await handle_random(
+                            item['interaction'],
+                            item['width'],
+                            item['height'],
+                            self.qsize(),
+                            direct_prompt=item.get('prompt')
+                        )
+                    elif item['action'] == 'remix':
                         await handle_remix(
                             item['interaction'],
                             item['prompt'],
@@ -445,13 +459,6 @@ class FluxQueue:
                             item['seed'],
                             self.qsize()
                         )
-                    elif item['action'] == 'random':
-                        await handle_random(
-                            item['interaction'],
-                            item['width'],
-                            item['height'],
-                            self.qsize()
-                        )
                     elif item['action'] == 'edit':
                         await handle_edit(
                             item['interaction'],
@@ -467,11 +474,6 @@ class FluxQueue:
             finally:
                 self._processing = False
 
-# Modify the bot initialization to include the queue
-class SoupyBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.flux_queue = FluxQueue()
 
 # Then your bot initialization can use the SoupyBot class
 intents = discord.Intents.default()
@@ -716,100 +718,110 @@ def get_random_terms():
 
 
 
-async def handle_random(interaction, width, height, queue_size):
+async def handle_random(interaction, width, height, queue_size, direct_prompt=None):
     """
     Handles the generation of a random image by selecting random terms from categories
     and combining them with the base random prompt.
+    
+    Args:
+        interaction: The Discord interaction
+        width: Image width
+        height: Image height
+        queue_size: Current size of the queue
+        direct_prompt: Optional direct prompt to use (for terms-only mode)
     """
     try:
-        if not RANDOMPROMPT:
-            await interaction.response.send_message("❌ No RANDOMPROMPT found in .env.", ephemeral=True)
-            return
-
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-
         # Start timing for prompt generation
         prompt_start_time = time.perf_counter()
+        selected_terms_str = None
 
         # Show typing indicator in the channel
         async with interaction.channel.typing():
-            # Randomly choose dimensions
-            dimension_choices = [
-                (1024, 1024),  # Square
-                (1920, 1024),  # Wide
-                (1024, 1920)   # Tall
-            ]
-            width, height = random.choice(dimension_choices)
-            logger.info(f"🔀 Selected random dimensions for {interaction.user}: {width}x{height}")
+            # Check if we have a direct prompt (terms-only mode)
+            if direct_prompt:
+                random_prompt = direct_prompt
+                selected_terms_str = direct_prompt  # The terms are the prompt in this case
+                logger.info(f"🔀 Using direct terms as prompt for {interaction.user}: {random_prompt}")
+                # End timing for direct prompt case
+                prompt_end_time = time.perf_counter()
+                prompt_duration = prompt_end_time - prompt_start_time
+            else:
+                # Original random prompt generation logic
+                if not RANDOMPROMPT:
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("❌ No RANDOMPROMPT found in .env.", ephemeral=True)
+                    else:
+                        await interaction.followup.send("❌ No RANDOMPROMPT found in .env.", ephemeral=True)
+                    return
 
-            # Get random terms first
-            random_terms = get_random_terms()
-            formatted_descriptors = "\n".join([f"**{category}:** {term}" for category, term in random_terms.items()])
-            logger.info(f"🔀 Selected Descriptors for {interaction.user}:\n{formatted_descriptors}")
-            
-            # Combine with base prompt, but emphasize artistic style
-            art_style = random_terms.get('Artistic Rendering Style', '')
-            other_terms = [term for category, term in random_terms.items() if category != 'Artistic Rendering Style']
-            
-            # Create a more detailed artistic style instruction
-            style_emphasis = (
-                f"The image should be rendered combining these artistic styles: {art_style}. "
-                f"These artistic styles should be the dominant visual characteristics, "
-                f"blended together, with the following elements incorporated within these styles: {', '.join(other_terms)}"
-            )
-            
-            combined_prompt = f"{RANDOMPROMPT} {style_emphasis}"
-            logger.info(f"🔀 Combined Prompt for {interaction.user}:\n{combined_prompt}")
+                # Get random terms first
+                random_terms = get_random_terms()
+                formatted_descriptors = "\n".join([f"**{category}:** {term}" for category, term in random_terms.items()])
+                logger.info(f"🔀 Selected Descriptors for {interaction.user}:\n{formatted_descriptors}")
+                
+                # Combine with base prompt, but emphasize artistic style
+                art_style = random_terms.get('Artistic Rendering Style', '')
+                other_terms = [term for category, term in random_terms.items() if category != 'Artistic Rendering Style']
+                
+                # Create a more detailed artistic style instruction
+                style_emphasis = (
+                    f"The image should be rendered combining these artistic styles: {art_style}. "
+                    f"These artistic styles should be the dominant visual characteristics, "
+                    f"blended together, with the following elements incorporated within these styles: {', '.join(other_terms)}"
+                )
+                
+                combined_prompt = f"{RANDOMPROMPT} {style_emphasis}"
+                logger.info(f"🔀 Combined Prompt for {interaction.user}:\n{combined_prompt}")
 
-        # Now send to LLM with modified system message
-        system_msg = {
-            "role": "system", 
-            "content": "You are an assistant that creates image prompts with strong emphasis on artistic style. "
-                      "The artistic rendering style should be prominently featured in your prompt, affecting every element described."
-        }
-        user_msg = {"role": "user", "content": combined_prompt}
-        messages_for_llm = [system_msg, user_msg]
+                # Now send to LLM with modified system message
+                system_msg = {
+                    "role": "system", 
+                    "content": "You are an assistant that creates image prompts with strong emphasis on artistic style. "
+                              "The artistic rendering style should be prominently featured in your prompt, affecting every element described."
+                }
+                user_msg = {"role": "user", "content": combined_prompt}
+                messages_for_llm = [system_msg, user_msg]
 
-        # Add logging for the messages being sent to LLM
-        formatted_messages = format_messages(messages_for_llm)
-        logger.debug(f"📜 Sending the following messages to LLM for random prompt:\n{formatted_messages}")
+                # Add logging for the messages being sent to LLM
+                formatted_messages = format_messages(messages_for_llm)
+                logger.debug(f"📜 Sending the following messages to LLM for random prompt:\n{formatted_messages}")
 
-        response = await async_chat_completion(
-            model=os.getenv("LOCAL_CHAT"),
-            messages=messages_for_llm,
-            temperature=0.8,
-            max_tokens=325          
-        )
-        random_prompt = response.choices[0].message.content.strip()
-        logger.info(f"🔀 Generated random prompt for {interaction.user}: {random_prompt}")
+                response = await async_chat_completion(
+                    model=os.getenv("LOCAL_CHAT"),
+                    messages=messages_for_llm,
+                    temperature=0.8,
+                    max_tokens=325          
+                )
+                random_prompt = response.choices[0].message.content.strip()
+                logger.info(f"🔀 Generated random prompt for {interaction.user}: {random_prompt}")
 
-        # End timing for prompt generation
-        prompt_end_time = time.perf_counter()
-        prompt_duration = prompt_end_time - prompt_start_time
+                # Capture the randomly chosen terms as a comma-separated string
+                # Flatten the terms from the dictionary
+                selected_terms_list = []
+                for category, terms in random_terms.items():
+                    # Split by comma in case there are multiple terms in a single category
+                    split_terms = [term.strip() for term in terms.split(',')]
+                    selected_terms_list.extend(split_terms)
+                selected_terms_str = ", ".join(selected_terms_list)
+                
+                # End timing for LLM prompt generation
+                prompt_end_time = time.perf_counter()
+                prompt_duration = prompt_end_time - prompt_start_time
 
-        # Capture the randomly chosen terms as a comma-separated string
-        # Flatten the terms from the dictionary
-        selected_terms_list = []
-        for category, terms in random_terms.items():
-            # Split by comma in case there are multiple terms in a single category
-            split_terms = [term.strip() for term in terms.split(',')]
-            selected_terms_list.extend(split_terms)
-        selected_terms_str = ", ".join(selected_terms_list)
-        logger.info(f"🔀 Selected Terms for {interaction.user}: {selected_terms_str}")
-
+        # Generate new seed for both direct and LLM-generated prompts
         new_seed = random.randint(0, 2**32 - 1)
 
+        # Use generate_flux_image for both direct and LLM-generated prompts
         await generate_flux_image(
             interaction=interaction,
             prompt=random_prompt,
             width=width,
             height=height,
-            seed=new_seed,  # Use new random seed
+            seed=new_seed,
             action_name="Random",
             queue_size=queue_size,
-            pre_duration=prompt_duration,  # Pass the prompt rewriting duration
-            selected_terms=selected_terms_str  # Pass the selected terms
+            pre_duration=prompt_duration,
+            selected_terms=selected_terms_str
         )
 
         await increment_user_stat(interaction.user.id, 'images_generated')
@@ -1386,7 +1398,6 @@ async def stats_command(interaction: discord.Interaction):
                     "username": data.get("username", "Unknown"),
                     "images_generated": server_stats.get("images_generated", 0),
                     "chat_responses": server_stats.get("chat_responses", 0),
-                    "mentions": server_stats.get("mentions", 0)
                 })
         
         if not users_stats:
@@ -1396,7 +1407,6 @@ async def stats_command(interaction: discord.Interaction):
         # Sort users for each category
         top_images = sorted(users_stats, key=lambda x: x["images_generated"], reverse=True)[:5]
         top_chats = sorted(users_stats, key=lambda x: x["chat_responses"], reverse=True)[:5]
-        top_mentions = sorted(users_stats, key=lambda x: x["mentions"], reverse=True)[:5]
         
         # Create embed
         embed = discord.Embed(
@@ -1417,12 +1427,6 @@ async def stats_command(interaction: discord.Interaction):
             chats_field = "No data available."
         embed.add_field(name="💭 Top Chat Responses", value=chats_field, inline=False)
         
-        if top_mentions:
-            mentions_field = "\n".join([f"{i+1}. **{user['username']}** - {user['mentions']} mentions" for i, user in enumerate(top_mentions)])
-        else:
-            mentions_field = "No data available."
-        embed.add_field(name="📣 Top Mentions", value=mentions_field, inline=False)
-        
         embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
         
         await interaction.response.send_message(embed=embed)
@@ -1433,6 +1437,22 @@ async def stats_command(interaction: discord.Interaction):
         logger.error(error_msg)
         await interaction.response.send_message(error_msg, ephemeral=True)
 
+
+async def check_flux_server_status() -> bool:
+    """
+    Checks if the Flux server is online by making a request to its health endpoint.
+    Returns True if the server is online, False otherwise.
+    """
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with session.get(f"{FLUX_SERVER_URL.rstrip('/')}/health") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get("status") == "ok"
+                return False
+    except Exception as e:
+        logger.error(f"Error checking Flux server status: {e}")
+        return False
 
 @bot.tree.command(name="status", description="Displays the current status of the bot, Flux server, and chat functions.")
 async def status_command(interaction: discord.Interaction):
@@ -1449,7 +1469,8 @@ async def status_command(interaction: discord.Interaction):
     else:
         uptime_str = "Uptime information not available."
     
-    # Prepare Flux server status
+    # Check Flux server status
+    flux_server_online = await check_flux_server_status()
     flux_status = "🟢 Online" if flux_server_online else "🔴 Offline"
     
     # Check chat functions status
@@ -1770,87 +1791,128 @@ async def generate_flux_image(
     action_name="Flux",
     queue_size=0,
     pre_duration=0,
-    selected_terms: Optional[str] = None
+    selected_terms: Optional[str] = None  # New parameter
 ):
-    """Generate an image using the Flux API."""
     try:
-        start_time = time.perf_counter()
-        
-        # Prepare the request data
-        request_data = {
+        # Check if we need to send an initial response
+        if not interaction.response.is_done():
+            await interaction.response.defer(thinking=True)
+
+        flux_server_url = FLUX_SERVER_URL.rstrip('/')  # Ensure no trailing slash
+        num_steps = 4
+        guidance = 3.5
+        payload = {
             "prompt": prompt,
-            "width": width,
-            "height": height,
-            "seed": seed
+            "steps": str(num_steps),
+            "guidance_scale": str(guidance),
+            "width": str(width),
+            "height": str(height),
+            "seed": str(seed)
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post(FLUX_SERVER_URL + "/flux", json=request_data) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise Exception(f"API returned status {response.status}: {error_text}")
-                
-                image_data = await response.read()
+        # Use typing context manager for consistent behavior
+        async with interaction.channel.typing():
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+                # Start timing the image generation process
+                image_start_time = time.perf_counter()
 
-        # Calculate total duration
-        end_time = time.perf_counter()
-        image_duration = end_time - start_time
-        total_duration = image_duration + pre_duration
+                async with session.post(f"{flux_server_url}/flux", data=payload) as response:
+                    if response.status == 200:
+                        image_bytes = await response.read()
+                        
+                        # End timing the image generation process
+                        image_end_time = time.perf_counter()
+                        image_generation_duration = image_end_time - image_start_time
 
-        # Create a BytesIO object from the image data
-        image_bytes = BytesIO(image_data)
+                        # Calculate total duration
+                        total_duration = pre_duration + image_generation_duration
+                        logger.info(
+                            f"⏱️ Total image generation time for {interaction.user}: {total_duration:.2f} seconds (Prompt: {pre_duration:.2f}s, Image: {image_generation_duration:.2f}s)"
+                        )
 
-        # Generate a filename based on the prompt
-        safe_prompt = re.sub(r'[^a-zA-Z0-9]', '', prompt[:30].lower())
-        random_prefix = random.randint(100000, 999999)
-        filename = f"{random_prefix}_{safe_prompt}.png"
+                        # Generate a unique filename
+                        random_number = random.randint(100000, 999999)
+                        safe_prompt = re.sub(r'\W+', '', prompt[:40]).lower()
+                        filename = f"{random_number}_{safe_prompt}.png"  # Changed to .png
 
-        # Create the file object
-        image_file = discord.File(image_bytes, filename=filename)
+                        # Create a Discord File object from the image bytes
+                        image_file = discord.File(BytesIO(image_bytes), filename=filename)
 
-        # Create embeds
-        description_embed = create_description_embed(prompt, interaction.user)
-        details_embed = create_details_embed(
-            width, height, seed, total_duration, pre_duration, 
-            queue_size, selected_terms
-        )
+                        # Create embed messages
+                        if selected_terms and selected_terms != prompt:
+                            # If selected_terms are provided and different from prompt, include them in the description
+                            description_content = f"**Selected Terms:** {selected_terms}\n\n**Prompt:** {prompt}"
+                        else:
+                            # For simple prompts or when terms are the same as prompt, just show the prompt
+                            description_content = f"**Prompt:** {prompt}"
 
-        # Create view with buttons
-        new_view = ImageButtons(prompt, width, height, seed)
+                        description_embed = discord.Embed(
+                            description=description_content, color=discord.Color.blue()
+                        )
+                        details_embed = discord.Embed(color=discord.Color.green())
 
-        # Send the message with embeds and view
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                content=f"{interaction.user.mention} 🖼️ Generated Image:",
-                embeds=[description_embed, details_embed],
-                file=image_file,
-                view=new_view
-            )
-        else:
-            await interaction.response.send_message(
-                content=f"{interaction.user.mention} 🖼️ Generated Image:",
-                embeds=[description_embed, details_embed],
-                file=image_file,
-                view=new_view
-            )
+                        queue_total = queue_size + 1
+                        details_text = f"🌱 {seed} 🔄 {action_name} ⏱️ {total_duration:.2f}s 📋 {queue_total}"
 
-        logger.info(f"🖼️ Image generation completed for {interaction.user}: "
-                   f"filename='{filename}', total_duration={total_duration:.2f}s")
+                        # Change this line to set the description instead of adding a field
+                        details_embed.description = details_text
 
-        # Update user stats
-        await increment_user_stat(
-            interaction.user.id, 
-            'images_generated',
-            interaction.guild_id if interaction.guild else None
-        )
+                        # Initialize the FluxRemixView with current image parameters
+                        new_view = FluxRemixView(
+                            prompt=prompt, width=width, height=height, seed=seed
+                        )
 
+                        # When sending the final message, use followup if the initial response was deferred
+                        if interaction.response.is_done():
+                            await interaction.followup.send(
+                                content=f"{interaction.user.mention} 🖼️ Generated Image:",
+                                embeds=[description_embed, details_embed],
+                                file=image_file,
+                                view=new_view
+                            )
+                        else:
+                            await interaction.channel.send(
+                                content=f"{interaction.user.mention} 🖼️ Generated Image:",
+                                embeds=[description_embed, details_embed],
+                                file=image_file,
+                                view=new_view
+                            )
+                        logger.info(
+                            f"🖼️ Image generation completed for {interaction.user}: filename='{filename}', total_duration={total_duration:.2f}s"
+                        )
+                    else:
+                        logger.error(f"🖼️ Flux server error for {interaction.user}: HTTP {response.status}")
+                        if not interaction.followup.is_done():
+                            await interaction.followup.send(
+                                f"❌ Flux server error: HTTP {response.status}", ephemeral=True
+                            )
+    except (ClientConnectorError, ClientOSError):
+        logger.error(f"🖼️ Flux server is offline or unreachable for {interaction.user}.")
+        if isinstance(interaction, discord.Interaction):
+            try:
+                await interaction.followup.send(
+                    "❌ The Flux server is currently offline.", ephemeral=True
+                )
+            except Exception as send_error:
+                logger.error(f"❌ Failed to send follow-up message: {send_error}")
+    except ServerTimeoutError:
+        logger.error(f"🖼️ Flux server request timed out for {interaction.user}.")
+        if isinstance(interaction, discord.Interaction):
+            try:
+                await interaction.followup.send(
+                    "❌ The Flux server timed out while processing your request. Please try again later.", ephemeral=True
+                )
+            except Exception as send_error:
+                logger.error(f"❌ Failed to send follow-up message: {send_error}")
     except Exception as e:
-        error_msg = f"Error generating image: {str(e)}"
-        logger.error(error_msg)
-        if not interaction.response.is_done():
-            await interaction.response.send_message(error_msg, ephemeral=True)
-        else:
-            await interaction.followup.send(error_msg, ephemeral=True)
+        logger.error(f"🖼️ Unexpected error during image generation for {interaction.user}: {e}")
+        if isinstance(interaction, discord.Interaction):
+            try:
+                await interaction.followup.send(
+                    f"❌ An unexpected error occurred during image generation: {e}", ephemeral=True
+                )
+            except Exception as send_error:
+                logger.error(f"❌ Failed to send follow-up message: {send_error}")
 
 
 
@@ -1975,7 +2037,7 @@ class FluxRemixView(View):
     async def fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
-            await interaction.response.defer(thinking=True, ephemeral=True)
+            await interaction.response.send_message("🛠️ Making it fancy...", ephemeral=True)
             queue_size = bot.flux_queue.qsize()
             await bot.flux_queue.put({
                 'type': 'button',
@@ -2037,6 +2099,24 @@ class FluxRemixView(View):
             ]
             width, height = random.choice(dimensions)
             
+            # Determine if we should use only random terms (25% chance)
+            use_only_terms = random.random() < 0.5
+            
+            if use_only_terms:
+                # Get random terms and use them directly as the prompt
+                random_terms = get_random_terms()
+                # Flatten the terms from the dictionary into a comma-separated string
+                terms_list = []
+                for category, terms in random_terms.items():
+                    # Split by comma in case there are multiple terms in a single category
+                    split_terms = [term.strip() for term in terms.split(',')]
+                    terms_list.extend(split_terms)
+                prompt = ", ".join(terms_list)
+                logger.info(f"🔀 Using only random terms for {interaction.user}: {prompt}")
+            else:
+                # Use the original random prompt generation logic
+                prompt = None  # Will be generated in handle_random
+            
             queue_size = bot.flux_queue.qsize()
             await bot.flux_queue.put({
                 'type': 'button',
@@ -2044,7 +2124,8 @@ class FluxRemixView(View):
                 'action': 'random',
                 'width': width,
                 'height': height,
-                'seed': None  # Random will generate its own seed
+                'seed': None,  # Random will generate its own seed
+                'prompt': prompt  # Will be None for normal random, or terms-only for direct terms
             })
             logger.info(f"🔀 Enqueued 'Random' action for {interaction.user} with dimensions {width}x{height}")
             
@@ -2153,12 +2234,12 @@ async def generate_flux_image(
                         image_file = discord.File(BytesIO(image_bytes), filename=filename)
 
                         # Create embed messages
-                        if selected_terms:
-                            # If selected_terms are provided, include them in the description
+                        if selected_terms and selected_terms != prompt:
+                            # If selected_terms are provided and different from prompt, include them in the description
                             description_content = f"**Selected Terms:** {selected_terms}\n\n**Prompt:** {prompt}"
                         else:
-                            # Fallback to just the prompt
-                            description_content = prompt
+                            # For simple prompts or when terms are the same as prompt, just show the prompt
+                            description_content = f"**Prompt:** {prompt}"
 
                         description_embed = discord.Embed(
                             description=description_content, color=discord.Color.blue()
@@ -2293,6 +2374,12 @@ async def load_extensions():
         logger.info("📥 Loaded interject extension")
     except Exception as e:
         logger.error(f"❌ Failed to load interject extension: {e}")
+        
+    try:
+        await bot.load_extension("soupy_imagesearch")
+        logger.info("🖼️ Loaded image search extension")
+    except Exception as e:
+        logger.error(f"❌ Failed to load image search extension: {e}")
 
 # Then your existing on_ready event can use it
 @bot.event
@@ -2445,20 +2532,6 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-def handle_signal(signum, frame):
-    """Handle termination signals by scheduling the shutdown coroutine."""
-    logger.info(f"🛑 Received termination signal ({signum}). Initiating shutdown...")
-    
-    # Get the current event loop
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(shutdown())
-        else:
-            loop.run_until_complete(shutdown())
-    except Exception as e:
-        logger.error(f"❌ Error in signal handler: {e}")
-        sys.exit(1)
 
 
 
