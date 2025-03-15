@@ -8,7 +8,7 @@ Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to h
 
 View the [Changelog](CHANGELOG.md).
 
-# Soupy Remastered - January 10th, 2025
+# Soupy Remastered - Updated March 15th, 2025
 Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BLIP-2/Gradio backend for image-related tasks, and an LM Studio backend for chat-related tasks.  It has a number of neat functions, such as:
 
 | Function | Description |
@@ -18,13 +18,13 @@ Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/BL
 |``/whattime <location>``|Provides your local time for a geographic location|
 |``/8ball <query>``|Traditional 8-ball|
 |``/9ball <query>``|Gives LLM-generated 8-ball style answers
-| ![random button](https://i.imgur.com/YGboE7n.png)|Button triggers LLM to generate a "random" prompt based on ``.txt`` documents with keywords|
+| ![random button](https://i.imgur.com/YGboE7n.png)|Button triggers LLM to generate a "random" prompt based on ``.txt`` documents with keywords.  If you don't have an LLM, open **soupy_remastered.py** and find the line `use_only_terms = random.random() < 0.5` and change `0.5` to `1`.  This will make the ``Random`` button only pull the keywords, without sending the keywords to the LLM for processing. There are roughly 212 quadrillion possible combinations of keywords for randomly generated images.|
 |![fancy button](https://i.imgur.com/HGYjGKe.png)|Uses the LLM to take the currently used prompt and elaborate on it for a more creative outcome|
 |![remix button](https://i.imgur.com/vjOnzzB.png)|Re-generates the current image prompt with a new seed|
 |![edit button](https://i.imgur.com/P6t9l8j.png)|Edit the current prompt, image dimensions, or seed|
 |``/stats``|Displays basic user statistics|
 |``/status``|Reports if the LLM and/or local Flux server are available|
-|**Just talk with it.  It responds to the word soup.**|Talk with the bot by using the word "soup" or calling it soupy.  It will also respond to messages at random, about 3% of them.  There's also an "interject" function which will randomly send a message to your server.|
+|**Just talk with it.  It responds to the word soup.**|Talk with the bot by using the word "soup" or calling it soupy.  It will also respond to messages at random, about 3% of them.  There's also an "interject" function which will randomly send a message to your server.  You can ignore the chat functions if you're not using an LLM.  The image functions should still work.|
 
 ## IMPORTANT - READ THIS, OR ELSE!!
 There are multiple versions of soupy, some of them are old, some of them use Dall-E and/or ChatGPT.
@@ -555,8 +555,3 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 If you encounter any issues or have questions, feel free to open an issue in the [GitHub Issues](https://github.com/sneezeparty/soupy/issues) section of the repository.
 
 [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.
-
-
-
-
-
