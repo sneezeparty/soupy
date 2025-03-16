@@ -40,7 +40,6 @@ Before setting up Soupy, ensure you have the following installed on your system:
 ## Software Requirements
 - [Flux](https://huggingface.co/black-forest-labs/FLUX.1-schnell): Used for generating images.
 - [LM Studio](https://lmstudio.ai): The LLM backend.  I highly recommend you use [Lexi Llama Uncensored](https://huggingface.co/Orenguteng/Llama-3-8B-Lexi-Uncensored-GGUF).  It's what the prompts are tuned to.  You can use whatever you want though, probably to good effect.
-- [BLIP-2](https://huggingface.co/Salesforce/blip2-opt-2.7b): For seeing and responding to images in chat.  Having this enabled slows image generation down a bit with a 3090, so you can comment that out if you want.
 - [Gradio](https://www.gradio.app): For loading the backend image-related models.
 - Python 3.8+
 - Virtual Environment Manager (optional but recommended)
