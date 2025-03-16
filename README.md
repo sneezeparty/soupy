@@ -127,7 +127,7 @@ It actually runs pretty good.  I do this in my spare time.  I'm not a developer.
 
 
 ![random button](https://i.imgur.com/IjunXaZ.png) 
-The Random button triggers a function that chooses from random keywords located in ``characters.txt``, ``styles.txt``, and ``themes.txt``.  It then sends those results to the LLM for the generation of a new description, which is then sent to Flux.
+The Random button triggers a function that chooses from random keywords located in ``characters.txt``, ``styles.txt``, and ``themes.txt``.  It then sends those results to the LLM for the generation of a new description, which is then sent to Flux.  This function will use *only* the keywords 50% of the time, and will use the LLM the other 50% of the time.  If you don't have an LLM, open **soupy_remastered.py** and find the line `use_only_terms = random.random() < 0.5` and change `0.5` to `1`.
 
 
 ![Random example](https://i.imgur.com/0eFjCSq.png)
