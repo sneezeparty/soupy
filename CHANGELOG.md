@@ -1,5 +1,11 @@
 ## Changelog
 
+## [0.8.5] - 9/10/2025
+### Changed or added
+- Changed the default FLux model to one that is more accessible and uses less GPU RAM, but which is a little slower (requiring more steps per image)
+- Small changes to the queueing system, hopefully making the queue more consistent.
+- Changed/added functionality with new buttons.  With the new Random buttons, one uses an LLM backend to generate an image description, and the other uses a simple list of keywords.
+
 ## [0.8.4] - 3/15/2025
 ### Changed or added
 - Changed the behavior of the Random button in the following way: 50% of the time it will now choose keywords and send the naked keywords to the Flux backend for generation, rather than using the LLM for elaboration.  The results of this are pretty cool, and in some ways more varied than the LLM-generated responses
