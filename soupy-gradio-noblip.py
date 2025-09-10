@@ -110,18 +110,35 @@ class ModelConfig:
     Configuration for model repository and revision details.
     """
     
-    # REPO_NAME = "Freepik/flux.1-lite-8B-alpha"
-    # REVISION = None
-    
-    REPO_NAME = "black-forest-labs/FLUX.1-schnell"
-    REVISION = "refs/pr/1"
-    
-    # REPO_NAME = "black-forest-labs/FLUX.1-dev"
-    
+    # Primary model - Higher quality FLUX model
     # REPO_NAME = "sayakpaul/FLUX.1-merged"
     # REVISION = None
     
+    # Alternative public models (uncomment to use):
+    REPO_NAME = "Freepik/flux.1-lite-8B-alpha"
+    REVISION = None
+    
     # REPO_NAME = "ostris/OpenFLUX.1"
+    # REVISION = None
+    
+    # REPO_NAME = "HiDream-ai/HiDream-I1-Full"
+    # REVISION = None
+    
+    # REPO_NAME = "ostris/OpenFLUX.1"
+    # REVISION = None
+    
+    # REPO_NAME = "HiDream-ai/HiDream-I1-Full"
+    # REVISION = None
+    
+    # Specialized models (LoRA adapters - require base model):
+    # REPO_NAME = "XLabs-AI/flux-RealismLora"
+    # REVISION = None
+    
+    # Private models (require Hugging Face login):
+    # REPO_NAME = "black-forest-labs/FLUX.1-schnell"
+    # REVISION = "refs/pr/1"
+    
+    # REPO_NAME = "black-forest-labs/FLUX.1-dev"
     # REVISION = None
     
 
@@ -135,11 +152,24 @@ def load_scheduler(repo, revision):
     Loads the scheduler from the specified repository and revision.
     """
     logging.info("Loading scheduler...")
-    scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
-        repo, subfolder="scheduler", revision=revision
-    )
-    logging.info("Scheduler loaded successfully.")
-    return scheduler
+    try:
+        scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
+            repo, subfolder="scheduler", revision=revision
+        )
+        logging.info("Scheduler loaded successfully.")
+        return scheduler
+    except Exception as e:
+        logging.error(f"Failed to load scheduler from {repo}: {e}")
+        logging.info("Trying alternative public model: sayakpaul/FLUX.1-merged")
+        try:
+            scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
+                "sayakpaul/FLUX.1-merged", subfolder="scheduler"
+            )
+            logging.info("Alternative scheduler loaded successfully.")
+            return scheduler
+        except Exception as e2:
+            logging.error(f"Failed to load alternative scheduler: {e2}")
+            raise e2
 
 def load_text_encoder_and_tokenizer(dtype):
     """
@@ -160,36 +190,78 @@ def load_secondary_text_encoder_and_tokenizer(repo, revision, dtype):
     Loads the secondary T5 text encoder and tokenizer.
     """
     logging.info("Loading secondary text encoder and tokenizer...")
-    text_enc_2 = T5EncoderModel.from_pretrained(
-        repo, subfolder="text_encoder_2", torch_dtype=dtype, revision=revision
-    )
-    tokenizer_2 = T5TokenizerFast.from_pretrained(
-        repo, subfolder="tokenizer_2", torch_dtype=dtype, revision=revision
-    )
-    logging.info("Secondary text encoder and tokenizer loaded successfully.")
-    return text_enc_2, tokenizer_2
+    try:
+        text_enc_2 = T5EncoderModel.from_pretrained(
+            repo, subfolder="text_encoder_2", torch_dtype=dtype, revision=revision
+        )
+        tokenizer_2 = T5TokenizerFast.from_pretrained(
+            repo, subfolder="tokenizer_2", torch_dtype=dtype, revision=revision
+        )
+        logging.info("Secondary text encoder and tokenizer loaded successfully.")
+        return text_enc_2, tokenizer_2
+    except Exception as e:
+        logging.error(f"Failed to load secondary text encoder from {repo}: {e}")
+        logging.info("Trying alternative public model: sayakpaul/FLUX.1-merged")
+        try:
+            text_enc_2 = T5EncoderModel.from_pretrained(
+                "sayakpaul/FLUX.1-merged", subfolder="text_encoder_2", torch_dtype=dtype
+            )
+            tokenizer_2 = T5TokenizerFast.from_pretrained(
+                "sayakpaul/FLUX.1-merged", subfolder="tokenizer_2", torch_dtype=dtype
+            )
+            logging.info("Alternative secondary text encoder and tokenizer loaded successfully.")
+            return text_enc_2, tokenizer_2
+        except Exception as e2:
+            logging.error(f"Failed to load alternative secondary text encoder: {e2}")
+            raise e2
 
 def load_vae_model(repo, revision, dtype):
     """
     Loads the Variational Autoencoder (VAE) model.
     """
     logging.info("Loading VAE model...")
-    vae = AutoencoderKL.from_pretrained(
-        repo, subfolder="vae", torch_dtype=dtype, revision=revision
-    )
-    logging.info("VAE model loaded successfully.")
-    return vae
+    try:
+        vae = AutoencoderKL.from_pretrained(
+            repo, subfolder="vae", torch_dtype=dtype, revision=revision
+        )
+        logging.info("VAE model loaded successfully.")
+        return vae
+    except Exception as e:
+        logging.error(f"Failed to load VAE from {repo}: {e}")
+        logging.info("Trying alternative public model: sayakpaul/FLUX.1-merged")
+        try:
+            vae = AutoencoderKL.from_pretrained(
+                "sayakpaul/FLUX.1-merged", subfolder="vae", torch_dtype=dtype
+            )
+            logging.info("Alternative VAE model loaded successfully.")
+            return vae
+        except Exception as e2:
+            logging.error(f"Failed to load alternative VAE: {e2}")
+            raise e2
 
 def load_transformer_model(repo, revision, dtype):
     """
     Loads the Flux Transformer 2D model.
     """
     logging.info("Loading transformer model...")
-    transformer = FluxTransformer2DModel.from_pretrained(
-        repo, subfolder="transformer", torch_dtype=dtype, revision=revision
-    )
-    logging.info("Transformer model loaded successfully.")
-    return transformer
+    try:
+        transformer = FluxTransformer2DModel.from_pretrained(
+            repo, subfolder="transformer", torch_dtype=dtype, revision=revision
+        )
+        logging.info("Transformer model loaded successfully.")
+        return transformer
+    except Exception as e:
+        logging.error(f"Failed to load transformer from {repo}: {e}")
+        logging.info("Trying alternative public model: sayakpaul/FLUX.1-merged")
+        try:
+            transformer = FluxTransformer2DModel.from_pretrained(
+                "sayakpaul/FLUX.1-merged", subfolder="transformer", torch_dtype=dtype
+            )
+            logging.info("Alternative transformer model loaded successfully.")
+            return transformer
+        except Exception as e2:
+            logging.error(f"Failed to load alternative transformer: {e2}")
+            raise e2
 
 # Quantization and Freezing of Models
 def quantize_and_freeze_model(model, model_name):
@@ -387,6 +459,12 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         logging.error(f"Error during startup: {e}")
+        logging.error("This could be due to:")
+        logging.error("1. Network connectivity issues")
+        logging.error("2. Model repository access restrictions")
+        logging.error("3. Insufficient disk space")
+        logging.error("4. Missing dependencies")
+        logging.error("Please check your internet connection and try again.")
         raise e  # Prevent the app from starting if there's an error
 
     finally:
@@ -418,7 +496,7 @@ executor = ThreadPoolExecutor(max_workers=1)  # Limit to 1 worker to prevent GPU
 @app.post("/flux")
 async def flux_endpoint(
     prompt: str = Form(...),
-    steps: int = Form(4, ge=1),
+    steps: int = Form(8, ge=1),  # Increased from 4 to 8 for better quality
     guidance_scale: float = Form(3.5, gt=0.0),
     width: int = Form(1024, ge=64, le=1920),
     height: int = Form(1024, ge=64, le=1920),
@@ -651,11 +729,11 @@ def launch_gradio():
             with gr.Row():
                 prompt = gr.Textbox(label="Prompt", placeholder="Enter your prompt here...", lines=2)
             with gr.Row():
-                steps = gr.Slider(1, 100, value=4, step=1, label="Inference Steps")
+                steps = gr.Slider(1, 100, value=8, step=1, label="Inference Steps")  # Increased from 4 to 8
                 guidance_scale = gr.Slider(0.1, 20.0, value=3.5, step=0.1, label="Guidance Scale")
             with gr.Row():
-                width = gr.Slider(64, 1920, value=512, step=64, label="Width")
-                height = gr.Slider(64, 1920, value=512, step=64, label="Height")
+                width = gr.Slider(64, 1920, value=1024, step=64, label="Width")  # Increased from 512 to 1024
+                height = gr.Slider(64, 1920, value=1024, step=64, label="Height")  # Increased from 512 to 1024
             with gr.Row():
                 seed = gr.Number(label="Seed", value=-1, precision=0)
             generate_btn = gr.Button("Generate Image")
