@@ -129,10 +129,22 @@ async def extract_url_content(url: str, session: aiohttp.ClientSession) -> Optio
             
             # Clean and limit content length
             content = ' '.join(content.split())  # Normalize whitespace
-            if len(content) > 500:  # Limit to reasonable summary length
-                content = content[:497] + "..."
             
-            return f"[URL content: {content}]"
+            # Get max content length from env or default to 500
+            max_content_length = int(os.getenv('URL_MAX_CONTENT_LENGTH', 500))
+            if len(content) > max_content_length:
+                content = content[:max_content_length-3] + "..."
+            
+            # Add URL source information
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc
+            
+            # Check if we should include domain info
+            include_domain = os.getenv('URL_INCLUDE_DOMAIN', 'true').lower() == 'true'
+            if include_domain:
+                return f"[URL content from {domain}: {content}]"
+            else:
+                return f"[URL content: {content}]"
             
     except asyncio.TimeoutError:
         logger.warning(f"Timeout while fetching {url}")
@@ -345,7 +357,7 @@ def format_error_message(error):
         return f"{error_prefix}An OpenAI API error occurred: {str(error)}"
     return f"{error_prefix}{str(error)}"
 
-image_history = {}  # Dictionary to store recent image descriptions
+image_history = {}  # Dictionary to store recent image descriptionsimage_descriptions = []  # List to store current message's image descriptions
 
 """
 ---------------------------------------------------------------------------------
@@ -1109,8 +1121,8 @@ def clean_response(text: str) -> str:
 # Fetch "limit" recent messages from the channel, including content from any images.
 async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIMIT", 25)), current_message_id=None):
     """
-    Fetches recent messages from the channel, including content from any images and URLs.
-    Optimized for maintaining conversation context.
+    Fetches recent messages from the channel, focusing on the most recent conversation.
+    Limited context to keep responses relevant and focused.
     """
     message_history = []
     seen_messages = set()
@@ -1175,10 +1187,10 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
             formatted_content = f"{msg.author.name}: {message_content}"
             formatted_message = {"role": role, "content": formatted_content}
             
-            # Add to appropriate list based on position
-            if len(current_topic_messages) < 5:  # Keep most recent 5 messages for current topic
+            # Prioritize recent messages much more heavily
+            if len(current_topic_messages) < 8:  # Keep most recent 8 messages for current topic
                 current_topic_messages.append(formatted_message)
-            else:
+            elif len(background_messages) < 4:  # Only keep 4 background messages maximum
                 background_messages.append(formatted_message)
     
     # Clean up old entries from image_history
@@ -1195,9 +1207,9 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
     for url in expired_urls:
         del url_cache[url]
     
-    # Combine messages with current topic first, then relevant background
-    message_history = current_topic_messages + background_messages
-    return list(reversed(message_history))  # Maintain chronological order
+    # Put minimal background context first, then focus heavily on recent messages
+    message_history = list(reversed(background_messages)) + list(reversed(current_topic_messages))
+    return message_history  # This would have oldest → newest order
 
 
 """
@@ -1781,142 +1793,6 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             await interaction.response.send_message(error_msg, ephemeral=True)
         else:
             await interaction.followup.send(error_msg, ephemeral=True)
-
-async def generate_flux_image(
-    interaction,
-    prompt,
-    width,
-    height,
-    seed,
-    action_name="Flux",
-    queue_size=0,
-    pre_duration=0,
-    selected_terms: Optional[str] = None  # New parameter
-):
-    try:
-        # Check if we need to send an initial response
-        if not interaction.response.is_done():
-            await interaction.response.defer(thinking=True)
-
-        flux_server_url = FLUX_SERVER_URL.rstrip('/')  # Ensure no trailing slash
-        num_steps = 4
-        guidance = 3.5
-        payload = {
-            "prompt": prompt,
-            "steps": str(num_steps),
-            "guidance_scale": str(guidance),
-            "width": str(width),
-            "height": str(height),
-            "seed": str(seed)
-        }
-
-        # Use typing context manager for consistent behavior
-        async with interaction.channel.typing():
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-                # Start timing the image generation process
-                image_start_time = time.perf_counter()
-
-                async with session.post(f"{flux_server_url}/flux", data=payload) as response:
-                    if response.status == 200:
-                        image_bytes = await response.read()
-                        
-                        # End timing the image generation process
-                        image_end_time = time.perf_counter()
-                        image_generation_duration = image_end_time - image_start_time
-
-                        # Calculate total duration
-                        total_duration = pre_duration + image_generation_duration
-                        logger.info(
-                            f"⏱️ Total image generation time for {interaction.user}: {total_duration:.2f} seconds (Prompt: {pre_duration:.2f}s, Image: {image_generation_duration:.2f}s)"
-                        )
-
-                        # Generate a unique filename
-                        random_number = random.randint(100000, 999999)
-                        safe_prompt = re.sub(r'\W+', '', prompt[:40]).lower()
-                        filename = f"{random_number}_{safe_prompt}.png"  # Changed to .png
-
-                        # Create a Discord File object from the image bytes
-                        image_file = discord.File(BytesIO(image_bytes), filename=filename)
-
-                        # Create embed messages
-                        if selected_terms and selected_terms != prompt:
-                            # If selected_terms are provided and different from prompt, include them in the description
-                            description_content = f"**Selected Terms:** {selected_terms}\n\n**Prompt:** {prompt}"
-                        else:
-                            # For simple prompts or when terms are the same as prompt, just show the prompt
-                            description_content = f"**Prompt:** {prompt}"
-
-                        description_embed = discord.Embed(
-                            description=description_content, color=discord.Color.blue()
-                        )
-                        details_embed = discord.Embed(color=discord.Color.green())
-
-                        queue_total = queue_size + 1
-                        details_text = f"🌱 {seed} 🔄 {action_name} ⏱️ {total_duration:.2f}s 📋 {queue_total}"
-
-                        # Change this line to set the description instead of adding a field
-                        details_embed.description = details_text
-
-                        # Initialize the FluxRemixView with current image parameters
-                        new_view = FluxRemixView(
-                            prompt=prompt, width=width, height=height, seed=seed
-                        )
-
-                        # When sending the final message, use followup if the initial response was deferred
-                        if interaction.response.is_done():
-                            await interaction.followup.send(
-                                content=f"{interaction.user.mention} 🖼️ Generated Image:",
-                                embeds=[description_embed, details_embed],
-                                file=image_file,
-                                view=new_view
-                            )
-                        else:
-                            await interaction.channel.send(
-                                content=f"{interaction.user.mention} 🖼️ Generated Image:",
-                                embeds=[description_embed, details_embed],
-                                file=image_file,
-                                view=new_view
-                            )
-                        logger.info(
-                            f"🖼️ Image generation completed for {interaction.user}: filename='{filename}', total_duration={total_duration:.2f}s"
-                        )
-                    else:
-                        logger.error(f"🖼️ Flux server error for {interaction.user}: HTTP {response.status}")
-                        if not interaction.followup.is_done():
-                            await interaction.followup.send(
-                                f"❌ Flux server error: HTTP {response.status}", ephemeral=True
-                            )
-    except (ClientConnectorError, ClientOSError):
-        logger.error(f"🖼️ Flux server is offline or unreachable for {interaction.user}.")
-        if isinstance(interaction, discord.Interaction):
-            try:
-                await interaction.followup.send(
-                    "❌ The Flux server is currently offline.", ephemeral=True
-                )
-            except Exception as send_error:
-                logger.error(f"❌ Failed to send follow-up message: {send_error}")
-    except ServerTimeoutError:
-        logger.error(f"🖼️ Flux server request timed out for {interaction.user}.")
-        if isinstance(interaction, discord.Interaction):
-            try:
-                await interaction.followup.send(
-                    "❌ The Flux server timed out while processing your request. Please try again later.", ephemeral=True
-                )
-            except Exception as send_error:
-                logger.error(f"❌ Failed to send follow-up message: {send_error}")
-    except Exception as e:
-        logger.error(f"🖼️ Unexpected error during image generation for {interaction.user}: {e}")
-        if isinstance(interaction, discord.Interaction):
-            try:
-                await interaction.followup.send(
-                    f"❌ An unexpected error occurred during image generation: {e}", ephemeral=True
-                )
-            except Exception as send_error:
-                logger.error(f"❌ Failed to send follow-up message: {send_error}")
-
-
-
-
 class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
     def __init__(self, prompt: str, width: int, height: int, seed: int = None):
         super().__init__()
@@ -2079,17 +1955,16 @@ class FluxRemixView(View):
             await interaction.followup.send("❌ Error during remix.", ephemeral=True)
 
 
-    @discord.ui.button(label="🔀 Random", style=discord.ButtonStyle.danger, custom_id="flux_random_button", row=1)
+    @discord.ui.button(label="🎨 R-Fancy", style=discord.ButtonStyle.danger, custom_id="flux_random_fancy_button", row=1)
     @universal_cooldown_check()
-    async def random_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def random_fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """
-        Handler for the 'Random' button. Generates a new random prompt by selecting
-        one term from each category and appending them to the base RANDOMPROMPT.
-        Also randomly selects image dimensions.
+        Handler for the 'R-Fancy' button. Generates a new random prompt using LLM
+        with random terms from categories. Also randomly selects image dimensions.
         """
-        logger.info(f"🔀 'Random' button clicked by {interaction.user}.")
+        logger.info(f"🎨 'R-Fancy' button clicked by {interaction.user}.")
         try:
-            await interaction.response.send_message("🛠️ Generating random image...", ephemeral=True)
+            await interaction.response.send_message("🛠️ Generating fancy random image...", ephemeral=True)
             
             # Randomly select dimensions with equal probability
             dimensions = [
@@ -2099,23 +1974,8 @@ class FluxRemixView(View):
             ]
             width, height = random.choice(dimensions)
             
-            # Determine if we should use only random terms (25% chance)
-            use_only_terms = random.random() < 0.5
-            
-            if use_only_terms:
-                # Get random terms and use them directly as the prompt
-                random_terms = get_random_terms()
-                # Flatten the terms from the dictionary into a comma-separated string
-                terms_list = []
-                for category, terms in random_terms.items():
-                    # Split by comma in case there are multiple terms in a single category
-                    split_terms = [term.strip() for term in terms.split(',')]
-                    terms_list.extend(split_terms)
-                prompt = ", ".join(terms_list)
-                logger.info(f"🔀 Using only random terms for {interaction.user}: {prompt}")
-            else:
-                # Use the original random prompt generation logic
-                prompt = None  # Will be generated in handle_random
+            # Use LLM-generated prompt (set prompt to None so handle_random generates it)
+            prompt = None  # Will be generated in handle_random
             
             queue_size = bot.flux_queue.qsize()
             await bot.flux_queue.put({
@@ -2125,14 +1985,61 @@ class FluxRemixView(View):
                 'width': width,
                 'height': height,
                 'seed': None,  # Random will generate its own seed
-                'prompt': prompt  # Will be None for normal random, or terms-only for direct terms
+                'prompt': prompt  # None for LLM-generated prompt
             })
-            logger.info(f"🔀 Enqueued 'Random' action for {interaction.user} with dimensions {width}x{height}")
+            logger.info(f"🎨 Enqueued 'R-Fancy' action for {interaction.user} with dimensions {width}x{height}")
             
             # Increment the images_generated stat
             await increment_user_stat(interaction.user.id, 'images_generated')
         except Exception as e:
-            logger.error(f"🔀 Error queueing random generation for {interaction.user}: {e}")
+            logger.error(f"🎨 Error queueing fancy random generation for {interaction.user}: {e}")
+
+    @discord.ui.button(label="🔤 R-Keyword", style=discord.ButtonStyle.danger, custom_id="flux_random_keyword_button", row=1)
+    @universal_cooldown_check()
+    async def random_keyword_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """
+        Handler for the 'R-Keyword' button. Generates a new random prompt using only
+        random keywords from categories. Also randomly selects image dimensions.
+        """
+        logger.info(f"🔤 'R-Keyword' button clicked by {interaction.user}.")
+        try:
+            await interaction.response.send_message("🛠️ Generating keyword random image...", ephemeral=True)
+            
+            # Randomly select dimensions with equal probability
+            dimensions = [
+                (1024, 1024),  # Square
+                (1920, 1024),  # Wide
+                (1024, 1920)   # Tall
+            ]
+            width, height = random.choice(dimensions)
+            
+            # Get random terms and use them directly as the prompt
+            random_terms = get_random_terms()
+            # Flatten the terms from the dictionary into a comma-separated string
+            terms_list = []
+            for category, terms in random_terms.items():
+                # Split by comma in case there are multiple terms in a single category
+                split_terms = [term.strip() for term in terms.split(',')]
+                terms_list.extend(split_terms)
+            prompt = ", ".join(terms_list)
+            logger.info(f"🔤 Using only random terms for {interaction.user}: {prompt}")
+            
+            queue_size = bot.flux_queue.qsize()
+            await bot.flux_queue.put({
+                'type': 'button',
+                'interaction': interaction,
+                'action': 'random',
+                'width': width,
+                'height': height,
+                'seed': None,  # Random will generate its own seed
+                'prompt': prompt  # Direct terms-only prompt
+            })
+            logger.info(f"🔤 Enqueued 'R-Keyword' action for {interaction.user} with dimensions {width}x{height}")
+            
+            # Increment the images_generated stat
+            await increment_user_stat(interaction.user.id, 'images_generated')
+        except Exception as e:
+            logger.error(f"🔤 Error queueing keyword random generation for {interaction.user}: {e}")
 
     @discord.ui.button(label="📏 Wide", style=discord.ButtonStyle.primary, custom_id="flux_wide_button", row=1)
     @universal_cooldown_check()
@@ -2194,8 +2101,8 @@ async def generate_flux_image(
             await interaction.response.defer(thinking=True)
 
         flux_server_url = FLUX_SERVER_URL.rstrip('/')  # Ensure no trailing slash
-        num_steps = 4
-        guidance = 3.5
+        num_steps = int(os.getenv("FLUX_STEPS", 4))
+        guidance = float(os.getenv("FLUX_GUIDANCE", 3.5))
         payload = {
             "prompt": prompt,
             "steps": str(num_steps),
@@ -2207,7 +2114,20 @@ async def generate_flux_image(
 
         # Use typing context manager for consistent behavior
         async with interaction.channel.typing():
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+            # Use optimized session with connection pooling and keep-alive
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Total connection pool size
+                limit_per_host=30,  # Per-host connection limit
+                keepalive_timeout=30,  # Keep connections alive
+                enable_cleanup_closed=True
+            )
+            timeout = aiohttp.ClientTimeout(total=120, connect=10)
+            
+            async with aiohttp.ClientSession(
+                connector=connector, 
+                timeout=timeout,
+                headers={'Connection': 'keep-alive'}
+            ) as session:
                 # Start timing the image generation process
                 image_start_time = time.perf_counter()
 
@@ -2277,10 +2197,12 @@ async def generate_flux_image(
                         )
                     else:
                         logger.error(f"🖼️ Flux server error for {interaction.user}: HTTP {response.status}")
-                        if not interaction.followup.is_done():
+                        try:
                             await interaction.followup.send(
                                 f"❌ Flux server error: HTTP {response.status}", ephemeral=True
                             )
+                        except Exception as send_error:
+                            logger.error(f"❌ Failed to send follow-up message: {send_error}")
     except (ClientConnectorError, ClientOSError):
         logger.error(f"🖼️ Flux server is offline or unreachable for {interaction.user}.")
         if isinstance(interaction, discord.Interaction):
@@ -2338,8 +2260,10 @@ async def process_flux_image(interaction: discord.Interaction, description: str,
 
         await generate_flux_image(interaction, description, width, height, seed, queue_size=bot.flux_queue.qsize())
     except Exception as e:
-        if not interaction.followup.is_done():
+        try:
             await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+        except Exception as send_error:
+            logger.error(f"❌ Failed to send follow-up message: {send_error}")
         logger.error(f"Error in process_flux_image: {e}")
 
 
@@ -2369,11 +2293,12 @@ async def load_extensions():
     except Exception as e:
         logger.error(f"❌ Failed to load search extension: {e}")
     
-    try:
-        await bot.load_extension("soupy_interject")
-        logger.info("📥 Loaded interject extension")
-    except Exception as e:
-        logger.error(f"❌ Failed to load interject extension: {e}")
+    # Commented out to disable interject functionality
+    # try:
+    #     await bot.load_extension("soupy_interject")
+    #     logger.info("📥 Loaded interject extension")
+    # except Exception as e:
+    #     logger.error(f"❌ Failed to load interject extension: {e}")
         
     try:
         await bot.load_extension("soupy_imagesearch")
