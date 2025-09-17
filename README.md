@@ -19,7 +19,7 @@ Soupy Remastered is a completely locally run bot for Discord.  It uses a Flux/Gr
 |``/whattime <location>``|Provides your local time for a geographic location|
 |``/8ball <query>``|Traditional 8-ball|
 |``/9ball <query>``|Gives LLM-generated 8-ball style answers
-| ![random button](https://i.imgur.com/A9yQyI4.jpeg)|``R-Fancy`` nutton triggers LLM to generate a "random" prompt based on ``.txt`` documents with keywords. There are roughly 212 quadrillion possible combinations of keywords for randomly generated images. ``R-Keyword`` will not use the LLM to generate a description.  Instead, it will use only a random selection of keywords.|
+| ![random button](https://i.imgur.com/A9yQyI4.jpeg)|``R-Fancy`` button triggers LLM to generate a "random" prompt based on ``.txt`` documents with keywords. There are roughly 212 quadrillion possible combinations of keywords for randomly generated images. This button utilizes the LLM to generate its response.  ``R-Keyword`` will not use the LLM to generate a description.  Instead, it will use only a random selection of keywords.|
 |![fancy button](https://i.imgur.com/HGYjGKe.png)|Uses the LLM to take the currently used prompt and elaborate on it for a more creative outcome|
 |![remix button](https://i.imgur.com/vjOnzzB.png)|Re-generates the current image prompt with a new seed|
 |![edit button](https://i.imgur.com/P6t9l8j.png)|Edit the current prompt, image dimensions, or seed|
