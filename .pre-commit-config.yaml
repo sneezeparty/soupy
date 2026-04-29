@@ -1,0 +1,10 @@
+# Pre-commit hooks for Soupy.
+# Activate locally with `pre-commit install` after cloning.
+# Runs automatically on `git commit`; bypass only if you understand why with `git commit --no-verify`.
+
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        name: gitleaks (block commits containing secrets)
