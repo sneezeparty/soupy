@@ -1,0 +1,110 @@
+:root {
+  --app-radius: 12px;
+  --app-radius-sm: 8px;
+  --app-shadow: 0 14px 40px rgba(0, 0, 0, 0.24);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+main section > hgroup h2 {
+  margin-bottom: 0.25rem;
+  letter-spacing: 0.01em;
+}
+
+main section > hgroup p {
+  color: var(--text-secondary);
+}
+
+article {
+  background: color-mix(in srgb, var(--card-bg) 92%, black 8%);
+  border: 1px solid color-mix(in srgb, var(--card-border) 85%, transparent);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+}
+
+button,
+[type="button"],
+[type="submit"],
+[type="reset"],
+.button,
+a[role="button"] {
+  border-radius: 10px !important;
+  border-width: 1px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
+}
+
+button:hover,
+[type="button"]:hover,
+[type="submit"]:hover,
+[type="reset"]:hover,
+.button:hover,
+a[role="button"]:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
+}
+
+button:active,
+[type="button"]:active,
+[type="submit"]:active,
+[type="reset"]:active,
+.button:active,
+a[role="button"]:active {
+  transform: translateY(0);
+}
+
+input,
+select,
+textarea {
+  border-radius: var(--app-radius-sm) !important;
+}
+
+code {
+  border-radius: 6px;
+  padding: .1rem .35rem;
+}
+
+nav.app-nav strong {
+  font-size: 1.02rem;
+  letter-spacing: 0.01em;
+}
+
+nav.app-nav a {
+  border-radius: 999px;
+  padding: .35rem .75rem;
+  text-decoration: none;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  transition: background .2s ease, color .2s ease, border-color .2s ease;
+}
+
+nav.app-nav a:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--card-bg) 50%, transparent);
+  border-color: color-mix(in srgb, var(--card-border) 60%, transparent);
+}
+
+nav.app-nav a[aria-current="page"] {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--card-bg) 85%, black 15%);
+  border-color: color-mix(in srgb, var(--card-border) 90%, transparent);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.env-card,
+.bot-controls article {
+  backdrop-filter: blur(6px);
+}
+
+@media (max-width: 900px) {
+  .app-main {
+    padding: 1rem .75rem 1.5rem;
+  }
+}

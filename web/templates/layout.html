@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}{{ control_panel_title }}{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/css/cool-ui.css">
+  <style>
+    :root {
+      --app-bg: {{ colors.page_bg }};
+      --card-bg: {{ colors.card_bg }};
+      --card-border: {{ colors.card_border }};
+      --text-primary: {{ colors.text_primary }};
+      --text-secondary: {{ colors.text_secondary }};
+      --text-muted: {{ colors.text_muted }};
+      --status-on: {{ colors.status_running }};
+      --status-off: {{ colors.status_stopped }};
+      --console-bg: {{ colors.console_bg }};
+      --console-text: {{ colors.console_text }};
+      --console-border: {{ colors.console_border }};
+    }
+    body {
+      max-width: 100%;
+      margin: 0;
+      padding: 0;
+      color: var(--text-primary);
+      background:
+        radial-gradient(1200px 800px at 10% -10%, color-mix(in srgb, var(--status-on) 20%, transparent), transparent 60%),
+        radial-gradient(1000px 700px at 100% 0%, color-mix(in srgb, var(--status-off) 18%, transparent), transparent 62%),
+        var(--app-bg);
+      min-height: 100vh;
+    }
+    nav.app-nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      padding: .75rem 1rem;
+      backdrop-filter: blur(12px);
+      background: color-mix(in srgb, var(--app-bg) 70%, transparent);
+      border-bottom: 1px solid color-mix(in srgb, var(--card-border) 60%, transparent);
+    }
+    .app-main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 1.25rem 1rem 2rem;
+    }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+    pre.log { background: {{ colors.console_bg }}; color: {{ colors.console_text }}; padding: 1rem; height: 50vh; overflow: auto; }
+    .status-on { background: {{ colors.status_running }}; }
+    .status-off { background: {{ colors.status_stopped }}; }
+  </style>
+  {% block head %}{% endblock %}
+  <script>
+    function postJson(url, data) {
+      return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: data ? JSON.stringify(data) : undefined });
+    }
+  </script>
+  {% block scripts_head %}{% endblock %}
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+</head>
+<body>
+  <nav class="app-nav">
+    <ul>
+      <li><strong>{{ control_panel_title }}</strong></li>
+    </ul>
+    <ul>
+      <li><a href="/" {% if request and request.url.path == "/" %}aria-current="page"{% endif %}>Dashboard</a></li>
+      <li><a href="/env" {% if request and request.url.path == "/env" %}aria-current="page"{% endif %}>Environment</a></li>
+    </ul>
+  </nav>
+  <main class="app-main">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
+
+

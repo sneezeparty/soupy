@@ -1,0 +1,35 @@
+# Secrets — production values stay local, never committed
+.env
+.env-stable
+.env-stable.bak.*
+.env.old
+
+# Live operational data — never committed (privacy)
+data/
+media/
+logs/
+soupy_database/databases/
+user_stats.json
+
+# Python build / cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / IDE
+.DS_Store
+.idea/
+*.code-workspace
+
+# Claude Code project state — local settings and dev-aid agents reference user paths
+.claude/
+
+# Working docs (delete these once cleanup commits land)
+REVIEW_PLAN.md
+REVIEW_BACKLOG.md
+VISION_IMPLEMENTATION.md
+
+# Stale legacy artifacts
+soupy_flux.log
+.schema
+run_soupy.py

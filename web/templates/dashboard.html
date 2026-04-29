@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+{% block title %}Dashboard • {{ control_panel_title }}{% endblock %}
+{% set dash_v = now.strftime("%Y%m%d%H%M%S") if now else "1" %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/dashboard/dashboard.css?v={{ dash_v }}" />
+{% endblock %}
+
+{% block content %}
+<div id="dashboard-root"></div>
+<script id="dashboard-initial" type="application/json">
+{
+  "status": {{ status|tojson }}
+}
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="/static/dashboard/dashboard-app.js?v={{ dash_v }}"></script>
+{% endblock %}

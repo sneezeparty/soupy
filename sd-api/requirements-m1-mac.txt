@@ -1,0 +1,39 @@
+# Requirements for M1 Mac Studio (Apple Silicon)
+# Install PyTorch with MPS (Metal Performance Shaders) support
+# Note: Use PyTorch 2.0+ for best MPS support
+
+# Core dependencies
+fastapi
+uvicorn[standard]
+torch>=2.0.0  # PyTorch with MPS support (install from PyPI, not CUDA version)
+torchvision>=0.15.0
+torchaudio>=2.0.0
+diffusers
+transformers
+safetensors
+accelerate
+rembg
+pillow
+colorama
+opencv-python-headless
+numpy
+scikit-image
+optimum-quanto
+requests
+huggingface_hub[cli]
+onnxruntime
+sentencepiece
+
+# Installation instructions for M1 Mac:
+# 1. Install PyTorch (with MPS support):
+#    pip install torch torchvision torchaudio
+#
+# 2. Install other dependencies:
+#    pip install -r requirements-m1-mac.txt
+#
+# 3. Verify MPS is available:
+#    python -c "import torch; print('MPS available:', torch.backends.mps.is_available())"
+#
+# Note: Some operations may still fall back to CPU on M1 Macs if MPS doesn't support them.
+# This is normal and handled automatically by PyTorch.
+
