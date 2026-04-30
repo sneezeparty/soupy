@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- The current trigger message is now wrapped in a `RESPOND TO THE MESSAGE BELOW` marker before the user/assistant merge step. Without it, the user/role merge that's needed for strict-alternation models like Gemma was concatenating the trigger onto any preceding URL content + RAG snippets + image descriptions, producing an 11k+ char user blob with the actual question buried at the end. The marker keeps the trigger findable.
+
 ## [1.1.1] - 2026-04-30
 
 ### Added

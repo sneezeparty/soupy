@@ -5558,10 +5558,20 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             if _url_chars_used > 0:
                 logger.info("📊 URL content total: %d chars used of %d-char budget", _url_chars_used, _url_budget_chars)
             
-            # Add the current user message with URL content (using display name/nickname)
+            # Add the current user message with URL content (using display name/nickname).
+            # The marker block before the message keeps the trigger findable after the
+            # consecutive-same-role merge step below glues this onto any preceding
+            # URL content / RAG context / image descriptions in a single user blob.
             user_message = {
-                "role": "user", 
-                "content": f"{message.author.display_name}: {current_message_content}"
+                "role": "user",
+                "content": (
+                    "\n\n---\n"
+                    "RESPOND TO THE MESSAGE BELOW. Everything earlier in this user turn "
+                    "(recent chat history, link previews, retrieved memory snippets) is "
+                    "background context only — do not respond to it directly.\n"
+                    "---\n"
+                    f"{message.author.display_name}: {current_message_content}"
+                )
             }
             if rag_context_message:
                 messages_for_llm.append(rag_context_message)
