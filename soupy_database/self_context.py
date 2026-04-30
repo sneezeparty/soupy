@@ -66,6 +66,11 @@ def self_archive_path(guild_id: int) -> Path:
     return SELF_MD_DIR / f"guild_{guild_id}_archive.md"
 
 
+def self_anchor_path(guild_id: int) -> Path:
+    _ensure_dir()
+    return SELF_MD_DIR / f"guild_{guild_id}_anchor.md"
+
+
 # ---------------------------------------------------------------------------
 # Feature toggle
 # ---------------------------------------------------------------------------
@@ -109,6 +114,10 @@ def load_self_archive(guild_id: int) -> str:
     return _read_file(self_archive_path(guild_id))
 
 
+def load_self_anchor(guild_id: int) -> str:
+    return _read_file(self_anchor_path(guild_id))
+
+
 def save_self_md(guild_id: int, content: str) -> None:
     _write_file(self_md_path(guild_id), content)
     logger.info("self_context: saved full doc %d chars for guild %s", len(content), guild_id)
@@ -117,6 +126,11 @@ def save_self_md(guild_id: int, content: str) -> None:
 def save_self_core(guild_id: int, content: str) -> None:
     _write_file(self_core_path(guild_id), content)
     logger.info("self_context: saved core %d chars for guild %s", len(content), guild_id)
+
+
+def save_self_anchor(guild_id: int, content: str) -> None:
+    _write_file(self_anchor_path(guild_id), content)
+    logger.info("self_context: saved anchor %d chars for guild %s", len(content), guild_id)
 
 
 def append_to_archive(guild_id: int, pruned_text: str) -> None:
@@ -577,6 +591,40 @@ Return ONLY the summary text. No preamble, no code fences.
 """
 
 
+_ANCHOR_SYSTEM = """\
+You are distilling Soupy Dafoe's self-knowledge document into a compact identity
+statement that will be injected into the system prompt for EVERY chat reply.
+
+Because this runs on every reply, it must be SHORT and TIMELESS — covering only
+enduring traits of the bot's character, not specific people, jokes, or topical
+opinions. Topical detail is retrieved separately via RAG when relevant; you do
+not need to include it here.
+"""
+
+
+_ANCHOR_USER = """\
+Read the document below and produce an identity statement of NO MORE than
+{max_chars} characters covering ONLY:
+- Voice (how Soupy talks — wit, dryness, sarcasm register)
+- Worldview leaning (politics, attitudes toward hype, tech, capital)
+- Core tendencies (habitual moves: deflate drama, deflect over-engineered ideas,
+  push back on entitled questions, etc.)
+
+DO NOT include:
+- Specific people's names or relationship descriptions
+- Specific running jokes or anecdotes
+- Specific opinions on specific products, events, or news items
+
+Write in first person, lowercase, in Soupy's own voice. One or two short
+paragraphs, no headers, no bullet list. Stay under {max_chars} chars.
+
+DOCUMENT:
+---
+{doc}
+---
+"""
+
+
 async def reflect_and_update(
     guild_id: int,
     llm_func: Callable[..., Coroutine[Any, Any, Any]],
@@ -663,8 +711,37 @@ async def reflect_and_update(
                 save_self_core(guild_id, core_text)
             else:
                 logger.warning("self_context: core summary too short (%d chars), skipping", len(core_text))
+                core_text = ""
         except Exception as exc:
             logger.error("self_context: core summary failed for guild %s: %s", guild_id, exc)
+            core_text = ""
+
+        # --- Step 3.5: Distill anchor (the always-on identity slug used in every reply's system prompt) ---
+        anchor_source = core_text or new_full
+        if anchor_source:
+            anchor_max_chars = int(os.getenv("SELF_MD_ANCHOR_MAX_CHARS", "600"))
+            anchor_messages = [
+                {"role": "system", "content": _ANCHOR_SYSTEM},
+                {"role": "user", "content": _ANCHOR_USER.format(
+                    max_chars=anchor_max_chars, doc=anchor_source,
+                )},
+            ]
+            try:
+                anchor_response = await llm_func(
+                    model=_model,
+                    messages=anchor_messages,
+                    temperature=float(os.getenv("SELF_MD_ANCHOR_TEMPERATURE", "0.5")),
+                    max_tokens=int(os.getenv("SELF_MD_ANCHOR_MAX_TOKENS", "400")),
+                )
+                anchor_text = anchor_response.choices[0].message.content.strip()
+                # Generous safety cap — LLMs sometimes overshoot stated limits.
+                anchor_text = anchor_text[: anchor_max_chars * 2]
+                if len(anchor_text) >= 30:
+                    save_self_anchor(guild_id, anchor_text)
+                else:
+                    logger.warning("self_context: anchor too short (%d chars), skipping", len(anchor_text))
+            except Exception as exc:
+                logger.error("self_context: anchor generation failed for guild %s: %s", guild_id, exc)
 
         # --- Step 4: Re-index into RAG ---
         if embed_func and embed_session:
@@ -701,24 +778,39 @@ _INJECTION_FRAME = (
 
 
 def get_self_md_for_injection(guild_id: int) -> str:
-    """Return the CORE summary for the system prompt.
+    """Return the always-on identity slug for the system prompt.
 
-    Falls back to the full doc (truncated at a paragraph boundary) if no core exists yet.
+    Preference order:
+      1. Anchor (`guild_<id>_anchor.md`) — small, LLM-distilled identity. Self-generated
+         each reflection cycle. ~600 chars by default.
+      2. Truncated core (paragraph-bounded, capped at SELF_MD_ANCHOR_FALLBACK_CHARS) —
+         used until the first reflection generates a real anchor.
+      3. Truncated full doc — final fallback.
+      4. Empty string when nothing exists yet.
+
+    Topical detail (specific people, jokes, opinions on specific things) is retrieved
+    separately via the self-knowledge RAG (`self_chunks` table) when relevant — it does
+    not need to live in the always-on system prompt.
     """
     if not is_self_md_enabled():
         return ""
-    content = load_self_core(guild_id)
+
+    # 1. Anchor: real, LLM-distilled.
+    content = load_self_anchor(guild_id)
+
     if not content:
-        # Fallback: use full doc until first core is generated, truncated at a clean boundary
-        content = load_self_md(guild_id)
-        if not content:
+        # 2/3. Fallback: truncate core, then full, at a paragraph boundary.
+        max_fallback = int(os.getenv("SELF_MD_ANCHOR_FALLBACK_CHARS", "600"))
+        source = load_self_core(guild_id) or load_self_md(guild_id)
+        if not source:
             return ""
-        max_fallback = int(os.getenv("SELF_MD_CORE_FALLBACK_CHARS", "3000"))
-        if len(content) > max_fallback:
-            # Cut at the last paragraph/line boundary before the limit
-            cut = content[:max_fallback].rfind("\n")
+        if len(source) > max_fallback:
+            cut = source[:max_fallback].rfind("\n")
             if cut > max_fallback // 2:
-                content = content[:cut].rstrip()
+                content = source[:cut].rstrip()
             else:
-                content = content[:max_fallback].rstrip()
+                content = source[:max_fallback].rstrip()
+        else:
+            content = source
+
     return _INJECTION_FRAME + content + "\n"

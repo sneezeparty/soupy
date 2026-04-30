@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- New self-knowledge **anchor** tier (`data/self_md/guild_<id>_anchor.md`). The reflection cycle now distills a small (~600 char) timeless identity statement from the core after generating it. The anchor is what gets injected into the system prompt for every reply; the larger core is no longer always-on. Topical detail (specific people, jokes, opinions on specific things) continues to be retrieved on demand via the existing self-knowledge RAG.
+- Env vars: `SELF_MD_ANCHOR_MAX_CHARS` (default 600), `SELF_MD_ANCHOR_TEMPERATURE` (0.5), `SELF_MD_ANCHOR_MAX_TOKENS` (400), `SELF_MD_ANCHOR_FALLBACK_CHARS` (600). All editable from the web Environment Editor.
+
 ### Changed
+- `get_self_md_for_injection` now prefers the anchor file. Falls back to a paragraph-bounded truncation of the core (then full doc) when no anchor exists yet — so behavior is sensible from first run, and improves automatically once the next reflection cycle generates a real anchor. Net effect: system prompt drops from ~12k chars → ~6-7k chars per reply.
 - The current trigger message is now wrapped in a `RESPOND TO THE MESSAGE BELOW` marker before the user/assistant merge step. Without it, the user/role merge that's needed for strict-alternation models like Gemma was concatenating the trigger onto any preceding URL content + RAG snippets + image descriptions, producing an 11k+ char user blob with the actual question buried at the end. The marker keeps the trigger findable.
 
 ## [1.1.1] - 2026-04-30
