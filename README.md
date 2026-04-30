@@ -577,6 +577,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - **DuckDuckGo**: Search without API keys
 - **Bluesky/AT Protocol**: Autonomous social media engagement — replies, posts, likes, follows
 
+## Changelog
+
+Notable changes to Soupy are recorded in [CHANGELOG.md](CHANGELOG.md).
+
 ## Support
 
 If you encounter any issues, open an issue at [GitHub Issues](https://github.com/sneezeparty/soupy/issues).

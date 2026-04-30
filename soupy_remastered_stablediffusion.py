@@ -1336,6 +1336,8 @@ async def generate_parallel_candidates(messages: list, model: str, temperature: 
     temp_variation_up2 = get_float_env("CHAT_TEMP_VARIATION_UP2", 0.25)   # Additional variation for most creative
     temp_min = get_float_env("CHAT_TEMP_MIN", 0.3)                        # Minimum temperature
     temp_max = get_float_env("CHAT_TEMP_MAX", 1.0)                        # Maximum temperature
+    frequency_penalty = get_float_env("CHAT_FREQUENCY_PENALTY", 0.6)
+    presence_penalty = get_float_env("CHAT_PRESENCE_PENALTY", 0.3)
     
     # Create temperature variations for diversity (capped at temp_max to avoid hallucinations)
     # Base temp, slightly lower (more focused), slightly higher (more creative), highest (but capped)
@@ -1358,6 +1360,8 @@ async def generate_parallel_candidates(messages: list, model: str, temperature: 
                     messages=messages,
                     temperature=temp,
                     max_tokens=max_tokens,
+                    frequency_penalty=frequency_penalty,
+                    presence_penalty=presence_penalty,
                 )
             except Exception as e:
                 err_text = str(e)
