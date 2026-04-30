@@ -643,8 +643,10 @@ async def reflect_and_update(
     interactions = await get_and_clear_interactions(guild_id)
 
     if not interactions:
-        logger.debug("self_context: no interactions to reflect on for guild %s", guild_id)
+        logger.info("🪞 self_context: no pending interactions to reflect on for guild %s — nothing to do", guild_id)
         return load_self_md(guild_id)
+
+    logger.info("🪞 self_context: starting reflection for guild %s (%d pending interactions)", guild_id, len(interactions))
 
     current = load_self_md(guild_id)
     if not current:
@@ -657,6 +659,7 @@ async def reflect_and_update(
     _model = model or os.getenv("LOCAL_CHAT", "local-model")
 
     # --- Step 1: Reflect on full document ---
+    logger.info("🪞 [1/4] regenerating full self-document via LLM (max %d words)…", max_words)
     messages = [
         {"role": "system", "content": _REFLECT_SYSTEM.format(max_words=max_words)},
         {"role": "user", "content": _REFLECT_USER.format(
@@ -693,6 +696,7 @@ async def reflect_and_update(
                      guild_id, len(interactions), len(new_full))
 
         # --- Step 3: Generate core summary ---
+        logger.info("🪞 [2/4] regenerating compressed core summary (max %d words)…", core_max_words)
         core_messages = [
             {"role": "system", "content": _CORE_SYSTEM.format(max_words=core_max_words)},
             {"role": "user", "content": _CORE_USER.format(
@@ -720,6 +724,7 @@ async def reflect_and_update(
         anchor_source = core_text or new_full
         if anchor_source:
             anchor_max_chars = int(os.getenv("SELF_MD_ANCHOR_MAX_CHARS", "600"))
+            logger.info("🪞 [3/4] distilling always-on identity anchor (max %d chars)…", anchor_max_chars)
             anchor_messages = [
                 {"role": "system", "content": _ANCHOR_SYSTEM},
                 {"role": "user", "content": _ANCHOR_USER.format(
@@ -745,12 +750,16 @@ async def reflect_and_update(
 
         # --- Step 4: Re-index into RAG ---
         if embed_func and embed_session:
+            logger.info("🪞 [4/4] re-indexing full doc + archive into self_chunks for RAG retrieval…")
             try:
                 n = await index_self_knowledge(guild_id, embed_func, embed_session)
                 logger.info("self_context: re-indexed %d chunks for guild %s", n, guild_id)
             except Exception as exc:
                 logger.error("self_context: re-indexing failed for guild %s: %s", guild_id, exc)
+        else:
+            logger.info("🪞 [4/4] skipping RAG re-index — no embed function provided")
 
+        logger.info("🪞 self_context: reflection cycle complete for guild %s", guild_id)
         return new_full
 
     except Exception as exc:

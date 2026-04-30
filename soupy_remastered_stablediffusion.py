@@ -2351,6 +2351,10 @@ async def soupyself_command(
     elif act == "reflect":
         await interaction.response.defer(ephemeral=True, thinking=True)
         pending = pending_interaction_count(guild_id)
+        logger.info(
+            "🪞 /soupyself reflect invoked by %s for guild %s (%d pending interaction(s))",
+            interaction.user, guild_id, pending,
+        )
         try:
             from soupy_database.rag import embed_texts_lm_studio
             async with aiohttp.ClientSession() as embed_session:
