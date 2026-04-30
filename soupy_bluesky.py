@@ -421,13 +421,13 @@ def _resize_image_for_blob(image_bytes: bytes) -> Optional[Tuple[bytes, str]]:
                 im.save(buf, format="JPEG", quality=quality, optimize=True)
                 data = buf.getvalue()
                 if len(data) <= _BSKY_BLOB_MAX_BYTES:
-                    logger.info("🦋 Resized og:image to %d bytes (q=%d, %dx%d)",
-                                len(data), quality, im.width, im.height)
+                    logger.debug("🦋 Resized og:image to %d bytes (q=%d, %dx%d)",
+                                 len(data), quality, im.width, im.height)
                     return data, "image/jpeg"
-            logger.info("🦋 og:image still too large after recompression; giving up")
+            logger.warning("🦋 og:image still too large after recompression; giving up")
             return None
     except Exception as e:
-        logger.info("🦋 og:image resize failed: %s", e)
+        logger.warning("🦋 og:image resize failed: %s", e)
         return None
 
 
@@ -481,8 +481,8 @@ async def _fetch_page_html(url: str) -> Tuple[Optional[str], str]:
         except Exception as e:
             logger.debug("🦋 og:image fetch with UA %r failed: %s", ua.split("/")[0], e)
     if last_status:
-        logger.info("🦋 og:image: every UA blocked (last HTTP %d), trying trafilatura for %s",
-                    last_status, url[:60])
+        logger.debug("🦋 og:image: every UA blocked (last HTTP %d), trying trafilatura for %s",
+                     last_status, url[:60])
     # Last-resort: trafilatura.
     def _traf_fetch():
         return trafilatura.fetch_url(url)
@@ -506,7 +506,7 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
         # Step 1: Fetch page HTML, retrying with social-crawler UAs on 4xx.
         html, resolved_url = await _fetch_page_html(url)
         if not html:
-            logger.info("🦋 og:image: could not fetch page at all for %s", url[:60])
+            logger.warning("🦋 og:image: could not fetch page at all for %s", url[:60])
             return None
 
         # Step 2: Parse image URL from meta tags (try multiple patterns + JSON-LD).
@@ -531,10 +531,10 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
                     break
 
         if not image_url:
-            logger.info("🦋 No og:image or twitter:image found for %s", resolved_url[:60])
+            logger.debug("🦋 No og:image or twitter:image found for %s", resolved_url[:60])
             return None
 
-        logger.info("🦋 Found og:image: %s", image_url[:100])
+        logger.debug("🦋 Found og:image: %s", image_url[:100])
 
         # Step 3: Download the image, retrying with crawler UAs if blocked.
         image_bytes: Optional[bytes] = None
@@ -558,11 +558,11 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
                 logger.debug("🦋 og:image download with UA %r failed: %s", ua.split("/")[0], e)
 
         if not image_bytes:
-            logger.info("🦋 og:image download failed (all UAs) for %s", image_url[:80])
+            logger.warning("🦋 og:image download failed (all UAs) for %s", image_url[:80])
             return None
 
         if len(image_bytes) < 1000:
-            logger.info("🦋 og:image too small (%d bytes), probably a tracking pixel", len(image_bytes))
+            logger.debug("🦋 og:image too small (%d bytes), probably a tracking pixel", len(image_bytes))
             return None
 
         # Pick canonical mime; treat anything non-PNG/non-WebP as JPEG-class.
@@ -575,7 +575,7 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
 
         # If oversized for Bluesky's blob limit, resize via Pillow.
         if len(image_bytes) > _BSKY_BLOB_MAX_BYTES:
-            logger.info("🦋 og:image is %d bytes, resizing to fit Bluesky blob limit", len(image_bytes))
+            logger.debug("🦋 og:image is %d bytes, resizing to fit Bluesky blob limit", len(image_bytes))
             resized = _resize_image_for_blob(image_bytes)
             if resized is None:
                 return None

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- `LOG_LEVEL` env var (default `INFO`). Controls what shows up in the terminal and the web log stream. The file at `logs/soupy.log` still captures `DEBUG` regardless. Tunable from the web Environment Editor.
+- Logging policy comment block above the logging setup in the main bot, documenting what belongs at INFO vs. DEBUG vs. WARNING vs. ERROR. Roughly 5–10 lines per chat reply at INFO.
+
+### Changed
+- Demoted noisy chat-path INFO calls to DEBUG so the terminal stays readable: per-message DB connect (`Database initialized for guild …`), token-budget breakdown, history-trim notice, per-URL fetch outcomes.
+- Reclassified Bluesky og:image processing logs: per-image resize/UA-blocked details → DEBUG; "could not fetch page" / "download failed (all UAs)" / "still too large after recompression" → WARNING.
+
 ## [1.1.0] - 2026-04-30
 
 ### Added

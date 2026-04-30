@@ -149,7 +149,7 @@ def init_database(guild_id: int) -> sqlite3.Connection:
     ensure_user_profile_schema(conn)
 
     conn.commit()
-    logger.info(f"Database initialized for guild {guild_id} at {db_path}")
+    logger.debug(f"Database initialized for guild {guild_id} at {db_path}")
     return conn
 
 

@@ -5350,7 +5350,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             _rag_budget_chars = int(_rag_budget_tokens * 3.5)
             _url_budget_chars = int(_url_budget_tokens * 3.5)
 
-            logger.info(
+            logger.debug(
                 "📊 Token budget: n_ctx=%d output=%d safety=%d system=%d cur_msg=%d available=%d "
                 "→ history=%d rag=%d url=%d tokens",
                 _n_ctx, _output_reserve, _safety_buffer, _system_tokens, _current_msg_tokens,
@@ -5369,7 +5369,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             _history_before = len(recent_messages)
             recent_messages = trim_messages_to_token_budget(recent_messages, _history_budget_tokens)
             if len(recent_messages) < _history_before:
-                logger.info(
+                logger.debug(
                     "📊 History trimmed: %d → %d messages to fit %d-token history budget",
                     _history_before, len(recent_messages), _history_budget_tokens,
                 )
@@ -5480,7 +5480,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                                     chunk = content[:remaining_url_budget]
                                     history_url_contents.append(chunk)
                                     _url_chars_used += len(chunk)
-                                    logger.info(f"Successfully processed HISTORY URL {url} ({len(chunk)}/{len(content)} chars kept)")
+                                    logger.debug(f"Successfully processed HISTORY URL {url} ({len(chunk)}/{len(content)} chars kept)")
                                 else:
                                     logger.warning(f"Failed to extract content from HISTORY URL {url}")
 
@@ -5519,7 +5519,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 async with aiohttp.ClientSession() as session:
                     for url in urls_in_current_message:
                         if _url_chars_used >= _url_budget_chars:
-                            logger.info(f"URL budget exhausted ({_url_chars_used}/{_url_budget_chars} chars); skipping remaining current-message URLs")
+                            logger.debug(f"URL budget exhausted ({_url_chars_used}/{_url_budget_chars} chars); skipping remaining current-message URLs")
                             break
                         # Check cache first
                         current_time = time.time()
@@ -5545,7 +5545,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                             chunk = content[:remaining_url_budget]
                             url_contents_for_current_message.append(chunk)
                             _url_chars_used += len(chunk)
-                            logger.info(f"Successfully processed URL {url} for CURRENT message ({len(chunk)}/{len(content)} chars kept)")
+                            logger.debug(f"Successfully processed URL {url} for CURRENT message ({len(chunk)}/{len(content)} chars kept)")
                         else:
                             logger.warning(f"Failed to extract content from URL {url} in CURRENT message from {message.author.display_name}")
 
