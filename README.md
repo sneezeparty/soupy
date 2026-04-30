@@ -6,7 +6,7 @@
 
 Please feel free to [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty) to help support this project.  
 
-Join [Soupy's Discord Server](https://discord.gg/YJeBgsMt) to try it out.
+Join [Soupy's Discord Server](https://discord.gg/GAv9umz5RB) to try it out.
 
 ---
 
