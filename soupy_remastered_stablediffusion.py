@@ -192,9 +192,34 @@ log_filepath = log_dir / log_filename
 MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB in bytes
 BACKUP_COUNT = 5  # Keep up to 5 backup files
 
+# ---------------------------------------------------------------------------
+# Logging policy
+#
+# Console output is filtered by LOG_LEVEL (default INFO) so the terminal stays
+# readable while the bot is running. The file handler always captures DEBUG,
+# so full detail is recoverable from logs/soupy.log when investigating.
+#
+# Conventions used throughout the codebase:
+#   INFO    — what the bot is doing right now: lifecycle (start/stop/cog load),
+#             per-reply trigger and final text, loop cycle start/end, retries,
+#             fallbacks, summary numbers. Roughly 5–10 lines per chat reply.
+#   DEBUG   — internals: per-row RAG hits, per-message DB connect, token-budget
+#             breakdowns, cache hits, candidate dumps, function traces.
+#   WARNING — recovered or skipped: empty results, retry exhausted, fallback engaged.
+#   ERROR   — failed: exceptions, send failures, backend unreachable.
+#
+# When adding a new log line, ask: "would the user need this every time, or
+# only when investigating something specific?" If the latter, use DEBUG.
+# ---------------------------------------------------------------------------
+
+# Pre-load .env-stable so LOG_LEVEL can drive the handler on the next line.
+# (load_dotenv runs again below with override=True for the rest of the env.)
+load_dotenv('.env-stable')
+
 # Set up handlers
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.DEBUG)
+_console_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+console_handler.setLevel(_console_log_level)
 console_handler.setFormatter(CustomFormatter(
     "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S,f"
@@ -226,7 +251,7 @@ logging.getLogger("discord.client").setLevel(logging.INFO)
 logging.getLogger("discord.gateway").setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
-logger.info(f"Logging initialized. Log file: {log_filepath}")
+logger.info(f"Logging initialized. Console level: {logging.getLevelName(_console_log_level)} (set LOG_LEVEL to change). File: {log_filepath} (DEBUG).")
 
 """
 ---------------------------------------------------------------------------------
