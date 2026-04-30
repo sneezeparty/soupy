@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-30
+
 ### Added
 - `LOG_LEVEL` env var (default `INFO`). Controls what shows up in the terminal and the web log stream. The file at `logs/soupy.log` still captures `DEBUG` regardless. Tunable from the web Environment Editor.
 - Logging policy comment block above the logging setup in the main bot, documenting what belongs at INFO vs. DEBUG vs. WARNING vs. ERROR. Roughly 5–10 lines per chat reply at INFO.
@@ -29,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Initial public release of Soupy Remastered: chat with personality, RAG-backed memory, autonomous Discord article posts, autonomous Bluesky engagement, web search, vision, image generation via a separate Stable Diffusion backend, and a FastAPI web control panel for live config and monitoring.
 
-[Unreleased]: https://github.com/sneezeparty/soupy/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/sneezeparty/soupy/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/sneezeparty/soupy/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/sneezeparty/soupy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sneezeparty/soupy/releases/tag/v1.0.0
