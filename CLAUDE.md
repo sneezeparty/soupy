@@ -8,6 +8,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Installer
+
+A first-run wizard lives at `install.py`, with helpers under `installer/`
+(see `INSTALL.md` for end-user docs). It is a single-file entry point
+plus a small package — stdlib-only at module level (`colorama` is the one
+optional third-party import, with a graceful fallback) so it runs on a
+fresh clone before `pip install` has happened. Each numbered step in
+`installer/steps/sNN_*.py` exposes `run(state, ui) -> dict`. The wizard
+persists progress to `.install-state.json` (gitignored), masks secrets
+in that file, generates `.env-stable` from `.env-stable.example` while
+preserving comments / ordering / multi-line values, and `os.execvp`s
+`run_all.py` at the end.
+
+When a change touches the env-var surface, the Discord-bot connection,
+LM Studio probe shape, or SD endpoints, also check whether `install.py`
+or the steps under `installer/steps/` need a corresponding update.
+
+---
+
 ## Running the Project
 
 ```bash

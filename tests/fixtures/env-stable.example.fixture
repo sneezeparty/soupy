@@ -1,0 +1,38 @@
+# =============================================================================
+# DISCORD BOT CONFIGURATION
+# =============================================================================
+DISCORD_TOKEN=your_discord_bot_token_here
+OWNER_IDS=000000000000000000
+CHANNEL_IDS=
+GUILD_ID=
+
+# Comment that should survive untouched.
+FIRST_SCAN_LOOKBACK_DAYS=365
+
+# =============================================================================
+# LLM
+# =============================================================================
+OPENAI_BASE_URL=http://localhost:1234/v1
+LOCAL_CHAT=google/gemma-3-27b
+
+# Multi-line quoted value — must survive unchanged.
+BEHAVIOUR="line one
+line two with a \"quote\"
+line three"
+
+# Quoted single-line.
+9BALL="creepy 8-ball persona, single line, with embedded \"quotes\"."
+
+# =============================================================================
+# OPTIONAL
+# =============================================================================
+# Bluesky (off by default)
+BLUESKY_HANDLE=yourname.bsky.social
+BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+BLUESKY_AUTO_REPLY=false
+
+# Daily posts
+DAILY_POST_CHANNELS="{}"
+DAILY_POST_ENABLED=false
+
+# Trailing comment + blank line below

@@ -4,6 +4,9 @@
 .env-stable.bak.*
 .env.old
 
+# Installer state — may contain answers we want re-prompted, never committed
+.install-state.json
+
 # Live operational data — never committed (privacy)
 data/
 media/
@@ -15,6 +18,10 @@ user_stats.json
 __pycache__/
 *.pyc
 *.pyo
+
+# Virtualenvs — never committed
+.venv/
+.venv-sd/
 
 # OS / IDE
 .DS_Store
