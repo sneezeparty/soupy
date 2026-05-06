@@ -22,7 +22,7 @@ import re
 from urllib.parse import urlparse
 
 import soupy_prompts
-from soupy_settings import settings
+from soupy_settings import openai_client, settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ def _is_blocked_url(url: str, blocked: set) -> bool:
 
 
 # Initialize OpenAI client
-client = OpenAI(base_url=settings.openai_base_url, api_key=settings.openai_api_key)
+client = openai_client()
 
 
 async def async_chat_completion(*args, **kwargs):

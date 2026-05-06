@@ -497,3 +497,23 @@ class Settings:
 
 # Module-level singleton. Import as: `from soupy_settings import settings`.
 settings = Settings()
+
+
+# ---------------------------------------------------------------------------
+# Shared OpenAI client
+# ---------------------------------------------------------------------------
+
+
+def openai_client():
+    """Return a configured OpenAI SDK client pointed at the LM Studio (or
+    other OpenAI-compatible) server. Uses settings.openai_base_url and
+    settings.openai_api_key.
+
+    Each caller gets its own instance — the OpenAI SDK's client is cheap
+    to construct and isn't async-safe to share across event loops in
+    every version. Future work: bake retry / circuit-breaker policy here
+    so every cog gets the same robustness for free.
+    """
+    from openai import OpenAI
+
+    return OpenAI(base_url=settings.openai_base_url, api_key=settings.openai_api_key)

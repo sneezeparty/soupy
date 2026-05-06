@@ -29,7 +29,7 @@ from openai import OpenAI
 import soupy_prompts
 from soupy_database.database import get_db_path
 from soupy_database.user_profiles import _load_structured_profiles, ensure_user_profile_schema
-from soupy_settings import settings
+from soupy_settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,7 @@ logger = logging.getLogger(__name__)
 # LLM client (same pattern as soupy_search.py)
 # ---------------------------------------------------------------------------
 
-client = OpenAI(
-    base_url=settings.openai_base_url,
-    api_key=settings.openai_api_key,
-)
+client = openai_client()
 
 HISTORY_PATH = os.path.join("data", "daily_post_history.json")
 SCHEDULE_PATH = os.path.join("data", "daily_post_schedule.json")

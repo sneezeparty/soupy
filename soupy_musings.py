@@ -25,7 +25,7 @@ from discord.ext import commands, tasks
 from openai import OpenAI
 
 from soupy_database.database import get_db_path
-from soupy_settings import settings
+from soupy_settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +74,7 @@ def _save_musing(thought: str, mode: str, guild_id: int) -> None:
         logger.debug("💭 Failed to save musing to archive: %s", exc)
 
 
-client = OpenAI(
-    base_url=settings.openai_base_url,
-    api_key=settings.openai_api_key,
-)
+client = openai_client()
 
 
 async def _llm_call(system: str, user: str, temperature: float = 0.7, max_tokens: int = 200) -> str:

@@ -66,6 +66,7 @@ import html2text
 import trafilatura
 from PIL import Image, ImageDraw
 import soupy_prompts
+from soupy_settings import openai_client, settings
 import soupy_search
 import soupy_imagesearch
 import aiohttp
@@ -258,7 +259,7 @@ Load Environment Variables
 load_dotenv(".env-stable", override=True)
 
 # The local LLM usage
-client = OpenAI(base_url=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY", "lm-studio"))
+client = openai_client()
 
 # Parse OWNER_IDS from .env
 OWNER_IDS = [int(id.strip()) for id in os.getenv("OWNER_IDS", "").split(",") if id.strip().isdigit()]

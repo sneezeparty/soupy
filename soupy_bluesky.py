@@ -29,7 +29,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from openai import OpenAI
 
-from soupy_settings import settings
+from soupy_settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +37,7 @@ logger = logging.getLogger(__name__)
 # LLM client
 # ---------------------------------------------------------------------------
 
-client = OpenAI(
-    base_url=settings.openai_base_url,
-    api_key=settings.openai_api_key,
-)
+client = openai_client()
 
 
 async def _llm_call(
