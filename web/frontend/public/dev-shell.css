@@ -1,0 +1,23 @@
+/*
+ * Minimal placeholder so dev-mode rendering isn't completely unstyled.
+ * The real CSS variables come from FastAPI templating in production.
+ * Do NOT use this file in the production bundle.
+ */
+:root {
+  --app-bg: #1b1d23;
+  --card-bg: #252830;
+  --card-border: #3a3f4a;
+  --text-primary: #e8e9ec;
+  --text-secondary: #b8bcc6;
+  --text-muted: #7d8290;
+  --status-on: #4ade80;
+  --status-off: #e74c3c;
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  background: var(--app-bg);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}

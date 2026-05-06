@@ -1,0 +1,20 @@
+{
+  "name": "soupy-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Vite + React build scaffold for the Soupy dashboard. The legacy single-file dashboard-app.js is still the canonical UI; this app exists so future tabs can be ported one at a time.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.10"
+  }
+}

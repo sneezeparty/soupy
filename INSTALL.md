@@ -80,6 +80,17 @@ ruff check .                   # lint
 pytest                         # run tests
 ```
 
+## Frontend (developers only)
+
+End users do not need Node.js — the dashboard's compiled JavaScript is
+shipped in `web/static/dashboard/`, and the Vite production bundle in
+`web/static/dashboard/dist/` is checked into git. If you are working on
+the React rewrite under `web/frontend/`, run `npm install` once in that
+directory and use `npm run dev` for hot-reload during development or
+`npm run build` to refresh the production bundle. See
+[`web/frontend/README.md`](web/frontend/README.md) for details. Running
+`python install.py` is unaffected.
+
 ## Replaces
 
 The interactive wizard replaces the manual 7-phase walkthrough that

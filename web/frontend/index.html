@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Soupy Dashboard (Vite dev shell)</title>
+    <!--
+      Dev-mode shell only. The real UI is rendered by FastAPI from
+      web/templates/dashboard.html, which injects CSS variables from .env-stable
+      and loads /static/dashboard/dashboard.css. During `vite dev` we don't have
+      access to that templating, so the styling here will look unstyled —
+      that's expected. Use this shell for component-level iteration; render the
+      production build inside the FastAPI page when you want to see real colors.
+    -->
+    <link rel="stylesheet" href="/dev-shell.css" />
+  </head>
+  <body>
+    <div id="react-root-v2"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -46,3 +46,8 @@ VISION_IMPLEMENTATION.md
 soupy_flux.log
 .schema
 run_soupy.py
+
+# Frontend (Vite scaffold) — node_modules and the dev-mode dist live local.
+# The production bundle goes to web/static/dashboard/dist/ and IS tracked.
+web/frontend/node_modules/
+web/frontend/dist/
