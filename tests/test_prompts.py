@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-import soupy_prompts
+from soupy import prompts as soupy_prompts
 
 
 @pytest.fixture(autouse=True)
@@ -68,7 +68,7 @@ def test_clear_cache_forgets_legacy_warning(monkeypatch, caplog):
     lookup. clear_cache resets that so /reload_env can re-warn after re-edit."""
     monkeypatch.setenv("BEHAVIOUR", "via env")
     soupy_prompts.clear_cache()
-    with caplog.at_level("INFO", logger="soupy_prompts"):
+    with caplog.at_level("INFO", logger="soupy.prompts"):
         soupy_prompts.load_prompt("behaviour")
     first_warnings = [r for r in caplog.records if "legacy env var" in r.message]
     assert len(first_warnings) == 1, f"expected one legacy warning, got {len(first_warnings)}"

@@ -25,10 +25,10 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
-import soupy_prompts
+from soupy import prompts as soupy_prompts
+from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
 from soupy_database.user_profiles import _load_structured_profiles, ensure_user_profile_schema
-from soupy_settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
 
@@ -1844,7 +1844,7 @@ class DailyPostCog(commands.Cog):
                 return
 
             # Fetch og:image for thumbnail
-            from soupy_bluesky import _fetch_og_image
+            from .bluesky import _fetch_og_image
 
             thumb_blob = None
             og_result = await _fetch_og_image(article_url)
@@ -1862,7 +1862,7 @@ class DailyPostCog(commands.Cog):
             )
 
             if result:
-                from soupy_bluesky import _post_url
+                from .bluesky import _post_url
 
                 post_url = _post_url(result.get("uri", ""))
                 logger.info("📰 🦋 Cross-posted to Bluesky: %s", post_url)

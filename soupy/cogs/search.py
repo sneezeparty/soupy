@@ -19,8 +19,8 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands
 
-import soupy_prompts
-from soupy_settings import openai_client, settings
+from soupy import prompts as soupy_prompts
+from soupy.settings import openai_client, settings
 
 # Configure logging
 logger = logging.getLogger(__name__)

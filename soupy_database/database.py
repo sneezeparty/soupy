@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 import aiohttp
 import discord
 
-from soupy_settings import settings
+from soupy.settings import settings
 
 from .helpers import describe_image, extract_url_content, extract_urls
 

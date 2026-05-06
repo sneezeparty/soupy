@@ -13,7 +13,7 @@ from typing import Any, Dict
 # Coloured logging — uses the canonical formatter from soupy_logging so
 # the web app and the bot agree on output format.
 # ---------------------------------------------------------------------------
-from soupy_logging import ColoredFormatter
+from soupy.log import ColoredFormatter
 
 _web_fmt = ColoredFormatter(datefmt="%Y-%m-%d %H:%M:%S,f")
 
@@ -61,7 +61,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from soupy_settings import settings
+from soupy.settings import settings
 
 from .services.bot_runner import BotRunner
 from .services.env_store import parse_env, write_env

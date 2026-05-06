@@ -27,7 +27,7 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from soupy_settings import openai_client, settings
+from soupy.settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
 
@@ -380,7 +380,7 @@ async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
                 pass
         # Fallback: extract date from HTML meta tags / JSON-LD
         if not date:
-            from soupy_dailypost import _extract_date_from_html
+            from .dailypost import _extract_date_from_html
 
             date = _extract_date_from_html(downloaded)
         return {"content": text, "date": date, "title": title}
@@ -2201,7 +2201,7 @@ class BlueskyEngageCog(commands.Cog):
                 title = a_title
                 pub_date = None
             # Check article age using shared estimator (also include title/snippet)
-            from soupy_dailypost import _estimate_article_age_days
+            from .dailypost import _estimate_article_age_days
 
             scan_text = " ".join(filter(None, [title, a_snippet, content]))
             age = _estimate_article_age_days(

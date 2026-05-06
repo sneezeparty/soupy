@@ -66,7 +66,8 @@ from openai import OpenAIError
 from PIL import Image, ImageDraw
 from timezonefinder import TimezoneFinder
 
-import soupy_prompts
+from soupy import prompts as soupy_prompts
+from soupy.settings import openai_client
 from soupy_database import process_scan_triggers, setup_scan_command
 from soupy_database.helpers import extract_url_content, extract_urls
 from soupy_database.rag import (
@@ -86,7 +87,6 @@ from soupy_database.self_context import (
 from soupy_database.self_context import (
     reflect_and_update as self_md_reflect,
 )
-from soupy_settings import openai_client
 
 # Initialize colorama
 colorama.init(autoreset=True)
@@ -115,7 +115,7 @@ LOG_FORMAT_FILE = "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s"
 
 # Reuse the canonical formatter from soupy_logging — the same class
 # was duplicated in web/app.py before this module existed.
-from soupy_logging import ColoredFormatter as CustomFormatter  # noqa: E402, F401
+from soupy.log import ColoredFormatter as CustomFormatter  # noqa: E402, F401
 
 # Create the formatters with the correct datetime format
 console_formatter = CustomFormatter(
@@ -294,7 +294,7 @@ if not CHANNEL_IDS:
 # of this file (and any consumer that imports from this module) finds them
 # at the same names. Function bodies are byte-identical to the previous
 # inline definitions.
-from soupy_triggers import (  # noqa: E402
+from soupy.triggers import (  # noqa: E402
     message_contains_trigger_keyword,
 )
 
@@ -2175,7 +2175,7 @@ async def reload_env(ctx):
 
         # Invalidate the typed-settings cache and the prompt-resolution cache
         # so the next read picks up the new values.
-        from soupy_settings import settings as _soupy_settings
+        from soupy.settings import settings as _soupy_settings
 
         _soupy_settings.reload()
         soupy_prompts.clear_cache()
@@ -5019,7 +5019,7 @@ async def process_sd_image(interaction: discord.Interaction, description: str, s
 # should_randomly_respond moved to soupy_triggers; re-imported here so callers
 # elsewhere in this module continue to see the same name without changing the
 # call-site code or behaviour.
-from soupy_triggers import should_randomly_respond  # noqa: E402, F401
+from soupy.triggers import should_randomly_respond  # noqa: E402, F401
 
 """
 ---------------------------------------------------------------------------------
@@ -5035,31 +5035,31 @@ async def load_extensions():
 
     # Load extensions
     try:
-        await bot.load_extension("soupy_search")
+        await bot.load_extension("soupy.cogs.search")
         logger.info("✅ Loaded search extension")
     except Exception as e:
         logger.error(f"❌ Failed to load search extension: {e}")
 
     try:
-        await bot.load_extension("soupy_imagesearch")
+        await bot.load_extension("soupy.cogs.imagesearch")
         logger.info("🖼️ Loaded image search extension")
     except Exception as e:
         logger.error(f"❌ Failed to load image search extension: {e}")
 
     try:
-        await bot.load_extension("soupy_dailypost")
+        await bot.load_extension("soupy.cogs.dailypost")
         logger.info("📰 Loaded daily post extension")
     except Exception as e:
         logger.error(f"❌ Failed to load daily post extension: {e}")
 
     try:
-        await bot.load_extension("soupy_musings")
+        await bot.load_extension("soupy.cogs.musings")
         logger.info("💭 Loaded musings extension")
     except Exception as e:
         logger.error(f"❌ Failed to load musings extension: {e}")
 
     try:
-        await bot.load_extension("soupy_bluesky")
+        await bot.load_extension("soupy.cogs.bluesky")
         logger.info("🦋 Loaded Bluesky engagement extension")
     except Exception as e:
         logger.error(f"❌ Failed to load Bluesky extension: {e}")

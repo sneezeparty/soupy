@@ -22,8 +22,8 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
-from soupy_settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,7 @@ import html2text
 import trafilatura
 from PIL import Image
 
-from soupy_settings import settings
+from soupy.settings import settings
 
 logger = logging.getLogger(__name__)
 

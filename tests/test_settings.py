@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-import soupy_settings
+from soupy import settings as soupy_settings
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ def test_int_parses(monkeypatch, fresh_settings):
 
 def test_int_falls_back_on_garbage(monkeypatch, fresh_settings, caplog):
     monkeypatch.setenv("MAX_TOKENS", "not-a-number")
-    with caplog.at_level("WARNING", logger="soupy_settings"):
+    with caplog.at_level("WARNING", logger="soupy.settings"):
         v = fresh_settings.max_tokens
     assert v == 4096
     assert any("not an int" in r.message for r in caplog.records)
@@ -78,7 +78,7 @@ def test_int_list_empty(monkeypatch, fresh_settings):
 
 def test_int_list_skips_garbage(monkeypatch, fresh_settings, caplog):
     monkeypatch.setenv("OWNER_IDS", "111, abc, 222")
-    with caplog.at_level("WARNING", logger="soupy_settings"):
+    with caplog.at_level("WARNING", logger="soupy.settings"):
         v = fresh_settings.owner_ids
     assert v == [111, 222]
 

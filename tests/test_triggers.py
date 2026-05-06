@@ -9,7 +9,7 @@ identical.
 
 from __future__ import annotations
 
-import soupy_triggers
+from soupy import triggers as soupy_triggers
 
 
 def test_default_trigger_keywords():

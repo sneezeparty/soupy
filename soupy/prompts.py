@@ -27,7 +27,9 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+# prompts/ lives at the repo root, one directory up from this file
+# (we're at soupy/prompts.py, the prompts directory is sibling to soupy/).
+PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 # Prompt name -> legacy env var name. The "name" is the file stem under
 # prompts/ (e.g. "behaviour" -> prompts/behaviour.default.txt).

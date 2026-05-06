@@ -37,7 +37,15 @@ Issues = "https://github.com/sneezeparty/soupy/issues"
 # This repo isn't installed as a package — it's run in place. Tell setuptools
 # to look at the small handful of importable subpackages so `pip install -e .`
 # works without scanning the world.
-packages = ["installer", "installer.steps", "soupy_database", "web", "web.services"]
+packages = [
+    "installer",
+    "installer.steps",
+    "soupy",
+    "soupy.cogs",
+    "soupy_database",
+    "web",
+    "web.services",
+]
 
 [tool.ruff]
 line-length = 120
