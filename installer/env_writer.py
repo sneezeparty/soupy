@@ -5,10 +5,14 @@ Only the values for keys we know about are rewritten; everything else
 (quoted multi-line `BEHAVIOUR`, all the `WEB_COLOR_*` defaults, etc.) is
 copied through verbatim.
 
-Mirrors the behaviour of `web/services/env_store.py` but stripped down —
-the installer doesn't need that module's full quote-handling because we
-only ever rewrite simple, single-line values in the wizard. Multi-line
-prompts stay untouched.
+NOTE on duplication: `web/services/env_store.py` solves a related but
+different problem (in-place edits to an existing `.env-stable`, not
+rendering from a template) and ships its own quote-aware parser. The
+two modules share a parsing concept but not an API surface. A future
+refactor could extract the shared parse/serialise primitives into a
+third module both depend on. For now we accept the duplication —
+installer/ must stay stdlib-only and bootstrap-safe before `pip install`
+runs, while web/services/ can rely on the bot venv being healthy.
 """
 
 from __future__ import annotations

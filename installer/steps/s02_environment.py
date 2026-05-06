@@ -59,26 +59,31 @@ def _python_version_ok() -> bool:
 
 
 def _has_sentinel(venv: Path, sentinel: str) -> bool:
-    pip = _venv_pip(venv)
-    if not pip.exists():
+    """True if `sentinel` (a package name) is installed in `venv`.
+
+    Asks the venv's Python via importlib.metadata.version, which gives an
+    authoritative answer regardless of how the package was installed
+    (regular wheel, editable, direct URL). The previous implementation
+    parsed `pip freeze` output and missed editable installs.
+    """
+    py = _venv_python(venv)
+    if not py.exists():
         return False
     try:
         result = subprocess.run(
-            [str(pip), "freeze"],
+            [
+                str(py),
+                "-c",
+                f"import importlib.metadata as m; " f"import sys; " f"sys.exit(0 if m.version({sentinel!r}) else 1)",
+            ],
             capture_output=True,
             text=True,
             check=False,
-            timeout=30,
+            timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    if result.returncode != 0:
-        return False
-    needle = sentinel.lower()
-    for line in result.stdout.splitlines():
-        if line.lower().startswith(needle + "==") or line.lower().startswith(needle + " @"):
-            return True
-    return False
+    return result.returncode == 0
 
 
 def _create_venv(venv: Path, ui) -> None:

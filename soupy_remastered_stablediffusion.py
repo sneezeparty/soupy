@@ -387,6 +387,23 @@ image_descriptions = []
 # Maps message_id -> list of formatted image descriptions
 message_image_descriptions: Dict[int, List[str]] = {}
 
+
+# Strong-reference set for fire-and-forget background tasks. asyncio only holds
+# weak refs to tasks created with asyncio.create_task, so anything we don't keep
+# alive ourselves can be silently GC'd mid-await. This set holds the reference
+# for the task's lifetime; the done-callback removes it on completion.
+_background_tasks: "set[asyncio.Task]" = set()
+
+
+def _spawn_task(coro) -> "asyncio.Task":
+    """Create a tracked background task. Use this instead of asyncio.create_task
+    for any fire-and-forget work spawned from a coroutine that won't await it."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 """
 ---------------------------------------------------------------------------------
 Discord Bot Setup
@@ -1242,7 +1259,7 @@ def should_bot_respond_to_message(message):
     # Check for bot mention
     if bot.user in message.mentions:
         # Increment @mention count
-        asyncio.create_task(increment_user_stat(message.author.id, "mentions"))
+        _spawn_task(increment_user_stat(message.author.id, "mentions"))
         return True
 
     # Check if any configured trigger keyword is mentioned
@@ -6033,7 +6050,7 @@ async def on_message(message):
         and not extract_urls(message.content)
         and message.channel.id not in _excluded_scan_ids
     ):
-        asyncio.create_task(_index_message_realtime(message))
+        _spawn_task(_index_message_realtime(message))
 
     # Continue with existing message handling
     should_respond = should_bot_respond_to_message(message) or should_randomly_respond()
@@ -6067,5 +6084,48 @@ Final: run the bot
 ---------------------------------------------------------------------------------
 """
 
+
+def _validate_discord_token_or_warn(token: str) -> None:
+    """Hit GET /users/@me before bot.run() so a typo or revoked token surfaces
+    with a clear error message instead of a deep discord.py login traceback.
+
+    Failure here is non-fatal — if Discord is unreachable for transient reasons
+    we still let bot.run() try, which gives discord.py its own retry path.
+    """
+    if not token:
+        return  # The earlier "if not DISCORD_BOT_TOKEN" check already handled this.
+    try:
+        import urllib.request as _urllib_req
+        import urllib.error as _urllib_err
+
+        req = _urllib_req.Request(
+            "https://discord.com/api/v10/users/@me",
+            headers={"Authorization": f"Bot {token.strip()}", "User-Agent": "soupy-startup"},
+        )
+        with _urllib_req.urlopen(req, timeout=10) as resp:
+            status = resp.getcode()
+        if status == 200:
+            logger.info("Discord token verified (HTTP 200 from /users/@me).")
+        elif status == 401:
+            logger.error(
+                "DISCORD_TOKEN failed pre-flight check (HTTP 401). "
+                "The token is invalid or revoked — fix it in .env-stable. "
+                "Continuing anyway so discord.py can produce its own error."
+            )
+        else:
+            logger.warning("Discord pre-flight returned HTTP %s. Continuing into bot.run().", status)
+    except _urllib_err.HTTPError as e:
+        if e.code == 401:
+            logger.error(
+                "DISCORD_TOKEN failed pre-flight check (HTTP 401 — invalid or revoked). "
+                "Fix it in .env-stable and restart."
+            )
+        else:
+            logger.warning("Discord pre-flight HTTP %s: %s", e.code, e.reason)
+    except Exception as e:  # noqa: BLE001 — pre-flight is best-effort
+        logger.warning("Could not pre-flight Discord token (%s); continuing.", e)
+
+
 if __name__ == "__main__":
+    _validate_discord_token_or_warn(DISCORD_BOT_TOKEN)
     bot.run(DISCORD_BOT_TOKEN)
