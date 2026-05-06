@@ -25,7 +25,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BOT_VENV = REPO_ROOT / ".venv"
 SD_VENV = REPO_ROOT / ".venv-sd"
 
-BOT_REQS = REPO_ROOT / "requirements.txt"
+# Prefer the lock file when present, fall back to the loose requirements.
+BOT_REQS_LOCK = REPO_ROOT / "requirements.lock"
+BOT_REQS_LOOSE = REPO_ROOT / "requirements.txt"
+BOT_REQS = BOT_REQS_LOCK if BOT_REQS_LOCK.exists() else BOT_REQS_LOOSE
 SD_REQS = REPO_ROOT / "sd-api" / "requirements.txt"
 SD_REQS_MAC = REPO_ROOT / "sd-api" / "requirements-m1-mac.txt"
 
@@ -105,7 +108,11 @@ def _stream_pip(cmd: List[str], ui) -> int:
             continue
         # Trim noisy pip lines but show progress and errors.
         lower = line.lower()
-        if "error" in lower or "warning" in lower or line.startswith(("Successfully", "Installing", "Collecting", "Downloading", "Building", "Preparing")):
+        if (
+            "error" in lower
+            or "warning" in lower
+            or line.startswith(("Successfully", "Installing", "Collecting", "Downloading", "Building", "Preparing"))
+        ):
             ui.info(f"    {line}")
     proc.wait()
     return proc.returncode
@@ -158,9 +165,7 @@ def run(state: Dict, ui) -> Dict:
     ui.header("Step 2 — Environment & dependencies")
 
     if not _python_version_ok():
-        ui.fail(
-            f"Python 3.10+ required (this is {sys.version_info.major}.{sys.version_info.minor})."
-        )
+        ui.fail(f"Python 3.10+ required (this is {sys.version_info.major}.{sys.version_info.minor}).")
         raise SystemExit(2)
     ui.ok(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 

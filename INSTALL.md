@@ -55,6 +55,31 @@ Run `/soupyscan` once per guild as an owner. The first scan archives
 your server's history and embeds it for RAG. On a busy server this can
 take hours or days — see `soupy_database/SETUP.md` for tuning.
 
+## Reproducible installs (optional)
+
+`requirements.txt` uses `>=` pins so a fresh install picks up bug-fix
+releases automatically. If you want a frozen snapshot, generate
+`requirements.lock` once and check it in:
+
+```bash
+pip install pip-tools
+pip-compile --output-file=requirements.lock requirements.txt
+```
+
+The installer prefers `requirements.lock` when it's present and falls
+back to `requirements.txt` otherwise.
+
+## Development
+
+For working on Soupy itself:
+
+```bash
+pip install -e ".[dev]"        # ruff, black, pytest, pre-commit, pip-tools
+pre-commit install             # wire hooks to git
+ruff check .                   # lint
+pytest                         # run tests
+```
+
 ## Replaces
 
 The interactive wizard replaces the manual 7-phase walkthrough that

@@ -8,3 +8,30 @@ repos:
     hooks:
       - id: gitleaks
         name: gitleaks (block commits containing secrets)
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$|web/static/dashboard/dashboard-app\.js$'
+      - id: end-of-file-fixer
+        exclude: 'web/static/dashboard/dashboard-app\.js$'
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        # Until the codebase is fully formatted, run black in check-only mode
+        # so existing files aren't reformatted on every touched-line commit.
+        args: [--check]

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soupy"
+version = "1.1.1"
+description = "Fully-local autonomous Discord bot with AI chat, image generation, web search, and Bluesky presence."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "sneezeparty" }]
+
+# Runtime deps live in requirements.txt (pinned via requirements.lock).
+# pyproject.toml dependencies are intentionally empty so `pip install -e .`
+# doesn't try to fight pip-tools' lock file.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "black>=24.0",
+    "pre-commit>=3.7",
+    "pip-tools>=7.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/sneezeparty/soupy"
+Issues = "https://github.com/sneezeparty/soupy/issues"
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+
+[tool.setuptools]
+# This repo isn't installed as a package — it's run in place. Tell setuptools
+# to look at the small handful of importable subpackages so `pip install -e .`
+# works without scanning the world.
+packages = ["installer", "installer.steps", "soupy_database", "web", "web.services"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    ".venv-sd",
+    "web/static/dashboard",
+    "soupy_database/databases",
+    "media",
+    "logs",
+    "data",
+]
+
+[tool.ruff.lint]
+# Start permissive — the priority is catching real bugs, not style flag-waving.
+# Tighten this list once the codebase is clean of the easy stuff.
+select = ["E", "F", "W", "B", "I"]
+ignore = [
+    "E501",  # line too long — caught by black, no need to double-warn
+    "E402",  # module-level import not at top — load_dotenv ordering needs this
+    "B008",  # function call in default argument — bot uses os.getenv() defaults
+    "B904",  # raise from — fine to skip in bot code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F841", "B011"]
+"installer/steps/*" = ["F401"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310"]
+extend-exclude = '''
+(
+    \.venv
+  | \.venv-sd
+  | web/static/dashboard
+  | soupy_database/databases
+)
+'''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
