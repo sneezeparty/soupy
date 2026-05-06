@@ -2230,6 +2230,13 @@ async def reload_env(ctx):
         # Reload environment variables
         load_dotenv(override=True)
 
+        # Invalidate the typed-settings cache and the prompt-resolution cache
+        # so the next read picks up the new values.
+        from soupy_settings import settings as _soupy_settings
+
+        _soupy_settings.reload()
+        soupy_prompts.clear_cache()
+
         # Reload text files
         global OVERALL_THEMES, CHARACTER_CONCEPTS, ARTISTIC_RENDERING_STYLES
         OVERALL_THEMES = load_text_file_from_env("OVERALL_THEMES")
