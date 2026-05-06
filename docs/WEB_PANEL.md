@@ -1,0 +1,20 @@
+# Web Control Panel
+
+Soupy ships with a FastAPI control panel that runs alongside the bot and manages it as a subprocess. **The panel is the primary way to operate Soupy** — start/stop/restart the bot, watch its log live, edit configuration, switch LLM models, and tune virtually every cadence and threshold the bot uses, all without touching the terminal. The recommended workflow is `python run_all.py`, then drive everything from the browser.
+
+## What the panel actually does
+
+- **Process management** — Start, stop, and restart the bot from a single button. The web app spawns the bot as a subprocess via PTY; restarting the bot does not restart uvicorn, and vice versa, so you can iterate on `.env-stable` or cog code rapidly.
+- **Live log streaming** — Bot stdout/stderr is fanned out over a WebSocket (`/ws/logs`) and shown in a console drawer in real time. Also written to `logs/soupy.log` (rotating, 5MB, 5 backups).
+- **Background-loop dashboard** — At-a-glance cards for each scheduled loop (Daily Post, Bluesky Engagement, Archive Scan, RAG Reindex, Self-Reflection, Musings) showing whether each is enabled, when it last ran, when it next runs, today's progress (e.g. `2 / 2 posts`, `5 replies · 1 post · 1 repost`), and a one-click toggle that flips the corresponding env flag.
+- **Runtime feature flags** — Toggle RAG-on-every-reply and disable individual slash commands without a restart (these are stored in `data/runtime_flags.json` and read live by the bot).
+- **Model & Personality tab** — Pick the active LM Studio model from a searchable dropdown, set the context-window size, and click "Switch model + restart" to push the change into LM Studio and reload the bot. A dedicated personality editor edits `BEHAVIOUR` and `BEHAVIOUR_SEARCH` directly with auto-formatting on load and a "Load raw" mode for the as-stored text. (Long prompts are still safest to edit in `.env-stable` directly — open the file in a real editor if you're rewriting from scratch.)
+- **Environment Editor** — Categorized, form-based editor for every variable in `.env-stable`. Each field has a "[?]" tooltip with a description and a placeholder showing the in-code default. Every save creates a timestamped `.env-stable.bak.*` backup. Categories include Discord setup, LLM, Stable Diffusion, Chat Behavior, Rate Limits, Vision, RAG, User Profiles, Context Window, Self-Knowledge, Daily Posts, Bluesky, Musings, Outpaint, and Web Panel theming. *Since v1.x* the editor also surfaces seven additional env vars that were previously hardcoded: `BLUESKY_MIN_GAP_MINUTES`, `BLUESKY_MAX_LIKES_PER_DAY`, `BLUESKY_MAX_FOLLOWS_PER_DAY`, `BLUESKY_ARTICLE_FRESHNESS_DAYS`, `URL_CACHE_TTL_SECONDS`, `SOUPY_LOG_MAX_BYTES`, and `SOUPY_LOG_BACKUP_COUNT`.
+- **Stats Studio** — Server and bot statistics: message volume by category over time, top channels, top users, image counts, totals across 24h / 7d / 30d windows.
+- **Media & Log tab** — Browse generated images as a thumbnail light-table; click for caption, user, prompt, and metadata. Live message stream alongside.
+- **Database Explorer** — Per-guild SQLite browser. Inspect `messages`, `profiles`, `rag_chunks`, and `scan_metadata` tables. Trigger or schedule archive scans, kick off RAG reindex, and run profile-batch jobs (build/refresh user profiles for everyone in a guild) with progress logs.
+- **Theming** — 30+ `WEB_COLOR_*` variables with a color-picker UI in the env editor. Set `WEB_CONTROL_PANEL_TITLE` to rebrand the page.
+
+The panel binds to `0.0.0.0:4941` by default. Override with `SOUPY_WEB_HOST` and `SOUPY_WEB_PORT`. There are exactly two pages: `/` (the React dashboard with all the tabs above) and `/env` (the form-based env editor).
+
+**Configurable without code changes.** Almost every cadence, cap, threshold, and probability the bot uses is an env var, which means it's editable in the web Environment Editor and applied on the next bot restart (one click in the panel). The handful of values that are still hardcoded are called out in their respective docs.
