@@ -225,6 +225,10 @@ class Settings:
     def vision_max_tokens(self) -> int:
         return _env_int("VISION_MAX_TOKENS", 300)
 
+    @cached_property
+    def vision_prompt(self) -> str:
+        return _env_str("VISION_PROMPT", "What is in this image? Describe it concisely.")
+
     # ----- RAG -----------------------------------------------------------
 
     @cached_property
@@ -413,6 +417,10 @@ class Settings:
     @cached_property
     def url_cache_ttl_seconds(self) -> int:
         return _env_int("URL_CACHE_TTL_SECONDS", 3600)
+
+    @cached_property
+    def url_include_domain(self) -> bool:
+        return _env_bool("URL_INCLUDE_DOMAIN", default=True)
 
     # ----- Logging -------------------------------------------------------
 
