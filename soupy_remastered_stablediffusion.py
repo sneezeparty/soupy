@@ -345,20 +345,15 @@ CHANNEL_IDS = [int(cid.strip()) for cid in CHANNEL_IDS_ENV.split(",") if cid.str
 if not CHANNEL_IDS:
     logger.warning("No CHANNEL_IDS specified. Shutdown notifications will not be sent.")
 
-DEFAULT_TRIGGER_KEYWORDS = ["soup", "gumbo"]
-
-
-def get_trigger_keywords() -> list[str]:
-    """Return literal chat keywords that trigger a reply outside allowed channels."""
-    raw = os.getenv("SOUPY_TRIGGER_KEYWORDS", ",".join(DEFAULT_TRIGGER_KEYWORDS))
-    keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
-    return keywords or DEFAULT_TRIGGER_KEYWORDS
-
-
-def message_contains_trigger_keyword(content: str) -> bool:
-    """Case-insensitive literal keyword match. Preserves old soup -> soupy behavior."""
-    return any(re.search(re.escape(keyword), content or "", re.IGNORECASE) for keyword in get_trigger_keywords())
-
+# Trigger predicates moved to soupy_triggers — re-imported here so the rest
+# of this file (and any consumer that imports from this module) finds them
+# at the same names. Function bodies are byte-identical to the previous
+# inline definitions.
+from soupy_triggers import (  # noqa: E402
+    DEFAULT_TRIGGER_KEYWORDS,
+    get_trigger_keywords,
+    message_contains_trigger_keyword,
+)
 
 REMOVE_BG_API_URL = os.getenv("REMOVE_BG_API_URL")
 
@@ -5071,14 +5066,10 @@ async def process_sd_image(interaction: discord.Interaction, description: str, s
         logger.error(f"Error in process_sd_image: {e}")
 
 
-def should_randomly_respond(probability=None) -> bool:
-    """
-    Returns True with the given probability (default from RANDOM_RESPONSE_RATE env, or 5%).
-    """
-    if probability is None:
-        probability = float(os.getenv("RANDOM_RESPONSE_RATE", "0.05"))
-    return random.random() < probability
-
+# should_randomly_respond moved to soupy_triggers; re-imported here so callers
+# elsewhere in this module continue to see the same name without changing the
+# call-site code or behaviour.
+from soupy_triggers import should_randomly_respond  # noqa: E402, F401
 
 """
 ---------------------------------------------------------------------------------
