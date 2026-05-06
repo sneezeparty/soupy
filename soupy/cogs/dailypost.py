@@ -936,7 +936,10 @@ class DailyPostCog(commands.Cog):
                         topics_for_log.append(f"{key}: {str(val)[:80]}")
             if parts:
                 profile_lines.append(f"- {nick}: {'; '.join(parts)}")
-            logger.debug("📰   👤 %s — %s", nick, " | ".join(topics_for_log) if topics_for_log else "(no profile data)")
+            # Name at INFO so it's visible in the console; full structured
+            # profile detail stays at DEBUG so the console doesn't drown.
+            logger.info("📰   👤 %s", nick)
+            logger.debug("📰      %s", " | ".join(topics_for_log) if topics_for_log else "(no profile data)")
 
         logger.debug("📰 Recent messages (%d):", len(recent))
         for m in recent[:5]:
