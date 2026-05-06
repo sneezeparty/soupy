@@ -24,6 +24,9 @@ user_stats.json
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+build/
+dist/
 
 # Virtualenvs — never committed
 .venv/
