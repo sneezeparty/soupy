@@ -29,7 +29,7 @@ Soupy runs entirely on your own hardware against [LM Studio](https://lmstudio.ai
 
 Before inviting Soupy, here's what it actually does once it's in your server:
 
-- **Listens** in the channels listed in `CHANNEL_IDS`. Outside those channels it only responds when @-mentioned or when "soup" / "soupy" appears in a message.
+- **Listens** in the channels listed in `CHANNEL_IDS`. Outside those channels it only responds when @-mentioned or when a keyword from `SOUPY_TRIGGER_KEYWORDS` appears in a message. Defaults: `soup,gumbo` (`soup` also catches `soupy`).
 - **Posts** in any channel where it's been triggered, plus the configured daily-post and musing channels for autonomous activity.
 - **Archives** message history into a per-guild SQLite database (`soupy_database/databases/guild_<id>.db`) and embeds it for retrieval-augmented generation.
 - **Profiles users** — generates structured summaries of opinions, hobbies, and interests from the message history of people it sees, and uses them to tailor replies.

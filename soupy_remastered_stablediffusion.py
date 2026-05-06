@@ -357,6 +357,23 @@ CHANNEL_IDS = [
 if not CHANNEL_IDS:
     logger.warning("No CHANNEL_IDS specified. Shutdown notifications will not be sent.")
 
+DEFAULT_TRIGGER_KEYWORDS = ["soup", "gumbo"]
+
+
+def get_trigger_keywords() -> list[str]:
+    """Return literal chat keywords that trigger a reply outside allowed channels."""
+    raw = os.getenv("SOUPY_TRIGGER_KEYWORDS", ",".join(DEFAULT_TRIGGER_KEYWORDS))
+    keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
+    return keywords or DEFAULT_TRIGGER_KEYWORDS
+
+
+def message_contains_trigger_keyword(content: str) -> bool:
+    """Case-insensitive literal keyword match. Preserves old soup -> soupy behavior."""
+    return any(
+        re.search(re.escape(keyword), content or "", re.IGNORECASE)
+        for keyword in get_trigger_keywords()
+    )
+
 REMOVE_BG_API_URL = os.getenv("REMOVE_BG_API_URL")
 
 if not REMOVE_BG_API_URL:
@@ -1240,8 +1257,8 @@ def should_bot_respond_to_message(message):
         asyncio.create_task(increment_user_stat(message.author.id, 'mentions'))
         return True
     
-    # Check if soup is mentioned
-    if re.search(r"soup", message.content, re.IGNORECASE):
+    # Check if any configured trigger keyword is mentioned
+    if message_contains_trigger_keyword(message.content):
         return True
 
     # Check if message is in allowed channel

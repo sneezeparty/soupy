@@ -108,6 +108,7 @@ Critical variables — the bot will not start without `DISCORD_TOKEN`:
 | `SD_SERVER_URL` | Stable Diffusion endpoint |
 | `OWNER_IDS` | Comma-separated Discord user IDs for admin commands |
 | `CHANNEL_IDS` | Channels the bot actively monitors |
+| `SOUPY_TRIGGER_KEYWORDS` | Comma-separated keywords that trigger replies outside monitored channels. Default: `soup,gumbo` |
 | `GUILD_ID` | Primary Discord server ID (used for fast slash-command sync) |
 | `MAX_TOKENS` | LLM response length limit |
 | `RAG_ENABLED` | Enable retrieval-augmented generation |
