@@ -43,7 +43,7 @@ charset-normalizer==3.4.7
     #   trafilatura
 click==8.3.3
     # via
-    #   duckduckgo-search
+    #   ddgs
     #   uvicorn
 colorama==0.4.6
     # via -r requirements.txt
@@ -53,12 +53,12 @@ courlan==1.3.2
     # via trafilatura
 dateparser==1.4.0
     # via htmldate
+ddgs==9.14.2
+    # via -r requirements.txt
 discord-py==2.7.1
     # via -r requirements.txt
 distro==1.9.0
     # via openai
-duckduckgo-search==8.1.1
-    # via -r requirements.txt
 exceptiongroup==1.3.1
     # via anyio
 fastapi==0.136.1
@@ -102,7 +102,7 @@ justext==3.0.2
     # via trafilatura
 lxml[html_clean]==6.1.0
     # via
-    #   duckduckgo-search
+    #   ddgs
     #   htmldate
     #   justext
     #   lxml-html-clean
@@ -127,7 +127,7 @@ opencv-python==4.13.0.92
 pillow==12.2.0
     # via -r requirements.txt
 primp==1.2.3
-    # via duckduckgo-search
+    # via ddgs
 propcache==0.4.1
     # via
     #   aiohttp
