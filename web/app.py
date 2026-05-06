@@ -98,6 +98,8 @@ from .services.bot_runner import BotRunner
 from .services.log_stream import WebsocketManager
 from .services.env_store import parse_env, write_env
 
+from soupy_settings import settings
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOGS_DIR = BASE_DIR / "logs"
 
@@ -122,7 +124,7 @@ load_dotenv(BASE_DIR / ".env-stable")
 
 def _sqlite_guild_db_paths(base_dir: Path, server_id: str | None) -> list[Path]:
     """Paths to per-guild message archive DBs (SQLite)."""
-    db_dir = Path(os.environ.get("SOUPY_DB_DIR", str(base_dir / "soupy_database" / "databases")))
+    db_dir = Path(settings.soupy_db_dir or str(base_dir / "soupy_database" / "databases"))
     if not db_dir.is_dir():
         return []
     if server_id:
@@ -298,10 +300,10 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Soupy Control", version="0.1.0")
 
     # Get control panel title from environment
-    control_panel_title = os.getenv("WEB_CONTROL_PANEL_TITLE", "Soupy Control")
+    control_panel_title = settings.web_control_panel_title
 
     # Get timezone from environment (default to America/Los_Angeles for California)
-    display_timezone_str = os.getenv("TIMEZONE", "America/Los_Angeles")
+    display_timezone_str = settings.timezone
     try:
         display_timezone = ZoneInfo(display_timezone_str)
     except Exception:
@@ -634,7 +636,7 @@ def create_app() -> FastAPI:
             pass
         try:
             # Env pair list: CHANNEL_NAMES = "123:general,456:random"
-            raw_pairs = os.environ.get("CHANNEL_NAMES")
+            raw_pairs = settings.channel_names_raw or None
             if raw_pairs:
                 for pair in raw_pairs.split(","):
                     pair = pair.strip()
@@ -647,7 +649,7 @@ def create_app() -> FastAPI:
             pass
         try:
             # Env JSON mapping: CHANNEL_NAMES_JSON = '{"123":"general"}'
-            raw_json = os.environ.get("CHANNEL_NAMES_JSON")
+            raw_json = settings.channel_names_json or None
             if raw_json:
                 channel_name_map.update(json.loads(raw_json))
         except Exception:
@@ -1239,9 +1241,7 @@ def create_app() -> FastAPI:
             from soupy_database.runtime_flags import read_runtime_flags
 
             flags = read_runtime_flags()
-            data["self_md_enabled"] = bool(
-                os.getenv("SELF_MD_ENABLED", "false").strip().lower() in ("1", "true", "yes")
-            )
+            data["self_md_enabled"] = bool(settings.self_md_enabled)
         except Exception:
             pass
 
@@ -1764,7 +1764,7 @@ def create_app() -> FastAPI:
                 pass
 
             # Get all databases
-            db_dir = os.getenv("SOUPY_DB_DIR", os.path.join(BASE_DIR, "soupy_database", "databases"))
+            db_dir = settings.soupy_db_dir or os.path.join(BASE_DIR, "soupy_database", "databases")
             db_path = Path(db_dir)
             databases = []
 
@@ -1807,7 +1807,7 @@ def create_app() -> FastAPI:
             import os
 
             # Get display timezone (from app context or env)
-            display_tz_str = os.getenv("TIMEZONE", "America/Los_Angeles")
+            display_tz_str = settings.timezone
             try:
                 display_tz = ZoneInfo(display_tz_str)
             except Exception:
@@ -2462,7 +2462,7 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def _startup():
         # Optional autostart if env flag is set
-        if os.environ.get("SOUPY_AUTOSTART_BOT", "0") in {"1", "true", "True"}:
+        if settings.autostart_bot:
             await bot_runner.start()
 
     @app.on_event("shutdown")

@@ -446,6 +446,26 @@ class Settings:
     def timezone(self) -> str:
         return _env_str("TIMEZONE", "America/Los_Angeles")
 
+    @cached_property
+    def web_control_panel_title(self) -> str:
+        return _env_str("WEB_CONTROL_PANEL_TITLE", "Soupy Control")
+
+    @cached_property
+    def soupy_db_dir(self) -> str:
+        """Optional override for the per-guild database directory.
+        Defaults to soupy_database/databases/ at the repo root."""
+        return _env_str("SOUPY_DB_DIR")
+
+    @cached_property
+    def channel_names_raw(self) -> str:
+        """Comma-separated `id:name` pairs (legacy format)."""
+        return _env_str("CHANNEL_NAMES")
+
+    @cached_property
+    def channel_names_json(self) -> str:
+        """Raw JSON object mapping channel id (str) -> name (str)."""
+        return _env_str("CHANNEL_NAMES_JSON")
+
     # ----- Self-knowledge ------------------------------------------------
 
     @cached_property
