@@ -385,9 +385,9 @@ def create_app() -> FastAPI:
     async def dashboard(request: Request):
         status = await bot_runner.status()
         return templates.TemplateResponse(
+            request,
             "dashboard.html",
             {
-                "request": request,
                 "status": status,
                 "now": datetime.now(timezone.utc),
             },
@@ -889,8 +889,9 @@ def create_app() -> FastAPI:
         env_path = BASE_DIR / ".env-stable"
         _, kv = parse_env(env_path)
         return templates.TemplateResponse(
+            request,
             "env.html",
-            {"request": request, "vars": kv, "env_path": str(env_path)},
+            {"vars": kv, "env_path": str(env_path)},
         )
 
     @app.get("/api/env/get")
