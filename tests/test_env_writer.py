@@ -13,7 +13,6 @@ import pytest
 
 from installer import env_writer
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "env-stable.example.fixture"
 
 
@@ -44,7 +43,7 @@ def test_render_preserves_multiline_quoted_value():
     out = env_writer.render(FIXTURE, {"DISCORD_TOKEN": "x"})
     assert 'BEHAVIOUR="line one' in out
     assert "line two with a" in out
-    assert "line three\"" in out
+    assert 'line three"' in out
 
 
 def test_render_does_not_touch_keys_not_in_updates():
@@ -91,12 +90,7 @@ def test_write_no_backup_when_target_absent(tmp_path: Path):
 
 def test_parse_existing_returns_kv(tmp_path: Path):
     target = tmp_path / ".env-stable"
-    target.write_text(
-        "DISCORD_TOKEN=hello\n"
-        "# comment\n"
-        "OWNER_IDS=12345\n"
-        'BEHAVIOUR="multi\nline"\n'
-    )
+    target.write_text("DISCORD_TOKEN=hello\n" "# comment\n" "OWNER_IDS=12345\n" 'BEHAVIOUR="multi\nline"\n')
     out = env_writer.parse_existing(target)
     assert out["DISCORD_TOKEN"] == "hello"
     assert out["OWNER_IDS"] == "12345"

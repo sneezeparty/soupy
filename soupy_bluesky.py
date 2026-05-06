@@ -42,7 +42,10 @@ client = OpenAI(
 
 
 async def _llm_call(
-    system: str, user: str, temperature: float = 0.7, max_tokens: int = 300,
+    system: str,
+    user: str,
+    temperature: float = 0.7,
+    max_tokens: int = 300,
     timeout_seconds: int = 300,
 ) -> str:
     def _sync():
@@ -69,7 +72,9 @@ async def _llm_call(
 # ---------------------------------------------------------------------------
 
 
-async def _describe_image(image_url: str, prompt: str = "Describe this image concisely in 1-2 sentences.") -> Optional[str]:
+async def _describe_image(
+    image_url: str, prompt: str = "Describe this image concisely in 1-2 sentences."
+) -> Optional[str]:
     """Download an image and describe it using the LM Studio vision model.
 
     Returns a short description string, or None if vision is disabled or fails.
@@ -116,25 +121,29 @@ async def _describe_image(image_url: str, prompt: str = "Describe this image con
         model_name = os.getenv("VISION_MODEL") or os.getenv("LOCAL_CHAT")
         payload = {
             "model": model_name,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
-                    {"type": "text", "text": prompt},
-                ],
-            }],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ],
             "max_tokens": int(os.getenv("VISION_MAX_TOKENS", "200")),
             "temperature": 0.3,
         }
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, json=payload, headers=headers,
-                                    timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(
+                endpoint, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
                 if resp.status != 200:
                     # Try without data URI prefix (some backends want raw base64)
                     payload["messages"][0]["content"][0]["image_url"]["url"] = encoded
-                    async with session.post(endpoint, json=payload, headers=headers,
-                                            timeout=aiohttp.ClientTimeout(total=30)) as resp2:
+                    async with session.post(
+                        endpoint, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+                    ) as resp2:
                         if resp2.status != 200:
                             logger.debug("🦋 Vision API failed: %d", resp2.status)
                             return None
@@ -323,6 +332,7 @@ SEARCH_QUERY_FOR_POST_SYSTEM = (
 
 async def _ddg_search(query: str, timelimit: str = "d", max_results: int = 8) -> List[Dict]:
     """DuckDuckGo NEWS search. Falls back to text search if news returns nothing."""
+
     def _sync():
         with DDGS() as ddg:
             raw = list(ddg.news(query, timelimit=timelimit, max_results=max_results))
@@ -332,13 +342,16 @@ async def _ddg_search(query: str, timelimit: str = "d", max_results: int = 8) ->
                 if r.get("date"):
                     r["pub_date"] = r["date"]
             return raw
+
     try:
         results = await asyncio.wait_for(asyncio.to_thread(_sync), timeout=15)
         if results:
             return results
+
         def _sync_text():
             with DDGS() as ddg:
                 return list(ddg.text(query, timelimit=timelimit, max_results=max_results))
+
         return await asyncio.wait_for(asyncio.to_thread(_sync_text), timeout=15)
     except (asyncio.TimeoutError, Exception):
         return []
@@ -349,6 +362,7 @@ async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
 
     Falls back to HTML meta tag extraction if trafilatura doesn't find a date.
     """
+
     def _sync():
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
@@ -360,6 +374,7 @@ async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
         if meta:
             try:
                 import json as _json
+
                 m = _json.loads(meta)
                 date = m.get("date")
                 title = m.get("title", "")
@@ -368,8 +383,10 @@ async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
         # Fallback: extract date from HTML meta tags / JSON-LD
         if not date:
             from soupy_dailypost import _extract_date_from_html
+
             date = _extract_date_from_html(downloaded)
         return {"content": text, "date": date, "title": title}
+
     try:
         return await asyncio.wait_for(asyncio.to_thread(_sync), timeout=20)
     except (asyncio.TimeoutError, Exception):
@@ -421,8 +438,9 @@ def _resize_image_for_blob(image_bytes: bytes) -> Optional[Tuple[bytes, str]]:
                 im.save(buf, format="JPEG", quality=quality, optimize=True)
                 data = buf.getvalue()
                 if len(data) <= _BSKY_BLOB_MAX_BYTES:
-                    logger.debug("🦋 Resized og:image to %d bytes (q=%d, %dx%d)",
-                                 len(data), quality, im.width, im.height)
+                    logger.debug(
+                        "🦋 Resized og:image to %d bytes (q=%d, %dx%d)", len(data), quality, im.width, im.height
+                    )
                     return data, "image/jpeg"
             logger.warning("🦋 og:image still too large after recompression; giving up")
             return None
@@ -448,6 +466,7 @@ def _resolve_image_url(image_url: str, page_url: str) -> Optional[str]:
         # Absolute path on same host
         try:
             from urllib.parse import urlparse
+
             p = urlparse(page_url)
             if p.scheme and p.netloc:
                 return f"{p.scheme}://{p.netloc}{image_url}"
@@ -481,11 +500,12 @@ async def _fetch_page_html(url: str) -> Tuple[Optional[str], str]:
         except Exception as e:
             logger.debug("🦋 og:image fetch with UA %r failed: %s", ua.split("/")[0], e)
     if last_status:
-        logger.debug("🦋 og:image: every UA blocked (last HTTP %d), trying trafilatura for %s",
-                     last_status, url[:60])
+        logger.debug("🦋 og:image: every UA blocked (last HTTP %d), trying trafilatura for %s", last_status, url[:60])
+
     # Last-resort: trafilatura.
     def _traf_fetch():
         return trafilatura.fetch_url(url)
+
     try:
         html = await asyncio.wait_for(asyncio.to_thread(_traf_fetch), timeout=15)
         if html:
@@ -511,6 +531,7 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
 
         # Step 2: Parse image URL from meta tags (try multiple patterns + JSON-LD).
         import re
+
         image_url = None
 
         meta_patterns = [
@@ -552,8 +573,7 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
                             content_type = r.headers.get("Content-Type", "image/jpeg")
                             image_bytes = await r.read()
                             break
-                        logger.debug("🦋 og:image download with UA %r got HTTP %d",
-                                     ua.split("/")[0], r.status)
+                        logger.debug("🦋 og:image download with UA %r got HTTP %d", ua.split("/")[0], r.status)
             except Exception as e:
                 logger.debug("🦋 og:image download with UA %r failed: %s", ua.split("/")[0], e)
 
@@ -638,9 +658,7 @@ def _load_history() -> Dict[str, Any]:
 
 def _save_history(h: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
-    Path(HISTORY_PATH).write_text(
-        json.dumps(h, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    Path(HISTORY_PATH).write_text(json.dumps(h, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _reset_daily_if_needed(h: Dict[str, Any]) -> None:
@@ -725,9 +743,7 @@ class BlueskyClient:
                 data = await r.json()
         return [item.get("post", {}) for item in data.get("feed", [])]
 
-    async def search_posts(
-        self, query: str, sort: str = "top", limit: int = 10
-    ) -> List[Dict]:
+    async def search_posts(self, query: str, sort: str = "top", limit: int = 10) -> List[Dict]:
         token = await self.auth()
         if not token:
             return []
@@ -792,8 +808,7 @@ class BlueskyClient:
         return [item.get("post", {}) for item in data.get("feed", [])]
 
     async def create_reply(
-        self, text: str, parent_uri: str, parent_cid: str,
-        root_uri: str, root_cid: str
+        self, text: str, parent_uri: str, parent_cid: str, root_uri: str, root_cid: str
     ) -> Optional[Dict]:
         """Post a reply to a Bluesky post."""
         token = await self.auth()
@@ -877,10 +892,7 @@ class BlueskyClient:
             ) as r:
                 return r.status in (200, 201)
 
-
-    async def quote_post(
-        self, text: str, quote_uri: str, quote_cid: str
-    ) -> Optional[Dict]:
+    async def quote_post(self, text: str, quote_uri: str, quote_cid: str) -> Optional[Dict]:
         """Create a quote-post (repost with commentary)."""
         token = await self.auth()
         if not token:
@@ -936,8 +948,11 @@ class BlueskyClient:
                 return data.get("blob")
 
     async def create_post(
-        self, text: str, link_url: Optional[str] = None,
-        link_title: str = "", link_description: str = "",
+        self,
+        text: str,
+        link_url: Optional[str] = None,
+        link_title: str = "",
+        link_description: str = "",
         thumb_blob: Optional[Dict] = None,
     ) -> Optional[Dict]:
         """Create an original Bluesky post, optionally with a link card embed.
@@ -1019,6 +1034,7 @@ class BlueskyEngageCog(commands.Cog):
 
     def _restore_dashboard_from_history(self) -> None:
         """Populate dashboard timer state from persisted history so counters survive restarts."""
+
         # Find last reply, post, repost timestamps from history
         def _last_ts(entries: List[Dict]) -> Optional[str]:
             if not entries:
@@ -1067,17 +1083,10 @@ class BlueskyEngageCog(commands.Cog):
         # Always refresh counts from history
         today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         bsky["replies_today"] = sum(
-            1 for c in self.history.get("comments", [])
-            if c.get("ts", "").startswith(today_iso)
+            1 for c in self.history.get("comments", []) if c.get("ts", "").startswith(today_iso)
         )
-        bsky["posts_today"] = sum(
-            1 for p in self.history.get("posts", [])
-            if p.get("ts", "").startswith(today_iso)
-        )
-        bsky["reposts_today"] = sum(
-            1 for r in self.history.get("reposts", [])
-            if r.get("ts", "").startswith(today_iso)
-        )
+        bsky["posts_today"] = sum(1 for p in self.history.get("posts", []) if p.get("ts", "").startswith(today_iso))
+        bsky["reposts_today"] = sum(1 for r in self.history.get("reposts", []) if r.get("ts", "").startswith(today_iso))
 
     def _musing_channel_id(self) -> Optional[int]:
         raw = os.getenv("MUSING_CHANNEL_ID", "")
@@ -1096,7 +1105,7 @@ class BlueskyEngageCog(commands.Cog):
         Mixes big and small accounts — ~30% of the time we intentionally pick
         a smaller account to reply to, which drives profile visits and follows.
         """
-        big_candidates: List[Dict] = []    # 20+ likes (popular posts)
+        big_candidates: List[Dict] = []  # 20+ likes (popular posts)
         small_candidates: List[Dict] = []  # 3-19 likes (smaller accounts, discoverable)
         seen_uris: set = set()
 
@@ -1119,8 +1128,9 @@ class BlueskyEngageCog(commands.Cog):
         timeline = await self.bsky.get_timeline(limit=40)
         for p in timeline:
             _add(p)
-        logger.info("🦋   Timeline: %d posts → %d big, %d small",
-                     len(timeline), len(big_candidates), len(small_candidates))
+        logger.info(
+            "🦋   Timeline: %d posts → %d big, %d small", len(timeline), len(big_candidates), len(small_candidates)
+        )
 
         prev_big, prev_small = len(big_candidates), len(small_candidates)
 
@@ -1138,8 +1148,9 @@ class BlueskyEngageCog(commands.Cog):
             for p in posts:
                 _add(p)
             await asyncio.sleep(0.5)
-        logger.info("🦋   Trending added %d big, %d small",
-                     len(big_candidates) - prev_big, len(small_candidates) - prev_small)
+        logger.info(
+            "🦋   Trending added %d big, %d small", len(big_candidates) - prev_big, len(small_candidates) - prev_small
+        )
 
         prev_big, prev_small = len(big_candidates), len(small_candidates)
 
@@ -1166,8 +1177,11 @@ class BlueskyEngageCog(commands.Cog):
                         _add(p)
                     await asyncio.sleep(0.5)
 
-                logger.info("🦋   Thread exploration added %d big, %d small",
-                             len(big_candidates) - prev_big, len(small_candidates) - prev_small)
+                logger.info(
+                    "🦋   Thread exploration added %d big, %d small",
+                    len(big_candidates) - prev_big,
+                    len(small_candidates) - prev_small,
+                )
 
         # --- Apply filters to both pools ---
         our_did = self.bsky.did
@@ -1189,7 +1203,8 @@ class BlueskyEngageCog(commands.Cog):
 
         def _filter(pool: List[Dict]) -> List[Dict]:
             return [
-                c for c in pool
+                c
+                for c in pool
                 if c.get("author", {}).get("did") != our_did
                 and c.get("uri") not in commented_uris
                 and c.get("author", {}).get("did") not in blocked_dids
@@ -1210,10 +1225,7 @@ class BlueskyEngageCog(commands.Cog):
 
         # Decide which pool to draw from: ~30% chance of picking small accounts.
         # This drives profile visits from people who are more likely to follow back.
-        use_small = (
-            small_candidates
-            and (not big_candidates or random.random() < 0.30)
-        )
+        use_small = small_candidates and (not big_candidates or random.random() < 0.30)
 
         if use_small:
             candidates = small_candidates[:10] + big_candidates[:5]
@@ -1221,8 +1233,12 @@ class BlueskyEngageCog(commands.Cog):
         else:
             candidates = big_candidates[:10] + small_candidates[:5]
 
-        logger.info("🦋   Total candidates: %d big, %d small → %d selected",
-                     len(big_candidates), len(small_candidates), len(candidates))
+        logger.info(
+            "🦋   Total candidates: %d big, %d small → %d selected",
+            len(big_candidates),
+            len(small_candidates),
+            len(candidates),
+        )
         for i, c in enumerate(candidates[:8]):
             author = c.get("author", {}).get("displayName", "?")
             text = c.get("record", {}).get("text", "")[:80]
@@ -1246,6 +1262,7 @@ class BlueskyEngageCog(commands.Cog):
         try:
             guild_id = int(os.getenv("GUILD_ID", "0"))
             from soupy_database.self_context import load_self_core, is_self_md_enabled
+
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
                 if core:
@@ -1272,8 +1289,7 @@ class BlueskyEngageCog(commands.Cog):
             idx = int(result.strip().splitlines()[0].strip())
             if 0 <= idx < len(candidates):
                 chosen = candidates[idx]
-                logger.info("🦋 Picked [%d]: %s",
-                            idx, chosen.get("record", {}).get("text", "")[:80])
+                logger.info("🦋 Picked [%d]: %s", idx, chosen.get("record", {}).get("text", "")[:80])
                 return chosen
         except ValueError:
             pass
@@ -1345,9 +1361,10 @@ class BlueskyEngageCog(commands.Cog):
                     "being discussed. Focus on specific names, events, or organizations. "
                     "Return ONLY the search query, nothing else.",
                     material[:500],
-                    temperature=0.2, max_tokens=2048,
+                    temperature=0.2,
+                    max_tokens=2048,
                 )
-                query = query.strip().strip('"\'')
+                query = query.strip().strip("\"'")
                 # Fallback: if LLM returns garbage, use cleaned post text
                 if len(query) < 5 or len(query) > 150:
                     query = _re.sub(r"https?://\S+", "", post_text)
@@ -1366,7 +1383,9 @@ class BlueskyEngageCog(commands.Cog):
         try:
             embed_article, extra_article, search_tuple = await asyncio.wait_for(
                 asyncio.gather(
-                    _fetch_embed(), _fetch_extra(), _search_topic(),
+                    _fetch_embed(),
+                    _fetch_extra(),
+                    _search_topic(),
                     return_exceptions=True,
                 ),
                 timeout=20,
@@ -1392,8 +1411,7 @@ class BlueskyEngageCog(commands.Cog):
                 card_info += f"\n{embed_description[:300]}"
             parts.append(card_info)
 
-        for label, article in [("LINKED ARTICLE", embed_article),
-                                ("ADDITIONAL LINK", extra_article)]:
+        for label, article in [("LINKED ARTICLE", embed_article), ("ADDITIONAL LINK", extra_article)]:
             if isinstance(article, dict) and article:
                 title = article.get("title", "")
                 content = (article.get("content") or "")[:800]
@@ -1421,11 +1439,15 @@ class BlueskyEngageCog(commands.Cog):
             "only reply to what the ORIGINAL POST actually says, do not blend different stories together):\n"
             + "\n\n".join(parts)
         )
-        n_articles = sum(1 for a in [embed_article, extra_article]
-                         if isinstance(a, dict) and a)
+        n_articles = sum(1 for a in [embed_article, extra_article] if isinstance(a, dict) and a)
         n_search = len(search_results) if isinstance(search_results, list) else 0
-        logger.info("🦋 📚 Enrichment: %d chars (%d article(s), %d search results, query='%s')",
-                     len(context), n_articles, n_search, search_query[:60])
+        logger.info(
+            "🦋 📚 Enrichment: %d chars (%d article(s), %d search results, query='%s')",
+            len(context),
+            n_articles,
+            n_search,
+            search_query[:60],
+        )
         return context
 
     # ------------------------------------------------------------------
@@ -1478,8 +1500,7 @@ class BlueskyEngageCog(commands.Cog):
                     descriptions.append(desc)
             if descriptions:
                 image_context = "\n[IMAGE IN POST: " + " | ".join(descriptions) + "]\n"
-                logger.info("🦋 👁 Post has %d image(s), described: %s",
-                            len(image_urls), image_context.strip()[:100])
+                logger.info("🦋 👁 Post has %d image(s), described: %s", len(image_urls), image_context.strip()[:100])
 
         replies = thread.get("replies", [])
         # Sort replies by likes to get the best ones
@@ -1498,8 +1519,9 @@ class BlueskyEngageCog(commands.Cog):
 
         thread_context = (
             f"ORIGINAL POST by {root_author}:\n{root_text}\n{image_context}\n"
-            f"TOP REPLIES ({len(replies)} total):\n"
-            + "\n".join(reply_lines) if reply_lines else "(no replies yet)"
+            f"TOP REPLIES ({len(replies)} total):\n" + "\n".join(reply_lines)
+            if reply_lines
+            else "(no replies yet)"
         )
 
         # Enrich with web context (linked articles + DDG search)
@@ -1510,6 +1532,7 @@ class BlueskyEngageCog(commands.Cog):
         try:
             guild_id = int(os.getenv("GUILD_ID", "0"))
             from soupy_database.self_context import load_self_core, is_self_md_enabled
+
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
                 if core:
@@ -1536,16 +1559,27 @@ class BlueskyEngageCog(commands.Cog):
         candidates_list: List[str] = []
         for i in range(3):
             candidate = await _llm_call(COMMENT_SYSTEM, user_prompt, temperature=0.65, max_tokens=2048)
-            candidate = candidate.strip('"\'')
+            candidate = candidate.strip("\"'")
 
             # Strip meta-commentary lines the LLM sometimes outputs
             clean_lines = []
             for line in candidate.split("\n"):
                 line_lower = line.strip().lower()
-                if any(line_lower.startswith(p) for p in [
-                    "who's ", "who is ", "the post ", "the author ", "context:",
-                    "reply:", "note:", "analysis:", "reasoning:", "subject:",
-                ]):
+                if any(
+                    line_lower.startswith(p)
+                    for p in [
+                        "who's ",
+                        "who is ",
+                        "the post ",
+                        "the author ",
+                        "context:",
+                        "reply:",
+                        "note:",
+                        "analysis:",
+                        "reasoning:",
+                        "subject:",
+                    ]
+                ):
                     continue
                 clean_lines.append(line.strip())
             candidate = " ".join(l for l in clean_lines if l)
@@ -1557,7 +1591,7 @@ class BlueskyEngageCog(commands.Cog):
             if len(candidate) > 295:
                 for j in range(280, 0, -1):
                     if candidate[j] in ".!?":
-                        candidate = candidate[:j + 1]
+                        candidate = candidate[: j + 1]
                         break
                 else:
                     candidate = candidate[:295]
@@ -1565,7 +1599,7 @@ class BlueskyEngageCog(commands.Cog):
             if candidate and candidate[-1] not in ".!?":
                 for j in range(len(candidate) - 1, 0, -1):
                     if candidate[j] in ".!?":
-                        candidate = candidate[:j + 1]
+                        candidate = candidate[: j + 1]
                         break
             candidate = candidate.strip()
             if len(candidate) < 15:
@@ -1595,8 +1629,7 @@ class BlueskyEngageCog(commands.Cog):
 
         judge_result = await _llm_call(
             judge_system,
-            f"Original post by {root_author}:\n{root_text}\n\n"
-            f"Candidate replies:\n{judge_listing}",
+            f"Original post by {root_author}:\n{root_text}\n\n" f"Candidate replies:\n{judge_listing}",
             temperature=0.2,
             max_tokens=2048,
         )
@@ -1621,9 +1654,9 @@ class BlueskyEngageCog(commands.Cog):
             "- Contradicts what the post actually says\n\n"
             "Return OK if the reply is fine (even if creative/metaphorical).\n"
             "Return BAD followed by a reason ONLY for serious factual errors.",
-            f"Original post by {root_author}:\n{root_text}\n\n"
-            f"Proposed reply:\n{comment}",
-            temperature=0.1, max_tokens=2048,
+            f"Original post by {root_author}:\n{root_text}\n\n" f"Proposed reply:\n{comment}",
+            temperature=0.1,
+            max_tokens=2048,
         )
         if check_result.strip().upper().startswith("BAD"):
             logger.info("🦋 ⚠ Reply sanity check failed: %s — trying next candidate", check_result.strip()[:80])
@@ -1750,6 +1783,7 @@ class BlueskyEngageCog(commands.Cog):
         Returns (success, status_message, comment_url_or_none).
         """
         import time as _time
+
         start = _time.monotonic()
 
         logger.info("🦋 ╔══════════════════════════════════════════════════╗")
@@ -1790,9 +1824,7 @@ class BlueskyEngageCog(commands.Cog):
         await asyncio.sleep(random.uniform(3.0, 7.0))
 
         # Post the reply
-        reply_result = await self.bsky.create_reply(
-            comment_text, parent_uri, parent_cid, root_uri, root_cid
-        )
+        reply_result = await self.bsky.create_reply(comment_text, parent_uri, parent_cid, root_uri, root_cid)
         if not reply_result:
             return False, "Failed to post reply to Bluesky", None
 
@@ -1803,16 +1835,18 @@ class BlueskyEngageCog(commands.Cog):
 
         # Record in history
         _reset_daily_if_needed(self.history)
-        self.history.setdefault("comments", []).append({
-            "post_uri": chosen_uri,
-            "reply_uri": reply_uri,
-            "reply_url": reply_url,
-            "post_author": chosen_author,
-            "post_text": chosen_text,
-            "comment": comment_text,
-            "source": source,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        self.history.setdefault("comments", []).append(
+            {
+                "post_uri": chosen_uri,
+                "reply_uri": reply_uri,
+                "reply_url": reply_url,
+                "post_author": chosen_author,
+                "post_text": chosen_text,
+                "comment": comment_text,
+                "source": source,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         # Keep last 100 comments
         self.history["comments"] = self.history["comments"][-100:]
         _save_history(self.history)
@@ -1850,6 +1884,7 @@ class BlueskyEngageCog(commands.Cog):
     async def _run_repost_pipeline(self, source: str = "manual") -> Tuple[bool, str, Optional[str]]:
         """Find an interesting post and quote-post it with commentary."""
         import time as _time
+
         start = _time.monotonic()
 
         logger.info("🦋 ╔══════════════════════════════════════════════════╗")
@@ -1888,6 +1923,7 @@ class BlueskyEngageCog(commands.Cog):
         try:
             guild_id = int(os.getenv("GUILD_ID", "0"))
             from soupy_database.self_context import load_self_core, is_self_md_enabled
+
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
                 if core:
@@ -1911,8 +1947,7 @@ class BlueskyEngageCog(commands.Cog):
                     descriptions.append(desc)
             if descriptions:
                 image_context = "\n[IMAGE IN POST: " + " | ".join(descriptions) + "]\n"
-                logger.info("🦋 👁 Quote target has %d image(s): %s",
-                            len(image_urls), image_context.strip()[:100])
+                logger.info("🦋 👁 Quote target has %d image(s): %s", len(image_urls), image_context.strip()[:100])
 
         # Enrich with web context
         enrichment = await self._enrich_post_context(chosen)
@@ -1930,12 +1965,12 @@ class BlueskyEngageCog(commands.Cog):
         commentaries: List[str] = []
         for i in range(3):
             c = await _llm_call(QUOTE_POST_SYSTEM, user_prompt, temperature=0.65, max_tokens=2048)
-            c = c.strip('"\'')
+            c = c.strip("\"'")
             c = c.replace("—", ",").replace("–", ",").replace(" - ", ", ")
             if len(c) > 200:
                 for j in range(195, 0, -1):
                     if c[j] in ".!? ":
-                        c = c[:j + 1].rstrip()
+                        c = c[: j + 1].rstrip()
                         break
                 else:
                     c = c[:200]
@@ -1948,7 +1983,8 @@ class BlueskyEngageCog(commands.Cog):
             "Pick the best commentary for sharing this post. Must be relevant and witty. "
             "You MUST pick one. Return ONLY the index (0, 1, or 2).",
             f"Post by {chosen_author}:\n{chosen_text}\n\nCandidates:\n{listing}",
-            temperature=0.2, max_tokens=2048,
+            temperature=0.2,
+            max_tokens=2048,
         )
 
         try:
@@ -1969,15 +2005,17 @@ class BlueskyEngageCog(commands.Cog):
 
         # Record
         _reset_daily_if_needed(self.history)
-        self.history.setdefault("reposts", []).append({
-            "post_uri": chosen_uri,
-            "our_uri": post_uri,
-            "our_url": post_url,
-            "post_author": chosen_author,
-            "commentary": commentary,
-            "source": source,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        self.history.setdefault("reposts", []).append(
+            {
+                "post_uri": chosen_uri,
+                "our_uri": post_uri,
+                "our_url": post_url,
+                "post_author": chosen_author,
+                "commentary": commentary,
+                "source": source,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         self.history["reposts"] = self.history["reposts"][-50:]
         _save_history(self.history)
 
@@ -1990,9 +2028,7 @@ class BlueskyEngageCog(commands.Cog):
     # Original post pipeline
     # ------------------------------------------------------------------
 
-    async def _discover_article(
-        self, self_context: str
-    ) -> Tuple[Optional[str], str, str, str]:
+    async def _discover_article(self, self_context: str) -> Tuple[Optional[str], str, str, str]:
         """Mine Bluesky + DDG for articles, rate, fetch top 3, judge best.
 
         Returns (article_url, title, snippet, content) or (None, '', '', '').
@@ -2013,11 +2049,15 @@ class BlueskyEngageCog(commands.Cog):
             if year_match and int(year_match.group(1)) < current_year:
                 return
             seen_urls.add(url)
-            all_results.append({
-                "href": url, "title": title,
-                "body": description[:200],
-                "source": "bluesky", "bsky_likes": likes,
-            })
+            all_results.append(
+                {
+                    "href": url,
+                    "title": title,
+                    "body": description[:200],
+                    "source": "bluesky",
+                    "bsky_likes": likes,
+                }
+            )
 
         logger.info("🦋 ━━━ Mining Bluesky for articles ━━━")
 
@@ -2070,7 +2110,8 @@ class BlueskyEngageCog(commands.Cog):
             queries_raw = await _llm_call(
                 SEARCH_QUERY_FOR_POST_SYSTEM,
                 f"{self_context}\nGenerate 3 diverse search queries for today's news.",
-                temperature=0.6, max_tokens=2048,
+                temperature=0.6,
+                max_tokens=2048,
             )
             queries = [q.strip() for q in queries_raw.strip().splitlines() if q.strip()][:3]
             logger.info("🦋 DDG queries: %s", queries)
@@ -2093,13 +2134,16 @@ class BlueskyEngageCog(commands.Cog):
 
         all_results.sort(key=lambda a: a.get("bsky_likes", 0), reverse=True)
 
-        logger.info("🦋 Total candidate articles: %d (%d from Bluesky, %d from DDG)",
-                     len(all_results), bsky_article_count, len(all_results) - bsky_article_count)
+        logger.info(
+            "🦋 Total candidate articles: %d (%d from Bluesky, %d from DDG)",
+            len(all_results),
+            bsky_article_count,
+            len(all_results) - bsky_article_count,
+        )
         for i, a in enumerate(all_results[:10]):
             likes = a.get("bsky_likes", 0)
             src = "bsky" if a.get("source") == "bluesky" else "ddg"
-            logger.info("🦋   [%d] %s %d♥ %s — %s",
-                         i, src, likes, a.get("href", "")[:70], a.get("title", "?")[:60])
+            logger.info("🦋   [%d] %s %d♥ %s — %s", i, src, likes, a.get("href", "")[:70], a.get("title", "?")[:60])
         if not all_results:
             return None, "", "", ""
 
@@ -2117,7 +2161,8 @@ class BlueskyEngageCog(commands.Cog):
             "are better than random blogs or aggregator sites.\n\n"
             "Return 3 index numbers, one per line, best first. If none are real news, return SKIP.",
             f"{self_context}\nArticles:\n{listing}",
-            temperature=0.3, max_tokens=2048,
+            temperature=0.3,
+            max_tokens=2048,
         )
         if rate_result.strip().upper().startswith("SKIP"):
             return None, "", "", ""
@@ -2156,9 +2201,12 @@ class BlueskyEngageCog(commands.Cog):
                 pub_date = None
             # Check article age using shared estimator (also include title/snippet)
             from soupy_dailypost import _estimate_article_age_days
+
             scan_text = " ".join(filter(None, [title, a_snippet, content]))
             age = _estimate_article_age_days(
-                pub_date=pub_date, url=a_url, text=scan_text,
+                pub_date=pub_date,
+                url=a_url,
+                text=scan_text,
             )
             if age is None:
                 logger.info("🦋   [%d] ⏭ No date found, rejecting: %s", idx, title[:60])
@@ -2190,7 +2238,8 @@ class BlueskyEngageCog(commands.Cog):
                 "Between a straight news report and a critical angle, pick the critical angle.\n\n"
                 "You MUST pick one. Return ONLY the index number (0, 1, or 2). Nothing else.",
                 f"{self_context}\nArticles:\n{judge_articles}",
-                temperature=0.3, max_tokens=2048,
+                temperature=0.3,
+                max_tokens=2048,
             )
             try:
                 pick_idx = int(pick_result.strip()[0])
@@ -2213,6 +2262,7 @@ class BlueskyEngageCog(commands.Cog):
         If article_url is provided, skip discovery and post about that specific article.
         """
         import time as _time
+
         start = _time.monotonic()
 
         logger.info("🦋 ╔══════════════════════════════════════════════════╗")
@@ -2230,6 +2280,7 @@ class BlueskyEngageCog(commands.Cog):
         try:
             guild_id = int(os.getenv("GUILD_ID", "0"))
             from soupy_database.self_context import load_self_core, is_self_md_enabled
+
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
                 if core:
@@ -2257,7 +2308,9 @@ class BlueskyEngageCog(commands.Cog):
             # Try up to 3 times to find a suitable article
             article_url = None
             for attempt in range(3):
-                article_url, article_title, article_snippet, article_content = await self._discover_article(self_context)
+                article_url, article_title, article_snippet, article_content = await self._discover_article(
+                    self_context
+                )
                 if article_url:
                     break
                 logger.info("🦋 Article discovery attempt %d failed, retrying...", attempt + 1)
@@ -2278,15 +2331,27 @@ class BlueskyEngageCog(commands.Cog):
         candidates: List[str] = []
         for i in range(3):
             c = await _llm_call(ORIGINAL_POST_SYSTEM, post_user, temperature=0.65, max_tokens=2048)
-            c = c.strip('"\'')
+            c = c.strip("\"'")
             # Strip meta-commentary lines
             clean_lines = []
             for line in c.split("\n"):
                 line_lower = line.strip().lower()
-                if any(line_lower.startswith(p) for p in [
-                    "who's ", "who is ", "the article ", "the author ", "context:",
-                    "post:", "note:", "analysis:", "reasoning:", "subject:", "commentary:",
-                ]):
+                if any(
+                    line_lower.startswith(p)
+                    for p in [
+                        "who's ",
+                        "who is ",
+                        "the article ",
+                        "the author ",
+                        "context:",
+                        "post:",
+                        "note:",
+                        "analysis:",
+                        "reasoning:",
+                        "subject:",
+                        "commentary:",
+                    ]
+                ):
                     continue
                 clean_lines.append(line.strip())
             c = " ".join(l for l in clean_lines if l)
@@ -2295,7 +2360,7 @@ class BlueskyEngageCog(commands.Cog):
             if len(c) > 295:
                 for j in range(290, 0, -1):
                     if c[j] in ".!?":
-                        c = c[:j + 1]
+                        c = c[: j + 1]
                         break
                 else:
                     c = c[:295]
@@ -2303,7 +2368,7 @@ class BlueskyEngageCog(commands.Cog):
             if c and c[-1] not in ".!?":
                 for j in range(len(c) - 1, 0, -1):
                     if c[j] in ".!?":
-                        c = c[:j + 1]
+                        c = c[: j + 1]
                         break
             c = c.strip()
             if len(c) < 20:
@@ -2327,7 +2392,8 @@ class BlueskyEngageCog(commands.Cog):
             "- Is wishy-washy, both-sides, or noncommittal\n\n"
             "You MUST pick one. Return ONLY the index (0, 1, or 2).",
             f"Article: {article_title}\n\nCandidates:\n{judge_listing}",
-            temperature=0.2, max_tokens=2048,
+            temperature=0.2,
+            max_tokens=2048,
         )
 
         try:
@@ -2345,14 +2411,14 @@ class BlueskyEngageCog(commands.Cog):
                 FACT_CHECK_SYSTEM,
                 f"Article: {article_title}\n\nArticle content:\n{article_content[:1500]}\n\n"
                 f"Proposed post:\n{candidate}",
-                temperature=0.1, max_tokens=2048,
+                temperature=0.1,
+                max_tokens=2048,
             )
             reason = check_result.strip()
             is_accurate = reason.upper().startswith("ACCURATE")
             verdicts[c_idx] = (is_accurate, reason)
             marker = "✅ PASS" if is_accurate else "⚠ FAIL"
-            logger.info("🦋 Fact-check %s candidate %d: %s — %s",
-                         marker, c_idx, candidate[:60], reason[:100])
+            logger.info("🦋 Fact-check %s candidate %d: %s — %s", marker, c_idx, candidate[:60], reason[:100])
 
         ranked = [idx] + [i for i in range(len(candidates)) if i != idx]
         post_text = None
@@ -2399,15 +2465,17 @@ class BlueskyEngageCog(commands.Cog):
 
         # Record
         _reset_daily_if_needed(self.history)
-        self.history.setdefault("posts", []).append({
-            "url": article_url,
-            "title": article_title,
-            "our_uri": our_uri,
-            "our_url": our_url,
-            "text": post_text,
-            "source": source,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        self.history.setdefault("posts", []).append(
+            {
+                "url": article_url,
+                "title": article_title,
+                "our_uri": our_uri,
+                "our_url": our_url,
+                "text": post_text,
+                "source": source,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         self.history["posts"] = self.history["posts"][-50:]
         _save_history(self.history)
 
@@ -2428,8 +2496,7 @@ class BlueskyEngageCog(commands.Cog):
                 "date": self._schedule_date,
                 "events": [{"time": t.isoformat(), "action": a} for t, a in self._schedule],
             }
-            Path(SCHEDULE_PATH).write_text(
-                json.dumps(payload, indent=2), encoding="utf-8")
+            Path(SCHEDULE_PATH).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception as e:
             logger.debug("🦋 Failed to save schedule: %s", e)
 
@@ -2444,6 +2511,7 @@ class BlueskyEngageCog(commands.Cog):
                 return False
 
             import pytz
+
             pacific = pytz.timezone("US/Pacific")
             today_iso = datetime.now(pacific).date().isoformat()
             if saved_date != today_iso:
@@ -2464,9 +2532,7 @@ class BlueskyEngageCog(commands.Cog):
             logger.info("🦋 Loaded saved schedule (%d events remaining for today)", len(self._schedule))
 
             # Push the loaded schedule to the dashboard
-            schedule_list = [
-                {"time": t.isoformat(), "action": a} for t, a in self._schedule
-            ]
+            schedule_list = [{"time": t.isoformat(), "action": a} for t, a in self._schedule]
             next_run = self._schedule[0][0].isoformat() if self._schedule else None
             self._update_dashboard(
                 enabled=self._is_auto_enabled(),
@@ -2486,16 +2552,13 @@ class BlueskyEngageCog(commands.Cog):
         Each entry is (time, action) where action is 'reply', 'repost', or 'post'.
         """
         import pytz
+
         pacific = pytz.timezone("US/Pacific")
         now_pacific = datetime.now(pacific)
         today = now_pacific.date()
 
-        window_start = pacific.localize(
-            datetime.combine(today, datetime.min.time().replace(hour=6))
-        )
-        window_end = pacific.localize(
-            datetime.combine(today, datetime.min.time().replace(hour=23))
-        )
+        window_start = pacific.localize(datetime.combine(today, datetime.min.time().replace(hour=6)))
+        window_end = pacific.localize(datetime.combine(today, datetime.min.time().replace(hour=23)))
 
         window_seconds = int((window_end - window_start).total_seconds())
 
@@ -2547,15 +2610,18 @@ class BlueskyEngageCog(commands.Cog):
         # Remove entries for actions already done today (auto only)
         today_iso = today.isoformat()
         auto_replies_done = sum(
-            1 for c in self.history.get("comments", [])
+            1
+            for c in self.history.get("comments", [])
             if c.get("ts", "").startswith(today_iso) and c.get("source") == "auto"
         )
         auto_reposts_done = sum(
-            1 for r in self.history.get("reposts", [])
+            1
+            for r in self.history.get("reposts", [])
             if r.get("ts", "").startswith(today_iso) and r.get("source") == "auto"
         )
         auto_posts_done = sum(
-            1 for p in self.history.get("posts", [])
+            1
+            for p in self.history.get("posts", [])
             if p.get("ts", "").startswith(today_iso) and p.get("source") == "auto"
         )
 
@@ -2576,8 +2642,9 @@ class BlueskyEngageCog(commands.Cog):
         self._schedule = remaining
 
         logger.info("🦋 ━━━ Daily Bluesky schedule (%d events remaining) ━━━", len(self._schedule))
-        logger.info("🦋   Done today: %d replies, %d reposts, %d posts",
-                     auto_replies_done, auto_reposts_done, auto_posts_done)
+        logger.info(
+            "🦋   Done today: %d replies, %d reposts, %d posts", auto_replies_done, auto_reposts_done, auto_posts_done
+        )
         for i, (t, a) in enumerate(self._schedule):
             logger.info("🦋   [%d] %s — %s", i + 1, t.strftime("%I:%M %p %Z"), a)
 
@@ -2585,9 +2652,7 @@ class BlueskyEngageCog(commands.Cog):
         self._save_schedule()
 
         # Update dashboard
-        schedule_list = [
-            {"time": t.isoformat(), "action": a} for t, a in self._schedule
-        ]
+        schedule_list = [{"time": t.isoformat(), "action": a} for t, a in self._schedule]
         next_run = self._schedule[0][0].isoformat() if self._schedule else None
         self._update_dashboard(
             enabled=self._is_auto_enabled(),
@@ -2627,6 +2692,7 @@ class BlueskyEngageCog(commands.Cog):
                 return
 
             import pytz
+
             pacific = pytz.timezone("US/Pacific")
             now_pacific = datetime.now(pacific)
             today_str = now_pacific.date().isoformat()
@@ -2648,13 +2714,13 @@ class BlueskyEngageCog(commands.Cog):
             self._schedule.pop(0)
             self._save_schedule()  # Persist updated schedule
             now_iso = datetime.now(timezone.utc).isoformat()
-            logger.info("🦋 ⏰ Auto-%s triggered (scheduled for %s)",
-                         action, next_time.strftime("%I:%M %p"))
+            logger.info("🦋 ⏰ Auto-%s triggered (scheduled for %s)", action, next_time.strftime("%I:%M %p"))
 
             # Update dashboard: next_run
             next_run = self._schedule[0][0].isoformat() if self._schedule else None
             self._update_dashboard(
-                last_run=now_iso, next_run=next_run,
+                last_run=now_iso,
+                next_run=next_run,
                 schedule=[{"time": t.isoformat(), "action": a} for t, a in self._schedule],
             )
 
@@ -2688,24 +2754,18 @@ class BlueskyEngageCog(commands.Cog):
                     post_author = last.get("post_author", "someone")
                     orig_url = _post_url(last.get("post_uri", ""))
                     await self._report_to_musing_channel(
-                        f"just left a comment on {post_author}'s post\n"
-                        f"my reply: {url}\n"
-                        f"original: {orig_url}"
+                        f"just left a comment on {post_author}'s post\n" f"my reply: {url}\n" f"original: {orig_url}"
                     )
                 elif action == "repost":
                     self._update_dashboard(last_repost=ts_now)
                     last = self.history.get("reposts", [])[-1] if self.history.get("reposts") else {}
                     orig_url = _post_url(last.get("post_uri", ""))
                     await self._report_to_musing_channel(
-                        f"shared someone's post\n"
-                        f"my repost: {url}\n"
-                        f"original: {orig_url}"
+                        f"shared someone's post\n" f"my repost: {url}\n" f"original: {orig_url}"
                     )
                 elif action == "post":
                     self._update_dashboard(last_post=ts_now)
-                    await self._report_to_musing_channel(
-                        f"posted something on bluesky\n{url}"
-                    )
+                    await self._report_to_musing_channel(f"posted something on bluesky\n{url}")
             elif not success:
                 logger.info("🦋 ⏭ Auto-%s failed after retry: %s", action, status)
                 self._update_dashboard(last_failure=f"{action}: {status}")
@@ -2729,11 +2789,13 @@ class BlueskyEngageCog(commands.Cog):
         action="reply (default): comment on a post, repost: quote-post something, post: original post with article",
         url="For 'post' action: provide a specific article URL to post about instead of auto-searching",
     )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="reply", value="reply"),
-        app_commands.Choice(name="repost", value="repost"),
-        app_commands.Choice(name="post", value="post"),
-    ])
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="reply", value="reply"),
+            app_commands.Choice(name="repost", value="repost"),
+            app_commands.Choice(name="post", value="post"),
+        ]
+    )
     async def soupysky(
         self,
         interaction: discord.Interaction,
@@ -2741,9 +2803,7 @@ class BlueskyEngageCog(commands.Cog):
         url: Optional[str] = None,
     ) -> None:
         if interaction.user.id not in self._owner_ids():
-            await interaction.response.send_message(
-                "only the owner can do that.", ephemeral=True
-            )
+            await interaction.response.send_message("only the owner can do that.", ephemeral=True)
             return
 
         chosen = action.value if action else "reply"
@@ -2759,18 +2819,14 @@ class BlueskyEngageCog(commands.Cog):
                 success, status, result_url = await self._run_repost_pipeline()
                 label = "repost"
             elif chosen == "post":
-                success, status, result_url = await self._run_original_post_pipeline(
-                    article_url=url
-                )
+                success, status, result_url = await self._run_original_post_pipeline(article_url=url)
                 label = "post"
             else:
                 success, status, result_url = await self._run_engage_pipeline()
                 label = "reply"
 
             if success:
-                await interaction.followup.send(
-                    f"done. {status}\n{result_url or ''}", ephemeral=True
-                )
+                await interaction.followup.send(f"done. {status}\n{result_url or ''}", ephemeral=True)
                 # Report to musing channel
                 if result_url:
                     if label == "reply":
@@ -2786,23 +2842,15 @@ class BlueskyEngageCog(commands.Cog):
                         last = self.history.get("reposts", [])[-1] if self.history.get("reposts") else {}
                         orig_url = _post_url(last.get("post_uri", ""))
                         await self._report_to_musing_channel(
-                            f"shared someone's post\n"
-                            f"my repost: {result_url}\n"
-                            f"original: {orig_url}"
+                            f"shared someone's post\n" f"my repost: {result_url}\n" f"original: {orig_url}"
                         )
                     elif label == "post":
-                        await self._report_to_musing_channel(
-                            f"posted something on bluesky\n{result_url}"
-                        )
+                        await self._report_to_musing_channel(f"posted something on bluesky\n{result_url}")
             else:
-                await interaction.followup.send(
-                    f"didn't work out. {status}", ephemeral=True
-                )
+                await interaction.followup.send(f"didn't work out. {status}", ephemeral=True)
         except Exception as e:
             logger.error("🦋 Pipeline error: %s", e, exc_info=True)
-            await interaction.followup.send(
-                f"something broke: {e}", ephemeral=True
-            )
+            await interaction.followup.send(f"something broke: {e}", ephemeral=True)
 
 
 # ---------------------------------------------------------------------------

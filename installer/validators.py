@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional
 
 from . import http
 
-
 SNOWFLAKE_RE = re.compile(r"^\d{17,20}$")
 
 
@@ -44,6 +43,7 @@ def parse_snowflake_list(value: str) -> List[str]:
 # Discord
 # ---------------------------------------------------------------------------
 
+
 def discord_token(token: str) -> Result:
     """Verify a bot token by hitting GET /users/@me on the Discord API."""
     if not token or token.strip() in ("", "your_discord_bot_token_here"):
@@ -73,6 +73,7 @@ def discord_token(token: str) -> Result:
 # LM Studio (OpenAI-compatible)
 # ---------------------------------------------------------------------------
 
+
 def lm_studio_models(base_url: str) -> Result:
     """GET {base}/models. Returns the list of model ids on success."""
     base = base_url.rstrip("/")
@@ -98,6 +99,7 @@ def lm_studio_models(base_url: str) -> Result:
 # Stable Diffusion backend
 # ---------------------------------------------------------------------------
 
+
 def sd_backend(base_url: str) -> Result:
     """Ping the SD backend's /health endpoint (sd-api/sd_api.py exposes it)."""
     base = base_url.rstrip("/")
@@ -121,6 +123,7 @@ def sd_backend(base_url: str) -> Result:
 # ---------------------------------------------------------------------------
 # Helpers used at prompt time, not networked
 # ---------------------------------------------------------------------------
+
 
 def url_looks_valid(value: str) -> bool:
     return value.startswith("http://") or value.startswith("https://")

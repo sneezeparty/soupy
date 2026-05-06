@@ -12,7 +12,6 @@ from typing import Dict, List
 
 from .. import validators
 
-
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
 
 

@@ -12,7 +12,6 @@ from typing import Dict
 
 from .. import validators
 
-
 PORTAL_URL = "https://discord.com/developers/applications"
 
 

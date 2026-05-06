@@ -28,7 +28,6 @@ from installer import state as state_mod
 from installer.ui import NonInteractiveUI, UI, WizardAbort
 from installer.steps import STEPS
 
-
 REPO_ROOT = Path(__file__).resolve().parent
 STATE_PATH = REPO_ROOT / ".install-state.json"
 EXAMPLE_PATH = REPO_ROOT / ".env-stable.example"
@@ -118,9 +117,7 @@ def _select_step_ids(args: argparse.Namespace, state: Dict[str, Any]) -> List[st
     return step_ids
 
 
-def _maybe_skip_completed(
-    args: argparse.Namespace, state: Dict[str, Any], step_ids: List[str]
-) -> List[str]:
+def _maybe_skip_completed(args: argparse.Namespace, state: Dict[str, Any], step_ids: List[str]) -> List[str]:
     if not args.resume:
         return step_ids
     completed = set(state.get("__completed_steps__", []))
@@ -185,12 +182,7 @@ def main(argv: List[str] | None = None) -> int:
             ui.info(f"resuming — {len(completed)} step(s) already completed: {', '.join(completed)}")
 
     # Existing install: reconfigure / verify / cancel.
-    if (
-        TARGET_PATH.exists()
-        and not args.resume
-        and not args.non_interactive
-        and not state.get("__completed_steps__")
-    ):
+    if TARGET_PATH.exists() and not args.resume and not args.non_interactive and not state.get("__completed_steps__"):
         action = _existing_install_action(ui)
         if action == "cancel":
             ui.info("nothing changed.")

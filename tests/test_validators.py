@@ -41,6 +41,7 @@ def test_parse_snowflake_list_raises_on_bad_id():
 # Discord token
 # ---------------------------------------------------------------------------
 
+
 def test_discord_token_blank():
     result = validators.discord_token("")
     assert not result.ok
@@ -52,9 +53,7 @@ def test_discord_token_placeholder():
 
 
 def test_discord_token_success():
-    with patch.object(
-        http, "get_json", return_value=(200, {"id": "999", "username": "soupy"})
-    ):
+    with patch.object(http, "get_json", return_value=(200, {"id": "999", "username": "soupy"})):
         result = validators.discord_token("some-token")
     assert result.ok
     assert "soupy" in result.message
@@ -81,6 +80,7 @@ def test_discord_token_network_error():
 # ---------------------------------------------------------------------------
 # LM Studio
 # ---------------------------------------------------------------------------
+
 
 def test_lm_studio_models_success():
     body = {"data": [{"id": "chat-model"}, {"id": "embed-model"}]}
@@ -129,6 +129,7 @@ def test_lm_studio_models_strips_trailing_slash():
 # ---------------------------------------------------------------------------
 # SD backend
 # ---------------------------------------------------------------------------
+
 
 def test_sd_backend_health_ok():
     with patch.object(http, "get_json", return_value=(200, {"status": "ok", "model": "sd35"})):

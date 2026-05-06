@@ -83,15 +83,15 @@ def _is_blocked_url(url: str, blocked: set) -> bool:
             return True
     return False
 
+
 # Initialize OpenAI client
-client = OpenAI(
-    base_url=os.getenv("OPENAI_BASE_URL"),
-    api_key=os.getenv("OPENAI_API_KEY", "lm-studio")
-)
+client = OpenAI(base_url=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY", "lm-studio"))
+
 
 async def async_chat_completion(*args, **kwargs):
     """Wraps the OpenAI chat completion in an async context"""
     return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
+
 
 class SearchCog(commands.Cog):
     def __init__(self, bot):
@@ -102,21 +102,21 @@ class SearchCog(commands.Cog):
 
     async def cog_unload(self):
         """Cleanup when cog is unloaded"""
-        if hasattr(self, 'session'):
+        if hasattr(self, "session"):
             await self.session.close()
 
     async def is_rate_limited(self, user_id: int) -> bool:
         """Check if user has exceeded rate limits"""
         current_time = time.time()
         search_times = self.search_rate_limits.get(user_id, [])
-        
+
         # Clean up old timestamps
         search_times = [t for t in search_times if current_time - t < 60]
         self.search_rate_limits[user_id] = search_times
-        
+
         if len(search_times) >= self.MAX_SEARCHES_PER_MINUTE:
             return True
-        
+
         self.search_rate_limits[user_id].append(current_time)
         return False
 
@@ -126,29 +126,33 @@ class SearchCog(commands.Cog):
             async with self.session.get(url, timeout=10) as response:
                 if response.status == 200:
                     html = await response.text()
-                    
+
                     # Try trafilatura first
                     content = trafilatura.extract(html)
                     if content:
                         return content.strip()
-                    
+
                     # Fallback to BeautifulSoup
-                    soup = BeautifulSoup(html, 'html.parser')
-                    
+                    soup = BeautifulSoup(html, "html.parser")
+
                     # Remove unwanted elements
-                    for element in soup(['script', 'style', 'nav', 'header', 'footer', 'iframe']):
+                    for element in soup(["script", "style", "nav", "header", "footer", "iframe"]):
                         element.decompose()
-                    
+
                     # Get main content
-                    main_content = soup.find('main') or soup.find('article') or soup.find('div', class_=re.compile(r'content|article|post'))
+                    main_content = (
+                        soup.find("main")
+                        or soup.find("article")
+                        or soup.find("div", class_=re.compile(r"content|article|post"))
+                    )
                     if main_content:
-                        return main_content.get_text(strip=True, separator=' ')
-                    
+                        return main_content.get_text(strip=True, separator=" ")
+
                     # Last resort: get body text
-                    body = soup.find('body')
+                    body = soup.find("body")
                     if body:
-                        return body.get_text(strip=True, separator=' ')
-                    
+                        return body.get_text(strip=True, separator=" ")
+
                     return None
         except Exception as e:
             logger.error(f"Error fetching article content from {url}: {e}")
@@ -199,14 +203,16 @@ class SearchCog(commands.Cog):
             index_mapping: List[int] = []
             for idx, result in enumerate(search_results):
                 # Skip results without required fields
-                if not all(key in result for key in ['title', 'body', 'href']):
+                if not all(key in result for key in ["title", "body", "href"]):
                     continue
-                    
-                formatted_results.append({
-                    'title': result['title'],
-                    'preview': result.get('body', '')[:500],  # Limit preview length
-                    'url': result['href']
-                })
+
+                formatted_results.append(
+                    {
+                        "title": result["title"],
+                        "preview": result.get("body", "")[:500],  # Limit preview length
+                        "url": result["href"],
+                    }
+                )
                 index_mapping.append(idx)
 
             if not formatted_results:
@@ -222,7 +228,7 @@ class SearchCog(commands.Cog):
                 "4. Content uniqueness\n\n"
                 "Respond ONLY with the numbers (0-based) of the 5 best articles, separated by spaces.\n\n"
             )
-            
+
             for i, result in enumerate(formatted_results):
                 prompt += f"[{i}] {result['title']}\n"
                 prompt += f"URL: {result['url']}\n"
@@ -231,11 +237,14 @@ class SearchCog(commands.Cog):
             response = await async_chat_completion(
                 model=os.getenv("LOCAL_CHAT"),
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that selects the most relevant and informative articles."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that selects the most relevant and informative articles.",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=float(os.getenv("SEARCH_SELECT_TEMPERATURE", 0.3)),
-                max_tokens=50
+                max_tokens=50,
             )
 
             # Parse indices and validate
@@ -248,7 +257,7 @@ class SearchCog(commands.Cog):
                     return [search_results[i] for i in mapped_indices[:5]]
             except Exception:
                 logger.warning("Failed to parse article selection response")
-                
+
             return search_results[:5]
 
         except Exception as e:
@@ -267,18 +276,20 @@ class SearchCog(commands.Cog):
             MAX_TOKENS_PER_ARTICLE = 1000  # Limit tokens per article
 
             for article in articles:
-                content = await self.fetch_article_content(article.get('href', ''))
+                content = await self.fetch_article_content(article.get("href", ""))
                 if not content:
                     continue
 
                 # Truncate content to manage token count
                 content = content[:MAX_TOKENS_PER_ARTICLE]
-                processed_articles.append({
-                    'title': article.get('title', 'Untitled'),
-                    'source': article.get('source', 'Unknown Source'),
-                    'url': article['href'],
-                    'content': content
-                })
+                processed_articles.append(
+                    {
+                        "title": article.get("title", "Untitled"),
+                        "source": article.get("source", "Unknown Source"),
+                        "url": article["href"],
+                        "content": content,
+                    }
+                )
 
             if not processed_articles:
                 return "❌ Could not extract content from any articles."
@@ -327,12 +338,12 @@ class SearchCog(commands.Cog):
                     model=os.getenv("LOCAL_CHAT"),
                     messages=[
                         {"role": "system", "content": system_message},
-                        {"role": "user", "content": content_prompt}
+                        {"role": "user", "content": content_prompt},
                     ],
                     temperature=float(os.getenv("SEARCH_SUMMARY_TEMPERATURE", 0.7)),
-                    max_tokens=1500
+                    max_tokens=1500,
                 )
-                
+
                 return response.choices[0].message.content.strip()
 
             except Exception as e:
@@ -341,12 +352,14 @@ class SearchCog(commands.Cog):
                     logger.warning("Context length exceeded, falling back to shorter content")
                     shortened_articles = []
                     for article in processed_articles:
-                        shortened_articles.append({
-                            'title': article['title'],
-                            'source': article['source'],
-                            'url': article['url'],
-                            'content': article['content'][:300]  # Use shorter excerpts
-                        })
+                        shortened_articles.append(
+                            {
+                                "title": article["title"],
+                                "source": article["source"],
+                                "url": article["url"],
+                                "content": article["content"][:300],  # Use shorter excerpts
+                            }
+                        )
 
                     content_prompt = (
                         f"Search Query: {query}\n\n"
@@ -373,12 +386,12 @@ class SearchCog(commands.Cog):
                         model=os.getenv("LOCAL_CHAT"),
                         messages=[
                             {"role": "system", "content": system_message},
-                            {"role": "user", "content": content_prompt}
+                            {"role": "user", "content": content_prompt},
                         ],
                         temperature=float(os.getenv("SEARCH_SUMMARY_TEMPERATURE", 0.7)),
-                        max_tokens=1000
+                        max_tokens=1000,
                     )
-                    
+
                     return response.choices[0].message.content.strip()
                 else:
                     raise
@@ -389,23 +402,22 @@ class SearchCog(commands.Cog):
 
     @app_commands.command(
         name="soupysearch",
-        description="Performs a DuckDuckGo search and returns a comprehensive answer based on the results."
+        description="Performs a DuckDuckGo search and returns a comprehensive answer based on the results.",
     )
     @app_commands.describe(query="The search query.")
     async def search_command(self, interaction: discord.Interaction, query: str):
         """Handle the /soupysearch command"""
         start_time = time.time()
         logger.info(f"🔍 Search requested by {interaction.user}: '{query}'")
-        
+
         if await self.is_rate_limited(interaction.user.id):
             await interaction.response.send_message(
-                "⚠️ You are searching too quickly. Please wait a moment.",
-                ephemeral=True
+                "⚠️ You are searching too quickly. Please wait a moment.", ephemeral=True
             )
             return
-        
+
         await interaction.response.defer()
-        
+
         try:
             # Get initial search results (with resilient backends and timeout)
             initial_results = await self.perform_text_search(query, max_results=10)
@@ -440,50 +452,49 @@ class SearchCog(commands.Cog):
             # Select and process articles
             selected_results = await self.select_articles(initial_results)
             final_response = await self.generate_final_response(query, selected_results)
-            
+
             # Ensure sources are included by appending them
             sources_section = "\n\n**Sources Used:**\n"
             for i, article in enumerate(selected_results, 1):
-                title = article.get('title', 'Untitled').strip()
-                url = article.get('href', '').strip()
+                title = article.get("title", "Untitled").strip()
+                url = article.get("href", "").strip()
                 if url:  # Only include if we have a URL
                     sources_section += f"{i}. [{title}]({url})\n"
-            
+
             # Combine response with sources
             final_response = final_response.strip() + sources_section
-            
+
             # Split response if needed
             MAX_EMBED_LENGTH = 3900
-            response_chunks = [final_response[i:i + MAX_EMBED_LENGTH] 
-                             for i in range(0, len(final_response), MAX_EMBED_LENGTH)]
-            
+            response_chunks = [
+                final_response[i : i + MAX_EMBED_LENGTH] for i in range(0, len(final_response), MAX_EMBED_LENGTH)
+            ]
+
             elapsed_time = round(time.time() - start_time, 2)
-            
+
             for i, chunk in enumerate(response_chunks):
                 embed = discord.Embed(
-                    title=f"🔍 Search Results for: {query}" + 
-                          (f" (Part {i+1}/{len(response_chunks)})" if len(response_chunks) > 1 else ""),
+                    title=f"🔍 Search Results for: {query}"
+                    + (f" (Part {i+1}/{len(response_chunks)})" if len(response_chunks) > 1 else ""),
                     description=chunk,
-                    color=discord.Color.green()
+                    color=discord.Color.green(),
                 )
-                
+
                 if i == 0:
                     embed.set_footer(text=f"Search completed in {elapsed_time} seconds")
                     await interaction.followup.send(embed=embed)
                 else:
                     await interaction.followup.send(embed=embed)
-                
+
                 if i < len(response_chunks) - 1:
                     await asyncio.sleep(1)
-            
+
             logger.info(f"✅ Search completed for {interaction.user}")
-            
+
         except Exception as e:
             logger.error(f"❌ Error in search command: {e}")
-            await interaction.followup.send(
-                f"❌ An error occurred: {str(e)}",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
 
 async def setup(bot):
     """Setup function for loading the cog"""

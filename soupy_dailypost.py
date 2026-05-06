@@ -66,6 +66,8 @@ def _read_env_value(key: str, default: str = "") -> str:
     except Exception:
         pass
     return os.getenv(key, default)
+
+
 MAX_HISTORY_PER_CHANNEL = 30
 
 # ---------------------------------------------------------------------------
@@ -167,6 +169,7 @@ DEFAULT_BEHAVIOUR_DAILY_POST = (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _llm_call(
     system: str,
     user: str,
@@ -174,6 +177,7 @@ async def _llm_call(
     max_tokens: int = 500,
 ) -> str:
     """Make a synchronous OpenAI call on a thread, returning the text content."""
+
     def _sync():
         return client.chat.completions.create(
             model=os.getenv("LOCAL_CHAT", "local-model"),
@@ -248,6 +252,7 @@ async def _fetch_article_content(url: str, timeout: int = 10) -> Optional[Dict[s
             if meta:
                 try:
                     import json as _json
+
                     meta_dict = _json.loads(meta)
                     pub_date = meta_dict.get("date") or None
                 except Exception:
@@ -266,15 +271,33 @@ async def _fetch_article_content(url: str, timeout: int = 10) -> Optional[Dict[s
 
 
 MONTH_NAMES = [
-    "january", "february", "march", "april", "may", "june",
-    "july", "august", "september", "october", "november", "december",
-    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
 ]
 
 
-def _estimate_article_age_days(
-    pub_date: Optional[str] = None, url: str = "", text: str = ""
-) -> Optional[int]:
+def _estimate_article_age_days(pub_date: Optional[str] = None, url: str = "", text: str = "") -> Optional[int]:
     """Estimate an article's age in days by scanning for date clues.
 
     Checks (in order): trafilatura date, URL date patterns, then scans the
@@ -387,7 +410,7 @@ def _estimate_article_age_days(
 
     # Find a month mentioned near that year (within ~50 chars)
     year_pos = scan.find(str(found_year))
-    nearby = scan[max(0, year_pos - 50):year_pos + 50]
+    nearby = scan[max(0, year_pos - 50) : year_pos + 50]
     found_month = None
     for month_idx, name in enumerate(MONTH_NAMES):
         if name in nearby:
@@ -409,10 +432,7 @@ def _estimate_article_age_days(
         return None
 
 
-def _is_article_recent(
-    pub_date: Optional[str] = None, max_age_days: int = 14,
-    url: str = "", text: str = ""
-) -> bool:
+def _is_article_recent(pub_date: Optional[str] = None, max_age_days: int = 14, url: str = "", text: str = "") -> bool:
     """Check if an article is recent enough to post.
 
     Uses _estimate_article_age_days to score the article.
@@ -451,6 +471,7 @@ def _save_history(history: Dict[str, List[Dict[str, str]]]) -> None:
 # ---------------------------------------------------------------------------
 # Cog
 # ---------------------------------------------------------------------------
+
 
 class DailyPostCog(commands.Cog):
     """Posts one interesting news article per day to configured channels."""
@@ -494,8 +515,7 @@ class DailyPostCog(commands.Cog):
                 ts["daily_post"]["last_run"] = last_ts
                 ts["daily_post"]["last_title"] = last_entry.get("title", "")[:80]
                 channels = self._get_channels()
-                ts["daily_post"]["last_channel"] = channels.get(
-                    last_entry.get("_ch_id", ""), "")
+                ts["daily_post"]["last_channel"] = channels.get(last_entry.get("_ch_id", ""), "")
 
     def cog_unload(self) -> None:
         self._loop.cancel()
@@ -576,8 +596,7 @@ class DailyPostCog(commands.Cog):
                     for e in self.schedule
                 ],
             }
-            Path(SCHEDULE_PATH).write_text(
-                json.dumps(payload, indent=2), encoding="utf-8")
+            Path(SCHEDULE_PATH).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception as e:
             logger.debug("📰 Failed to save schedule: %s", e)
 
@@ -601,11 +620,13 @@ class DailyPostCog(commands.Cog):
                 try:
                     t = datetime.fromisoformat(entry["time"]).astimezone(self.timezone)
                     if t > now:
-                        events.append({
-                            "ch_id": entry["ch_id"],
-                            "time": t,
-                            "slot": entry.get("slot", "morning"),
-                        })
+                        events.append(
+                            {
+                                "ch_id": entry["ch_id"],
+                                "time": t,
+                                "slot": entry.get("slot", "morning"),
+                            }
+                        )
                 except (KeyError, ValueError):
                     continue
 
@@ -623,9 +644,11 @@ class DailyPostCog(commands.Cog):
                     ts["daily_post"]["enabled"] = True
                     ts["daily_post"]["interval"] = "2x/day"
                     ts["daily_post"]["schedule"] = [
-                        {"time": e["time"].astimezone(pytz.UTC).isoformat(),
-                         "slot": e["slot"],
-                         "channel": channels.get(e["ch_id"], e["ch_id"])}
+                        {
+                            "time": e["time"].astimezone(pytz.UTC).isoformat(),
+                            "slot": e["slot"],
+                            "channel": channels.get(e["ch_id"], e["ch_id"]),
+                        }
                         for e in self.schedule
                     ]
                     ts["daily_post"]["posts_today"] = self._posts_made_today()
@@ -683,7 +706,9 @@ class DailyPostCog(commands.Cog):
             ch_name = channels.get(entry["ch_id"], entry["ch_id"])
             logger.info(
                 "\U0001f4f0 Daily post scheduled: %s slot → #%s at %s",
-                entry["slot"], ch_name, entry["time"].strftime("%H:%M"),
+                entry["slot"],
+                ch_name,
+                entry["time"].strftime("%H:%M"),
             )
 
         # Update timer state for dashboard
@@ -695,9 +720,11 @@ class DailyPostCog(commands.Cog):
             ts["daily_post"]["enabled"] = True
             ts["daily_post"]["interval"] = "2x/day"
             ts["daily_post"]["schedule"] = [
-                {"time": e["time"].astimezone(pytz.UTC).isoformat(),
-                 "slot": e["slot"],
-                 "channel": channels.get(e["ch_id"], e["ch_id"])}
+                {
+                    "time": e["time"].astimezone(pytz.UTC).isoformat(),
+                    "slot": e["slot"],
+                    "channel": channels.get(e["ch_id"], e["ch_id"]),
+                }
                 for e in self.schedule
             ]
             ts["daily_post"]["posts_today"] = self._posts_made_today()
@@ -752,7 +779,9 @@ class DailyPostCog(commands.Cog):
                         try:
                             channel = await self.bot.fetch_channel(int(ch_id))
                         except Exception:
-                            logger.warning("\U0001f4f0 Could not fetch channel %s, dropping %s slot", ch_id, entry["slot"])
+                            logger.warning(
+                                "\U0001f4f0 Could not fetch channel %s, dropping %s slot", ch_id, entry["slot"]
+                            )
                             continue  # slot is consumed, not added to remaining
 
                     guild_id = channel.guild.id
@@ -763,7 +792,10 @@ class DailyPostCog(commands.Cog):
                     for attempt in range(1, max_retries + 1):
                         logger.info(
                             "📰 %s post attempt %d/%d for #%s",
-                            entry["slot"].title(), attempt, max_retries, channel.name,
+                            entry["slot"].title(),
+                            attempt,
+                            max_retries,
+                            channel.name,
                         )
                         success, msg = await self._run_pipeline_for_channel(guild_id, ch_id, topic, attempt=attempt)
                         if success:
@@ -773,12 +805,19 @@ class DailyPostCog(commands.Cog):
                         else:
                             logger.info(
                                 "⏭ %s post attempt %d failed for #%s: %s",
-                                entry["slot"].title(), attempt, channel.name, msg,
+                                entry["slot"].title(),
+                                attempt,
+                                channel.name,
+                                msg,
                             )
 
                     if not posted:
-                        logger.info("⏭ %s post: all %d attempts failed for #%s, skipping",
-                                    entry["slot"].title(), max_retries, channel.name)
+                        logger.info(
+                            "⏭ %s post: all %d attempts failed for #%s, skipping",
+                            entry["slot"].title(),
+                            max_retries,
+                            channel.name,
+                        )
 
                     # Update dashboard timer (wrapped so failures can't loop)
                     try:
@@ -786,12 +825,16 @@ class DailyPostCog(commands.Cog):
                         if ts and "daily_post" in ts:
                             next_entry = self.schedule[0] if self.schedule else None
                             ts["daily_post"]["last_run"] = now.astimezone(pytz.UTC).isoformat()
-                            ts["daily_post"]["next_run"] = next_entry["time"].astimezone(pytz.UTC).isoformat() if next_entry else None
+                            ts["daily_post"]["next_run"] = (
+                                next_entry["time"].astimezone(pytz.UTC).isoformat() if next_entry else None
+                            )
                             ts["daily_post"]["posts_today"] = self._posts_made_today()
                             ts["daily_post"]["schedule"] = [
-                                {"time": e["time"].astimezone(pytz.UTC).isoformat(),
-                                 "slot": e["slot"],
-                                 "channel": channels.get(e["ch_id"], e["ch_id"])}
+                                {
+                                    "time": e["time"].astimezone(pytz.UTC).isoformat(),
+                                    "slot": e["slot"],
+                                    "channel": channels.get(e["ch_id"], e["ch_id"]),
+                                }
                                 for e in self.schedule
                             ]
                             if posted:
@@ -804,8 +847,12 @@ class DailyPostCog(commands.Cog):
                         logger.warning("📰 Dashboard update failed (non-fatal): %s", ts_err)
 
                 except Exception as slot_err:
-                    logger.error("📰 Error processing %s slot (slot already consumed): %s",
-                                 entry.get("slot", "?"), slot_err, exc_info=True)
+                    logger.error(
+                        "📰 Error processing %s slot (slot already consumed): %s",
+                        entry.get("slot", "?"),
+                        slot_err,
+                        exc_info=True,
+                    )
                     # slot was already removed from self.schedule before this loop
                     # so even with this exception, it won't be replayed
 
@@ -820,9 +867,7 @@ class DailyPostCog(commands.Cog):
     # Audience analysis
     # ------------------------------------------------------------------
 
-    def _get_channel_top_posters(
-        self, conn: sqlite3.Connection, channel_id: str, limit: int = 10
-    ) -> List[int]:
+    def _get_channel_top_posters(self, conn: sqlite3.Connection, channel_id: str, limit: int = 10) -> List[int]:
         """Return top poster user_ids for a channel by message count."""
         cur = conn.cursor()
         cur.execute(
@@ -851,9 +896,7 @@ class DailyPostCog(commands.Cog):
             for row in cur.fetchall()
         ]
 
-    async def _build_audience_brief(
-        self, guild_id: int, channel_id: str, topic_hint: str
-    ) -> str:
+    async def _build_audience_brief(self, guild_id: int, channel_id: str, topic_hint: str) -> str:
         """Synthesize an audience brief from profiles and recent messages."""
         db_path = get_db_path(guild_id)
         if not os.path.exists(db_path):
@@ -904,11 +947,7 @@ class DailyPostCog(commands.Cog):
             logger.debug("📰   … and %d more", len(recent) - 5)
 
         # Build recent messages excerpt
-        recent_lines = [
-            f"- {m['nickname']}: {m['content'][:120]}"
-            for m in recent[:20]
-            if m.get("content")
-        ]
+        recent_lines = [f"- {m['nickname']}: {m['content'][:120]}" for m in recent[:20] if m.get("content")]
 
         user_prompt = (
             f"=== CHANNEL TOPIC (primary constraint — article MUST match this) ===\n"
@@ -972,15 +1011,16 @@ class DailyPostCog(commands.Cog):
         except ValueError:
             prefilter_max_age = 21
         import re as _re_filter
+
         # URLs that are homepages, feeds, forums, search pages — not articles
         _junk_url_patterns = [
-            r"^https?://[^/]+/?$",                   # bare domain / homepage
-            r"/rss[_.]|/feed[_./]|\.xml$|\.rss$",    # RSS / Atom feeds
-            r"/search\b|/welcome\b|/community\b",    # search pages, forum landings
-            r"^https?://news\.google\.com/",          # Google News aggregator
-            r"^https?://discussions\.apple\.com/",    # Apple community forums
-            r"^https?://[^/]*wikipedia\.org/",        # Wikipedia
-            r"/threads/|/forum/|/topic/",             # Forum threads (not news)
+            r"^https?://[^/]+/?$",  # bare domain / homepage
+            r"/rss[_.]|/feed[_./]|\.xml$|\.rss$",  # RSS / Atom feeds
+            r"/search\b|/welcome\b|/community\b",  # search pages, forum landings
+            r"^https?://news\.google\.com/",  # Google News aggregator
+            r"^https?://discussions\.apple\.com/",  # Apple community forums
+            r"^https?://[^/]*wikipedia\.org/",  # Wikipedia
+            r"/threads/|/forum/|/topic/",  # Forum threads (not news)
         ]
         _junk_re = _re_filter.compile("|".join(_junk_url_patterns), _re_filter.IGNORECASE)
 
@@ -998,30 +1038,31 @@ class DailyPostCog(commands.Cog):
                 continue
             # Use the full age estimator on title + snippet + URL
             # DDG news results include a pub_date field
-            age = _estimate_article_age_days(
-                pub_date=a.get("pub_date"), url=url, text=f"{title} {snippet}"
-            )
+            age = _estimate_article_age_days(pub_date=a.get("pub_date"), url=url, text=f"{title} {snippet}")
             if age is not None and age > prefilter_max_age:
                 logger.debug("🔍   ⏭ Pre-filter (~%d days, threshold=%d): %s", age, prefilter_max_age, title[:60])
                 old_count += 1
                 continue
             filtered.append(a)
 
-        logger.info("🔍 Total unique articles: %d (%d non-articles, %d pre-filtered as old)",
-                     len(filtered), junk_count, old_count)
+        logger.info(
+            "🔍 Total unique articles: %d (%d non-articles, %d pre-filtered as old)",
+            len(filtered),
+            junk_count,
+            old_count,
+        )
         for i, a in enumerate(filtered):
             logger.debug("🔍   [%d] %s", i, a.get("title", "?")[:80])
         return filtered
 
-    async def _ddg_search(
-        self, query: str, timelimit: str = "d", max_results: int = 8
-    ) -> List[Dict[str, Any]]:
+    async def _ddg_search(self, query: str, timelimit: str = "d", max_results: int = 8) -> List[Dict[str, Any]]:
         """Run a DuckDuckGo NEWS search with timeout.
 
         Uses ddg.news() instead of ddg.text() to get actual news articles
         with proper dates, sources, and URLs instead of random web pages.
         Maps 'url' → 'href' for pipeline compatibility.
         """
+
         def _sync():
             with DDGS() as ddg:
                 raw = list(ddg.news(query, timelimit=timelimit, max_results=max_results))
@@ -1040,9 +1081,11 @@ class DailyPostCog(commands.Cog):
                 return results
             # Fallback to text search if news search returns nothing
             logger.debug("🔍 News search empty for '%s', falling back to text search", query)
+
             def _sync_text():
                 with DDGS() as ddg:
                     return list(ddg.text(query, timelimit=timelimit, max_results=max_results))
+
             return await asyncio.wait_for(asyncio.to_thread(_sync_text), timeout=15)
         except asyncio.TimeoutError:
             logger.warning(f"\U0001f50d DDG search timed out for: {query}")
@@ -1125,9 +1168,7 @@ class DailyPostCog(commands.Cog):
             logger.debug("🦋 Trending topics error: %s", e)
             return []
 
-    async def _filter_trending_for_channel(
-        self, trending: List[str], audience_brief: str
-    ) -> List[str]:
+    async def _filter_trending_for_channel(self, trending: List[str], audience_brief: str) -> List[str]:
         """Use LLM to pick which trending topics are relevant to this channel."""
         if not trending:
             return []
@@ -1185,7 +1226,8 @@ class DailyPostCog(commands.Cog):
                         "limit": str(max_results_per_query),
                     }
                     async with session.get(
-                        BSKY_API, params=params,
+                        BSKY_API,
+                        params=params,
                         headers={
                             "Accept": "application/json",
                             "Authorization": f"Bearer {token}",
@@ -1241,21 +1283,23 @@ class DailyPostCog(commands.Cog):
                     if embed_title:
                         title_text = embed_title
 
-                    results.append({
-                        "title": f"[Bluesky] {author_name}: {title_text}",
-                        "body": text[:300],
-                        "href": embed_url or post_url,
-                        "source": "bluesky",
-                        "author": author_name,
-                        "author_handle": author_handle,
-                        "likes": likes,
-                        "reposts": reposts,
-                        "replies": replies,
-                        "created": created,
-                        "bsky_uri": uri,
-                        "post_url": post_url,
-                        "embed_url": embed_url,
-                    })
+                    results.append(
+                        {
+                            "title": f"[Bluesky] {author_name}: {title_text}",
+                            "body": text[:300],
+                            "href": embed_url or post_url,
+                            "source": "bluesky",
+                            "author": author_name,
+                            "author_handle": author_handle,
+                            "likes": likes,
+                            "reposts": reposts,
+                            "replies": replies,
+                            "created": created,
+                            "bsky_uri": uri,
+                            "post_url": post_url,
+                            "embed_url": embed_url,
+                        }
+                    )
                     new_count += 1
 
                 logger.info("🦋   '%s' → %d posts, %d with %d+ likes", query, len(posts), new_count, min_likes)
@@ -1268,7 +1312,9 @@ class DailyPostCog(commands.Cog):
         # Sort by engagement × recency.  Posts from today get full weight,
         # posts from a week ago get ~30% weight, posts older than 2 weeks ~10%.
         from datetime import timezone as _tz
+
         now_utc = datetime.now(_tz.utc)
+
         def _engagement_score(r: Dict[str, Any]) -> float:
             engagement = (r.get("likes", 0) or 0) + (r.get("reposts", 0) or 0)
             created_str = r.get("created", "")
@@ -1280,6 +1326,7 @@ class DailyPostCog(commands.Cog):
             except Exception:
                 recency = 0.1  # Unknown date gets low recency
             return engagement * recency
+
         results.sort(key=_engagement_score, reverse=True)
 
         if results:
@@ -1287,17 +1334,22 @@ class DailyPostCog(commands.Cog):
             for i, r in enumerate(results[:5]):
                 score = _engagement_score(r)
                 created = (r.get("created") or "")[:10]
-                logger.info("🦋   [%d] %d♥ %d🔄 (score=%.0f) %s — %s: %s",
-                            i, r["likes"], r["reposts"], score, created,
-                            r["author"], r["body"][:70])
+                logger.info(
+                    "🦋   [%d] %d♥ %d🔄 (score=%.0f) %s — %s: %s",
+                    i,
+                    r["likes"],
+                    r["reposts"],
+                    score,
+                    created,
+                    r["author"],
+                    r["body"][:70],
+                )
         else:
             logger.info("🦋 No Bluesky posts found matching criteria")
 
         return results[:10]  # Cap to avoid flooding the rating step
 
-    async def _rate_articles(
-        self, articles: List[Dict[str, Any]], audience_brief: str
-    ) -> List[int]:
+    async def _rate_articles(self, articles: List[Dict[str, Any]], audience_brief: str) -> List[int]:
         """LLM rates articles and returns indices of the top 3."""
         if not articles:
             return []
@@ -1312,7 +1364,9 @@ class DailyPostCog(commands.Cog):
                 likes = a.get("likes", 0)
                 reposts = a.get("reposts", 0)
                 created = (a.get("created") or "")[:10]
-                article_list += f"[{i}] {title}\n{snippet}\n{likes} likes, {reposts} reposts, posted {created}\nURL: {url}\n\n"
+                article_list += (
+                    f"[{i}] {title}\n{snippet}\n{likes} likes, {reposts} reposts, posted {created}\nURL: {url}\n\n"
+                )
             else:
                 article_list += f"[{i}] {title}\n{snippet}\nURL: {url}\n\n"
 
@@ -1336,6 +1390,7 @@ class DailyPostCog(commands.Cog):
         # Extract indices from the LLM response. Prefer clean lines with just
         # a number, but fall back to pulling any [N] or bare integer from the text.
         import re as _re
+
         indices: List[int] = []
 
         # First pass: numbers on their own line
@@ -1370,9 +1425,7 @@ class DailyPostCog(commands.Cog):
             logger.info("📊   #%d → [%d] %s", rank, idx, articles[idx].get("title", "?")[:80])
         return indices[:3]
 
-    async def _topic_already_discussed(
-        self, guild_id: int, title: str, snippet: str, days: int = 10
-    ) -> bool:
+    async def _topic_already_discussed(self, guild_id: int, title: str, snippet: str, days: int = 10) -> bool:
         """Check if this article's topic was already discussed on the server recently.
 
         Embeds the article title + snippet, searches RAG chunks for high-similarity
@@ -1401,6 +1454,7 @@ class DailyPostCog(commands.Cog):
             return False
 
         import sqlite3 as _sql
+
         conn = _sql.connect(db_path, check_same_thread=False)
         conn.row_factory = _sql.Row
         try:
@@ -1427,12 +1481,16 @@ class DailyPostCog(commands.Cog):
                 continue
             try:
                 from datetime import date
+
                 msg_date = date.fromisoformat(str(row["date"]).strip()[:10])
                 age_days = (date.today() - msg_date).days
                 if age_days <= days:
                     logger.info(
                         "🔍 Topic dedup: MATCH (sim=%.3f, %dd ago, #%s) — '%s'",
-                        sim, age_days, ch_name, chunk_text[:80],
+                        sim,
+                        age_days,
+                        ch_name,
+                        chunk_text[:80],
                     )
                     conn.close()
                     return True
@@ -1473,20 +1531,26 @@ class DailyPostCog(commands.Cog):
                 content = article.get("body", "")
                 pub_date = (article.get("created") or "")[:10] or None  # "2026-04-02T..."  → "2026-04-02"
                 post_url = article.get("post_url", "")
-                logger.info("📄   🦋 %s (%d♥, %d🔄) %s",
-                            article.get("author", "?"), article.get("likes", 0),
-                            article.get("reposts", 0), content[:80])
-                fetched.append({
-                    "url": post_url or url,
-                    "title": title,
-                    "snippet": content,
-                    "content": content,
-                    "pub_date": pub_date,
-                    "source": "bluesky",
-                    "author": article.get("author", ""),
-                    "likes": article.get("likes", 0),
-                    "embed_url": article.get("embed_url", ""),
-                })
+                logger.info(
+                    "📄   🦋 %s (%d♥, %d🔄) %s",
+                    article.get("author", "?"),
+                    article.get("likes", 0),
+                    article.get("reposts", 0),
+                    content[:80],
+                )
+                fetched.append(
+                    {
+                        "url": post_url or url,
+                        "title": title,
+                        "snippet": content,
+                        "content": content,
+                        "pub_date": pub_date,
+                        "source": "bluesky",
+                        "author": article.get("author", ""),
+                        "likes": article.get("likes", 0),
+                        "embed_url": article.get("embed_url", ""),
+                    }
+                )
             else:
                 # News article — fetch full content
                 result = await _fetch_article_content(url)
@@ -1498,14 +1562,16 @@ class DailyPostCog(commands.Cog):
                     content = article.get("body", "(content unavailable)")
                     pub_date = None
                     logger.info("📄   ⚠ %s (fetch failed, using snippet)", title[:70])
-                fetched.append({
-                    "url": url,
-                    "title": title,
-                    "snippet": article.get("body", ""),
-                    "content": content,
-                    "pub_date": pub_date,
-                    "source": "article",
-                })
+                fetched.append(
+                    {
+                        "url": url,
+                        "title": title,
+                        "snippet": article.get("body", ""),
+                        "content": content,
+                        "pub_date": pub_date,
+                        "source": "article",
+                    }
+                )
 
         # Filter out old articles and already-posted URLs.
         # Age threshold is configurable via DAILY_POST_MAX_AGE_DAYS (default 21).
@@ -1527,11 +1593,20 @@ class DailyPostCog(commands.Cog):
                 logger.debug("📄   ⏭ Already posted: %s", f["title"][:60])
                 continue
             # Combine all available text for date scanning
-            scan_text = " ".join(filter(None, [
-                f.get("title", ""), f.get("snippet", ""), f.get("content", ""),
-            ]))
+            scan_text = " ".join(
+                filter(
+                    None,
+                    [
+                        f.get("title", ""),
+                        f.get("snippet", ""),
+                        f.get("content", ""),
+                    ],
+                )
+            )
             age = _estimate_article_age_days(
-                pub_date=f.get("pub_date"), url=f.get("url", ""), text=scan_text,
+                pub_date=f.get("pub_date"),
+                url=f.get("url", ""),
+                text=scan_text,
             )
             if age is None:
                 if reject_no_date:
@@ -1565,10 +1640,7 @@ class DailyPostCog(commands.Cog):
         for i, f in enumerate(available):
             content_preview = f["content"][:2500]
             date_line = f"Published: {f['pub_date']}\n" if f.get("pub_date") else ""
-            articles_text += (
-                f"[{i}] {f['title']}\nURL: {f['url']}\n{date_line}"
-                f"Full content:\n{content_preview}\n\n"
-            )
+            articles_text += f"[{i}] {f['title']}\nURL: {f['url']}\n{date_line}" f"Full content:\n{content_preview}\n\n"
 
         pick_system = (
             "You are choosing which article to share in a Discord channel.\n\n"
@@ -1600,7 +1672,9 @@ class DailyPostCog(commands.Cog):
         if pick_result.strip().upper().startswith("SKIP"):
             fallback_enabled = os.getenv("DAILY_POST_FALLBACK_TO_TOP_RATED", "true").lower() == "true"
             if fallback_enabled:
-                logger.info("🏆 ⏭ LLM said SKIP — falling back to top-rated article (DAILY_POST_FALLBACK_TO_TOP_RATED=true)")
+                logger.info(
+                    "🏆 ⏭ LLM said SKIP — falling back to top-rated article (DAILY_POST_FALLBACK_TO_TOP_RATED=true)"
+                )
                 chosen_idx = 0
             else:
                 logger.info("🏆 ⏭ LLM declined all articles (SKIP)")
@@ -1615,12 +1689,15 @@ class DailyPostCog(commands.Cog):
 
         chosen = available[chosen_idx]
         is_bsky = chosen.get("source") == "bluesky"
-        logger.info("🏆 ✅ Winner: [%d] %s%s", chosen_idx, chosen["title"][:80],
-                     " (Bluesky)" if is_bsky else "")
+        logger.info("🏆 ✅ Winner: [%d] %s%s", chosen_idx, chosen["title"][:80], " (Bluesky)" if is_bsky else "")
         logger.info("🏆   URL: %s", chosen["url"])
         if is_bsky:
-            logger.info("🏆   Author: %s · %d♥ · %d🔄",
-                         chosen.get("author", "?"), chosen.get("likes", 0), chosen.get("reposts", 0))
+            logger.info(
+                "🏆   Author: %s · %d♥ · %d🔄",
+                chosen.get("author", "?"),
+                chosen.get("likes", 0),
+                chosen.get("reposts", 0),
+            )
             if chosen.get("embed_url"):
                 logger.info("🏆   Linked article: %s", chosen["embed_url"])
         else:
@@ -1726,19 +1803,25 @@ class DailyPostCog(commands.Cog):
                             "just more concisely.\n\n"
                             "Output ONLY the rewritten post. No preamble, no explanation, no quotes around it.",
                             commentary.strip(),
-                            temperature=0.3, max_tokens=2048,
+                            temperature=0.3,
+                            max_tokens=2048,
                         )
-                        shortened = shortened.strip('"\'').strip()
+                        shortened = shortened.strip("\"'").strip()
                         # Strip em dashes/hyphens used as dashes
                         shortened = shortened.replace("—", ",").replace("–", ",").replace(" - ", ", ")
                         if 20 < len(shortened) <= 295:
                             bsky_text = shortened
-                            logger.info("📰 🦋 Condensed commentary from %d → %d chars (attempt %d)",
-                                        original_len, len(shortened), attempt + 1)
+                            logger.info(
+                                "📰 🦋 Condensed commentary from %d → %d chars (attempt %d)",
+                                original_len,
+                                len(shortened),
+                                attempt + 1,
+                            )
                             break
                         else:
-                            logger.info("📰 🦋 Condense attempt %d produced %d chars, retrying...",
-                                        attempt + 1, len(shortened))
+                            logger.info(
+                                "📰 🦋 Condense attempt %d produced %d chars, retrying...", attempt + 1, len(shortened)
+                            )
                     except Exception as e:
                         logger.warning("📰 🦋 Condense attempt %d failed: %s", attempt + 1, e)
                 else:
@@ -1746,7 +1829,7 @@ class DailyPostCog(commands.Cog):
                     logger.warning("📰 🦋 LLM could not condense after 3 tries, truncating at sentence")
                     for i in range(290, 0, -1):
                         if bsky_text[i] in ".!?":
-                            bsky_text = bsky_text[:i + 1]
+                            bsky_text = bsky_text[: i + 1]
                             break
                     else:
                         bsky_text = bsky_text[:295]
@@ -1755,7 +1838,7 @@ class DailyPostCog(commands.Cog):
             if bsky_text and bsky_text[-1] not in ".!?":
                 for i in range(len(bsky_text) - 1, 0, -1):
                     if bsky_text[i] in ".!?":
-                        bsky_text = bsky_text[:i + 1]
+                        bsky_text = bsky_text[: i + 1]
                         break
 
             if len(bsky_text) < 20:
@@ -1764,6 +1847,7 @@ class DailyPostCog(commands.Cog):
 
             # Fetch og:image for thumbnail
             from soupy_bluesky import _fetch_og_image
+
             thumb_blob = None
             og_result = await _fetch_og_image(article_url)
             if og_result:
@@ -1781,12 +1865,11 @@ class DailyPostCog(commands.Cog):
 
             if result:
                 from soupy_bluesky import _post_url
+
                 post_url = _post_url(result.get("uri", ""))
                 logger.info("📰 🦋 Cross-posted to Bluesky: %s", post_url)
                 try:
-                    await bsky_cog._report_to_musing_channel(
-                        f"cross-posted to bluesky\n{post_url}"
-                    )
+                    await bsky_cog._report_to_musing_channel(f"cross-posted to bluesky\n{post_url}")
                 except Exception as e:
                     logger.debug("📰 Could not notify musing channel: %s", e)
             else:
@@ -1804,6 +1887,7 @@ class DailyPostCog(commands.Cog):
         """
         try:
             import time as _time
+
             _pipeline_start = _time.monotonic()
             logger.info("📰 ╔══════════════════════════════════════════════════╗")
             logger.info("📰 ║  DAILY POST PIPELINE — channel %s (attempt %d)", channel_id, attempt)
@@ -1871,9 +1955,7 @@ class DailyPostCog(commands.Cog):
                 bsky_cog = self.bot.get_cog("BlueskyEngageCog")
                 if bsky_cog is not None:
                     msg_link = getattr(sent_msg, "jump_url", "") or ""
-                    await bsky_cog._report_to_musing_channel(
-                        f"posted to #{channel.name}\n{msg_link}".strip()
-                    )
+                    await bsky_cog._report_to_musing_channel(f"posted to #{channel.name}\n{msg_link}".strip())
             except Exception as e:
                 logger.debug("📰 Could not notify musing channel: %s", e)
 
@@ -1884,11 +1966,13 @@ class DailyPostCog(commands.Cog):
             today_str = datetime.now(self.timezone).strftime("%Y-%m-%d")
             if channel_id not in self.history:
                 self.history[channel_id] = []
-            self.history[channel_id].append({
-                "url": url,
-                "title": title,
-                "date": today_str,
-            })
+            self.history[channel_id].append(
+                {
+                    "url": url,
+                    "title": title,
+                    "date": today_str,
+                }
+            )
             _save_history(self.history)
 
             # Update timer state
@@ -1924,9 +2008,7 @@ class DailyPostCog(commands.Cog):
     ) -> None:
         # Permission check
         if interaction.user.id not in self._owner_ids():
-            await interaction.response.send_message(
-                "You don't have permission to use this command.", ephemeral=True
-            )
+            await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -1965,6 +2047,7 @@ class DailyPostCog(commands.Cog):
 # ---------------------------------------------------------------------------
 # Extension setup
 # ---------------------------------------------------------------------------
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(DailyPostCog(bot))

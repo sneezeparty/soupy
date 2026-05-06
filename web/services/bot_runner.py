@@ -10,7 +10,6 @@ from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from .env_store import parse_env
 
-
 OutputCallback = Callable[[str], Awaitable[None]]
 
 
@@ -135,12 +134,8 @@ class BotRunner:
             else:
                 # Stream outputs via pipes
                 assert self._process.stdout and self._process.stderr
-                self._stdout_task = asyncio.create_task(
-                    self._stream(self._process.stdout, prefix="STDOUT")
-                )
-                self._stderr_task = asyncio.create_task(
-                    self._stream(self._process.stderr, prefix="STDERR")
-                )
+                self._stdout_task = asyncio.create_task(self._stream(self._process.stdout, prefix="STDOUT"))
+                self._stderr_task = asyncio.create_task(self._stream(self._process.stderr, prefix="STDERR"))
             await self._on_output(
                 f"[web] Started bot pid={self._process.pid} using {Path(entrypoint).name} at {self._start_time.isoformat()}"
             )
@@ -218,5 +213,3 @@ class BotRunner:
             return
         except Exception as exc:
             await self._on_output(f"[web] PTY stream error: {exc}")
-
-

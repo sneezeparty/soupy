@@ -235,9 +235,7 @@ class NonInteractiveUI(UI):
             raise
         valid = {v for v, _ in options}
         if value not in valid:
-            raise ValueError(
-                f"non-interactive answer for {label!r} = {value!r} not in {sorted(valid)}"
-            )
+            raise ValueError(f"non-interactive answer for {label!r} = {value!r} not in {sorted(valid)}")
         return value
 
     def confirm(self, label: str, *, default: bool = False) -> bool:  # type: ignore[override]

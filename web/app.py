@@ -11,20 +11,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-
 # ---------------------------------------------------------------------------
 # Colored logging (matches bot's CustomFormatter style)
 # ---------------------------------------------------------------------------
 
+
 class _WebFormatter(logging.Formatter):
     COLORS = {
-        "DEBUG": "\033[95m", "INFO": "\033[92m",
-        "WARNING": "\033[93m", "ERROR": "\033[91m", "CRITICAL": "\033[41m",
+        "DEBUG": "\033[95m",
+        "INFO": "\033[92m",
+        "WARNING": "\033[93m",
+        "ERROR": "\033[91m",
+        "CRITICAL": "\033[41m",
     }
     RESET = "\033[0m"
-    TS = "\033[36m"      # cyan timestamp
-    NAME = "\033[94m"    # blue logger name
-    ARROW = "\033[90m"   # grey arrow
+    TS = "\033[36m"  # cyan timestamp
+    NAME = "\033[94m"  # blue logger name
+    ARROW = "\033[90m"  # grey arrow
 
     def format(self, record):
         ts = self.formatTime(record, self.datefmt)
@@ -34,8 +37,7 @@ class _WebFormatter(logging.Formatter):
             f"{lc}({record.levelname}){self.RESET} "
             f"{self.NAME}{record.name}{self.RESET} "
             f"{self.ARROW}=>{self.RESET} "
-            f"{record.getMessage()}"
-            + (f"\n{self.formatException(record.exc_info)}" if record.exc_info else "")
+            f"{record.getMessage()}" + (f"\n{self.formatException(record.exc_info)}" if record.exc_info else "")
         )
 
     def formatTime(self, record, datefmt=None):
@@ -61,8 +63,12 @@ _log_dir = Path("logs")
 _log_dir.mkdir(exist_ok=True)
 try:
     from logging.handlers import RotatingFileHandler
+
     _web_file_handler = RotatingFileHandler(
-        _log_dir / "soupy.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+        _log_dir / "soupy.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
     )
     _web_file_handler.setFormatter(_file_fmt)
 except Exception:
@@ -92,7 +98,6 @@ from .services.bot_runner import BotRunner
 from .services.log_stream import WebsocketManager
 from .services.env_store import parse_env, write_env
 
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOGS_DIR = BASE_DIR / "logs"
 
@@ -109,6 +114,7 @@ def _configure_soupy_database_console_logging() -> None:
     lg.addHandler(h)
     lg.propagate = False
     lg._soupy_console_configured = True  # type: ignore[attr-defined]
+
 
 # Same env file as the Discord bot (RAG reindex, OPENAI_BASE_URL, etc.)
 load_dotenv(BASE_DIR / ".env-stable")
@@ -211,9 +217,7 @@ def _merge_sqlite_message_stats_for_summary(
             )
             for r in cur.fetchall():
                 try:
-                    dt = datetime.strptime(
-                        f'{r["date"]} {r["time"]}', "%Y-%m-%d %H:%M:%S"
-                    ).replace(tzinfo=timezone.utc)
+                    dt = datetime.strptime(f'{r["date"]} {r["time"]}', "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                     te = dt.timestamp()
                 except Exception:
                     continue
@@ -223,9 +227,7 @@ def _merge_sqlite_message_stats_for_summary(
                 if 0 <= slot < 24:
                     hourly_msg[23 - slot] += 1
 
-            cur.execute(
-                "SELECT user_id, username, COUNT(*) AS n FROM messages GROUP BY user_id, username"
-            )
+            cur.execute("SELECT user_id, username, COUNT(*) AS n FROM messages GROUP BY user_id, username")
             for r in cur.fetchall():
                 uid = int(r["user_id"])
                 uname = r["username"] or "Unknown"
@@ -272,9 +274,7 @@ def _merge_sqlite_message_stats_for_summary(
     channels_ranked = sorted(ch_acc.items(), key=lambda item: -item[1]["count"])[:limit]
     channel_id_to_name = {str(cid): data["name"] for cid, data in ch_acc.items()}
 
-    hour_labels = [
-        (now_naive_utc - timedelta(hours=23 - i)).strftime("%m-%d %H:00") for i in range(24)
-    ]
+    hour_labels = [(now_naive_utc - timedelta(hours=23 - i)).strftime("%m-%d %H:00") for i in range(24)]
 
     return {
         "total_messages": total_messages,
@@ -299,7 +299,7 @@ def create_app() -> FastAPI:
 
     # Get control panel title from environment
     control_panel_title = os.getenv("WEB_CONTROL_PANEL_TITLE", "Soupy Control")
-    
+
     # Get timezone from environment (default to America/Los_Angeles for California)
     display_timezone_str = os.getenv("TIMEZONE", "America/Los_Angeles")
     try:
@@ -309,7 +309,7 @@ def create_app() -> FastAPI:
         logging.warning(f"Invalid timezone '{display_timezone_str}', falling back to UTC")
         display_timezone = ZoneInfo("UTC")
         display_timezone_str = "UTC"
-    
+
     # Get color scheme from environment
     colors = {
         "page_bg": os.getenv("WEB_COLOR_PAGE_BG", "#11191f"),
@@ -344,7 +344,7 @@ def create_app() -> FastAPI:
 
     # Templates and static
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
-    
+
     # Add global context for templates
     templates.env.globals["control_panel_title"] = control_panel_title
     templates.env.globals["colors"] = colors
@@ -385,6 +385,7 @@ def create_app() -> FastAPI:
 
     # Reduce log noise: thumb 304s, noisy dashboard polling endpoints
     try:
+
         class SuppressNoisyAccess(logging.Filter):
             def filter(self, record: logging.LogRecord) -> bool:
                 try:
@@ -427,6 +428,7 @@ def create_app() -> FastAPI:
     async def api_archive_images(limit: int = 50, offset: int = 0, kind: str | None = None):
         import json
         from pathlib import Path
+
         idx = media_dir / "images" / "index.jsonl"
         all_items = []
         if idx.exists():
@@ -453,6 +455,7 @@ def create_app() -> FastAPI:
     @app.get("/api/archive/messages")
     async def api_archive_messages(limit: int = 50, offset: int = 0):
         import json
+
         log = media_dir / "messages.jsonl"
         all_items = []
         if log.exists():
@@ -467,7 +470,7 @@ def create_app() -> FastAPI:
                 pass
         all_items.reverse()
         total = len(all_items)
-        items = all_items[offset:offset + limit]
+        items = all_items[offset : offset + limit]
         return JSONResponse({"items": items, "total": total})
 
     @app.get("/api/archive/message_by_image")
@@ -479,6 +482,7 @@ def create_app() -> FastAPI:
         """
         import json
         import re
+
         # Basic filename validation to prevent traversal or odd inputs
         if not re.fullmatch(r"[A-Za-z0-9._-]+", filename or ""):
             return JSONResponse({"ok": False, "message": "Invalid filename"}, status_code=400)
@@ -500,19 +504,22 @@ def create_app() -> FastAPI:
                 continue
             if obj.get("image_filename") == filename:
                 # Return minimal useful fields
-                return JSONResponse({
-                    "ok": True,
-                    "content": obj.get("content"),
-                    "event_type": obj.get("event_type"),
-                    "ts": obj.get("ts"),
-                    "username": obj.get("username"),
-                })
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "content": obj.get("content"),
+                        "event_type": obj.get("event_type"),
+                        "ts": obj.get("ts"),
+                        "username": obj.get("username"),
+                    }
+                )
 
         return JSONResponse({"ok": False, "message": "No matching message found"}, status_code=404)
 
     @app.get("/api/stats/raw")
     async def api_stats_raw():
         import json
+
         stats_path = BASE_DIR / "user_stats.json"
         if not stats_path.exists():
             return JSONResponse({}, status_code=200)
@@ -589,15 +596,19 @@ def create_app() -> FastAPI:
                 chat_rows = []
                 for _uid, u in data.items():
                     servers = u.get("servers", {})
-                    scope = (servers.get(server_id) if server_id else servers.get("global") or {})
-                    rows.append({
-                        "username": u.get("username", "Unknown"),
-                        "images_generated": int(scope.get("images_generated", 0)),
-                    })
-                    chat_rows.append({
-                        "username": u.get("username", "Unknown"),
-                        "chat_responses": int(scope.get("chat_responses", 0)),
-                    })
+                    scope = servers.get(server_id) if server_id else servers.get("global") or {}
+                    rows.append(
+                        {
+                            "username": u.get("username", "Unknown"),
+                            "images_generated": int(scope.get("images_generated", 0)),
+                        }
+                    )
+                    chat_rows.append(
+                        {
+                            "username": u.get("username", "Unknown"),
+                            "chat_responses": int(scope.get("chat_responses", 0)),
+                        }
+                    )
 
                 # Totals from global if available
                 for _uid, u in data.items():
@@ -717,9 +728,7 @@ def create_app() -> FastAPI:
                                 vis_by_day[day_key] += 1
                             user_vision_counter[username] += 1
 
-                hour_labels = [
-                    (now_dt - datetime.timedelta(hours=23 - i)).strftime("%m-%d %H:00") for i in range(24)
-                ]
+                hour_labels = [(now_dt - datetime.timedelta(hours=23 - i)).strftime("%m-%d %H:00") for i in range(24)]
                 result["hourly_24h"]["labels"] = hour_labels
                 result["hourly_24h"]["messages"] = hourly_msg
                 result["hourly_24h"]["images_generated"] = hourly_gen
@@ -766,7 +775,9 @@ def create_app() -> FastAPI:
         result["totals"]["images_generated"] = max(result["totals"]["images_generated"], gen_total)
         result["totals"]["images_analyzed"] = vis_total
         # Total images = generated (best available) + analyzed
-        result["totals"]["images"] = int(result["totals"]["images_generated"]) + int(result["totals"]["images_analyzed"]) 
+        result["totals"]["images"] = int(result["totals"]["images_generated"]) + int(
+            result["totals"]["images_analyzed"]
+        )
 
         # Finalize series arrays
         msgs7 = [messages_by_day[d] for d in days_list]
@@ -844,9 +855,7 @@ def create_app() -> FastAPI:
         if not result["top"]["users_by_images"]:
             result["top"]["users_by_images"] = [
                 {"username": u, "images_generated": c} for u, c in user_images_index_counter.most_common(limit)
-            ] or [
-                {"username": u, "images_generated": c} for u, c in user_image_msg_counter.most_common(limit)
-            ]
+            ] or [{"username": u, "images_generated": c} for u, c in user_image_msg_counter.most_common(limit)]
         result["top"]["users_by_vision"] = [
             {"username": u, "vision": c} for u, c in user_vision_counter.most_common(limit)
         ]
@@ -871,6 +880,7 @@ def create_app() -> FastAPI:
         import json
         import re
         from tempfile import NamedTemporaryFile
+
         # Basic filename validation to prevent traversal
         if not re.fullmatch(r"[A-Za-z0-9._-]+", filename or ""):
             return JSONResponse({"ok": False, "message": "Invalid filename"}, status_code=400)
@@ -892,7 +902,10 @@ def create_app() -> FastAPI:
         # Rewrite index.jsonl excluding this filename
         try:
             if idx_path.exists():
-                with open(idx_path, "r", encoding="utf-8") as src, NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp:
+                with (
+                    open(idx_path, "r", encoding="utf-8") as src,
+                    NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp,
+                ):
                     for line in src:
                         try:
                             obj = json.loads(line)
@@ -974,7 +987,11 @@ def create_app() -> FastAPI:
                         ) as fallback_resp:
                             if fallback_resp.status != 200:
                                 return JSONResponse(
-                                    {"ok": False, "models": [], "message": f"LM Studio returned HTTP {fallback_resp.status}"},
+                                    {
+                                        "ok": False,
+                                        "models": [],
+                                        "message": f"LM Studio returned HTTP {fallback_resp.status}",
+                                    },
                                     status_code=502,
                                 )
                             fallback_data = await fallback_resp.json()
@@ -1013,20 +1030,24 @@ def create_app() -> FastAPI:
                     label_parts.append("loaded")
 
                 label = f"{key} ({', '.join(label_parts)})" if label_parts else key
-                model_entries.append({
-                    "key": key,
-                    "label": label,
-                    "type": model_type,
-                    "quant": quant_name,
-                    "size_mb": size_mb,
-                    "loaded": loaded,
-                })
+                model_entries.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "type": model_type,
+                        "quant": quant_name,
+                        "size_mb": size_mb,
+                        "loaded": loaded,
+                    }
+                )
 
             model_entries.sort(key=lambda e: e["key"].lower())
-            logger.info("🔄 Found %d model(s) (%d LLM, %d embedding)",
-                         len(model_entries),
-                         sum(1 for e in model_entries if e["type"] == "llm"),
-                         sum(1 for e in model_entries if e["type"] == "embedding"))
+            logger.info(
+                "🔄 Found %d model(s) (%d LLM, %d embedding)",
+                len(model_entries),
+                sum(1 for e in model_entries if e["type"] == "llm"),
+                sum(1 for e in model_entries if e["type"] == "embedding"),
+            )
             return JSONResponse({"ok": True, "models": model_entries})
 
         except Exception as exc:
@@ -1144,17 +1165,22 @@ def create_app() -> FastAPI:
 
             # Step 4: Update .env-stable with new model and context window
             logger.info("🔄 Step 4: Updating .env-stable...")
-            write_env(env_path, {
-                "LOCAL_CHAT": new_model,
-                "CONTEXT_WINDOW_TOKENS": str(context_length),
-            })
+            write_env(
+                env_path,
+                {
+                    "LOCAL_CHAT": new_model,
+                    "CONTEXT_WINDOW_TOKENS": str(context_length),
+                },
+            )
 
             logger.info("🔄 ✅ Model switch complete: %s (%d ctx)", new_model, context_length)
-            return JSONResponse({
-                "ok": True,
-                "message": f"Loaded {new_model} with {context_length} context",
-                "load_config": load_result,
-            })
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "message": f"Loaded {new_model} with {context_length} context",
+                    "load_config": load_result,
+                }
+            )
 
         except Exception as exc:
             logger.error("🔄 ❌ Model switch failed: %s", exc, exc_info=True)
@@ -1169,6 +1195,7 @@ def create_app() -> FastAPI:
         Reads from data/bot_dashboard.json (written by the bot process).
         """
         import json as _json
+
         data = {"ok": True}
 
         # Bot running status
@@ -1192,6 +1219,7 @@ def create_app() -> FastAPI:
             if os.path.exists(hist_path):
                 hist = _json.loads(open(hist_path).read())
                 from datetime import date
+
                 today = date.today().isoformat()
                 posted_today = {}
                 for ch_id, entries in hist.items():
@@ -1209,6 +1237,7 @@ def create_app() -> FastAPI:
                 lines = [l for l in open(acc_path).read().splitlines() if l.strip()]
                 data["self_md_pending"] = len(lines)
             from soupy_database.runtime_flags import read_runtime_flags
+
             flags = read_runtime_flags()
             data["self_md_enabled"] = bool(
                 os.getenv("SELF_MD_ENABLED", "false").strip().lower() in ("1", "true", "yes")
@@ -1238,8 +1267,14 @@ def create_app() -> FastAPI:
         result = {
             "ok": True,
             "today": today,
-            "bluesky": {"replies_today": 0, "posts_today": 0, "reposts_today": 0,
-                        "replies": [], "posts": [], "reposts": []},
+            "bluesky": {
+                "replies_today": 0,
+                "posts_today": 0,
+                "reposts_today": 0,
+                "replies": [],
+                "posts": [],
+                "reposts": [],
+            },
             "daily_posts": {"posts_today": 0, "posts": []},
         }
 
@@ -1251,18 +1286,15 @@ def create_app() -> FastAPI:
 
                 comments = bh.get("comments", [])
                 result["bluesky"]["replies"] = comments[-50:]
-                result["bluesky"]["replies_today"] = sum(
-                    1 for c in comments if c.get("ts", "").startswith(today))
+                result["bluesky"]["replies_today"] = sum(1 for c in comments if c.get("ts", "").startswith(today))
 
                 posts = bh.get("posts", [])
                 result["bluesky"]["posts"] = posts[-50:]
-                result["bluesky"]["posts_today"] = sum(
-                    1 for p in posts if p.get("ts", "").startswith(today))
+                result["bluesky"]["posts_today"] = sum(1 for p in posts if p.get("ts", "").startswith(today))
 
                 reposts = bh.get("reposts", [])
                 result["bluesky"]["reposts"] = reposts[-50:]
-                result["bluesky"]["reposts_today"] = sum(
-                    1 for r in reposts if r.get("ts", "").startswith(today))
+                result["bluesky"]["reposts_today"] = sum(1 for r in reposts if r.get("ts", "").startswith(today))
         except Exception:
             pass
 
@@ -1279,8 +1311,7 @@ def create_app() -> FastAPI:
                 # Sort by date descending
                 all_posts.sort(key=lambda x: x.get("date", ""), reverse=True)
                 result["daily_posts"]["posts"] = all_posts[:50]
-                result["daily_posts"]["posts_today"] = sum(
-                    1 for p in all_posts if p.get("date") == today)
+                result["daily_posts"]["posts_today"] = sum(1 for p in all_posts if p.get("date") == today)
         except Exception:
             pass
 
@@ -1297,6 +1328,7 @@ def create_app() -> FastAPI:
         """Return all known channels for a guild from the SQLite archive."""
         import sqlite3 as _sql
         from soupy_database.database import get_db_path
+
         db_path = get_db_path(guild_id)
         if not os.path.exists(db_path):
             return JSONResponse({"ok": False, "channels": []})
@@ -1304,17 +1336,19 @@ def create_app() -> FastAPI:
         conn.row_factory = _sql.Row
         try:
             cur = conn.cursor()
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT c.channel_id, c.channel_name, COUNT(m.message_id) AS msg_count
                 FROM channels c
                 LEFT JOIN messages m ON m.channel_id = c.channel_id
                 GROUP BY c.channel_id
                 ORDER BY msg_count DESC
-                """
-            )
+                """)
             channels = [
-                {"id": str(r["channel_id"]), "name": r["channel_name"] or str(r["channel_id"]), "messages": r["msg_count"]}
+                {
+                    "id": str(r["channel_id"]),
+                    "name": r["channel_name"] or str(r["channel_id"]),
+                    "messages": r["msg_count"],
+                }
                 for r in cur.fetchall()
             ]
         finally:
@@ -1630,8 +1664,7 @@ def create_app() -> FastAPI:
             ensure_user_profile_schema(conn)
             cur.execute("SELECT COUNT(*) AS c FROM user_profile_summaries")
             profile_row_count = int(cur.fetchone()["c"])
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT ups.user_id,
                        ups.nickname_hint,
                        ups.updated_at,
@@ -1648,8 +1681,7 @@ def create_app() -> FastAPI:
                        ) AS label
                 FROM user_profile_summaries ups
                 ORDER BY LOWER(TRIM(COALESCE(ups.nickname_hint, ''))), ups.user_id
-                """
-            )
+                """)
             from_profiles: list[Dict[str, Any]] = []
             for r in cur.fetchall():
                 uid = int(r["user_id"])
@@ -1708,11 +1740,12 @@ def create_app() -> FastAPI:
             from soupy_database import get_stats
             import os
             from pathlib import Path
-            
+
             # Get active scans (try to import, but handle if bot isn't running)
             active = {}
             try:
                 from soupy_database import get_active_scans, get_stats
+
                 active_scans = get_active_scans()
                 for guild_id, task in active_scans.items():
                     if not task.done():
@@ -1724,17 +1757,17 @@ def create_app() -> FastAPI:
                             "guild_name": guild_name,
                             "running": True,
                             "done": task.done(),
-                            "cancelled": task.cancelled()
+                            "cancelled": task.cancelled(),
                         }
             except (ImportError, AttributeError):
                 # Bot module not available or active_scans not defined
                 pass
-            
+
             # Get all databases
             db_dir = os.getenv("SOUPY_DB_DIR", os.path.join(BASE_DIR, "soupy_database", "databases"))
             db_path = Path(db_dir)
             databases = []
-            
+
             if db_path.exists():
                 for db_file in db_path.glob("guild_*.db"):
                     try:
@@ -1743,29 +1776,26 @@ def create_app() -> FastAPI:
                         guild_id = int(guild_id_str)
                         stats = get_stats(guild_id)
                         if stats["exists"]:
-                            databases.append({
-                                "guild_id": str(guild_id),
-                                "guild_name": stats.get("guild_name"),
-                                "total_messages": stats["total_messages"],
-                                "total_channels": stats["total_channels"],
-                                "last_scan": stats["last_scan"],
-                                "archive_scan_interval_minutes": stats.get(
-                                    "archive_scan_interval_minutes", 0
-                                ),
-                                "file_size": db_file.stat().st_size if db_file.exists() else 0
-                            })
+                            databases.append(
+                                {
+                                    "guild_id": str(guild_id),
+                                    "guild_name": stats.get("guild_name"),
+                                    "total_messages": stats["total_messages"],
+                                    "total_channels": stats["total_channels"],
+                                    "last_scan": stats["last_scan"],
+                                    "archive_scan_interval_minutes": stats.get("archive_scan_interval_minutes", 0),
+                                    "file_size": db_file.stat().st_size if db_file.exists() else 0,
+                                }
+                            )
                     except (ValueError, Exception):
                         continue
-            
-            return JSONResponse({
-                "ok": True,
-                "active_scans": active,
-                "databases": databases,
-                "total_databases": len(databases)
-            })
+
+            return JSONResponse(
+                {"ok": True, "active_scans": active, "databases": databases, "total_databases": len(databases)}
+            )
         except Exception as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-    
+
     @app.get("/api/database/stats/{guild_id}")
     async def api_database_stats(guild_id: str):
         """Get detailed stats for a specific server database."""
@@ -1775,7 +1805,7 @@ def create_app() -> FastAPI:
             from datetime import datetime, timedelta
             from collections import defaultdict
             import os
-            
+
             # Get display timezone (from app context or env)
             display_tz_str = os.getenv("TIMEZONE", "America/Los_Angeles")
             try:
@@ -1783,72 +1813,77 @@ def create_app() -> FastAPI:
             except Exception:
                 display_tz = ZoneInfo("UTC")
                 display_tz_str = "UTC"
-            
+
             guild_id_int = int(guild_id)
             stats = get_stats(guild_id_int)
-            
+
             if not stats["exists"]:
                 return JSONResponse({"ok": False, "message": "Database not found"}, status_code=404)
-            
+
             # Get additional stats from database
             from soupy_database.database import get_db_path
+
             db_path = get_db_path(guild_id_int)
-            
+
             detailed_stats = {
                 "guild_id": guild_id,
                 "total_messages": stats["total_messages"],
                 "total_channels": stats["total_channels"],
                 "last_scan": stats["last_scan"],
             }
-            
+
             # Get file size
             if os.path.exists(db_path):
                 detailed_stats["file_size"] = os.path.getsize(db_path)
             else:
                 detailed_stats["file_size"] = 0
-            
+
             # Get scan history
             try:
                 conn = sqlite3.connect(db_path, check_same_thread=False)
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                
+
                 cursor.execute("""
                     SELECT scan_type, last_scan_time, messages_scanned, created_at
                     FROM scan_metadata
                     ORDER BY last_scan_time DESC
                     LIMIT 10
                 """)
-                
+
                 scan_history = []
                 for row in cursor.fetchall():
-                    scan_history.append({
-                        "scan_type": row["scan_type"],
-                        "last_scan_time": row["last_scan_time"],
-                        "messages_scanned": row["messages_scanned"],
-                        "created_at": row["created_at"]
-                    })
-                
+                    scan_history.append(
+                        {
+                            "scan_type": row["scan_type"],
+                            "last_scan_time": row["last_scan_time"],
+                            "messages_scanned": row["messages_scanned"],
+                            "created_at": row["created_at"],
+                        }
+                    )
+
                 detailed_stats["scan_history"] = scan_history
-                
+
                 # Get total scan count
                 cursor.execute("SELECT COUNT(*) as count FROM scan_metadata")
                 detailed_stats["total_scans"] = cursor.fetchone()["count"]
-                
+
                 # Get image/URL stats
                 cursor.execute("SELECT COUNT(*) as count FROM messages WHERE image_description IS NOT NULL")
                 detailed_stats["messages_with_images"] = cursor.fetchone()["count"]
-                
+
                 cursor.execute("SELECT COUNT(*) as count FROM messages WHERE url_summary IS NOT NULL")
                 detailed_stats["messages_with_urls"] = cursor.fetchone()["count"]
-                
-                cursor.execute("SELECT COUNT(*) as count FROM messages WHERE image_description IS NOT NULL AND url_summary IS NOT NULL")
+
+                cursor.execute(
+                    "SELECT COUNT(*) as count FROM messages WHERE image_description IS NOT NULL AND url_summary IS NOT NULL"
+                )
                 detailed_stats["messages_with_both"] = cursor.fetchone()["count"]
-                
+
                 # Get unique users count
                 cursor.execute("SELECT COUNT(DISTINCT user_id) as count FROM messages")
                 detailed_stats["unique_users"] = cursor.fetchone()["count"]
-                
+
                 # Get channel stats (all channels, not just top 20)
                 cursor.execute("""
                     SELECT channel_id, channel_name, COUNT(*) as message_count
@@ -1856,18 +1891,20 @@ def create_app() -> FastAPI:
                     GROUP BY channel_id, channel_name
                     ORDER BY message_count DESC
                 """)
-                
+
                 channel_stats = []
                 for row in cursor.fetchall():
-                    channel_stats.append({
-                        "channel_id": str(row["channel_id"]),
-                        "channel_name": row["channel_name"],
-                        "message_count": row["message_count"]
-                    })
-                
+                    channel_stats.append(
+                        {
+                            "channel_id": str(row["channel_id"]),
+                            "channel_name": row["channel_name"],
+                            "message_count": row["message_count"],
+                        }
+                    )
+
                 detailed_stats["channels"] = channel_stats
                 detailed_stats["top_channels"] = channel_stats[:20]  # Keep for backward compatibility
-                
+
                 # Get user stats (all users, not just top 20)
                 cursor.execute("""
                     SELECT user_id, username, COUNT(*) as message_count
@@ -1875,47 +1912,49 @@ def create_app() -> FastAPI:
                     GROUP BY user_id, username
                     ORDER BY message_count DESC
                 """)
-                
+
                 user_stats = []
                 for row in cursor.fetchall():
-                    user_stats.append({
-                        "user_id": str(row["user_id"]),
-                        "username": row["username"],
-                        "message_count": row["message_count"]
-                    })
-                
+                    user_stats.append(
+                        {
+                            "user_id": str(row["user_id"]),
+                            "username": row["username"],
+                            "message_count": row["message_count"],
+                        }
+                    )
+
                 detailed_stats["users"] = user_stats
                 detailed_stats["top_users"] = user_stats[:20]  # Keep for backward compatibility
-                
+
                 # Get date range
                 cursor.execute("""
                     SELECT MIN(date || ' ' || time) as earliest, MAX(date || ' ' || time) as latest
                     FROM messages
                 """)
-                
+
                 date_range = cursor.fetchone()
                 if date_range and date_range["earliest"]:
                     # Parse dates (stored as UTC in database)
                     earliest_str = date_range["earliest"]
                     latest_str = date_range["latest"]
-                    earliest_utc = datetime.strptime(earliest_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    latest_utc = datetime.strptime(latest_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                    
+                    earliest_utc = datetime.strptime(earliest_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    latest_utc = datetime.strptime(latest_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
                     # Convert to display timezone
                     earliest_local = earliest_utc.astimezone(display_tz)
                     latest_local = latest_utc.astimezone(display_tz)
-                    
+
                     days_span = (latest_utc - earliest_utc).days
                     detailed_stats["date_range"] = {
-                        "earliest": earliest_local.strftime('%Y-%m-%d %H:%M:%S'),
-                        "latest": latest_local.strftime('%Y-%m-%d %H:%M:%S'),
+                        "earliest": earliest_local.strftime("%Y-%m-%d %H:%M:%S"),
+                        "latest": latest_local.strftime("%Y-%m-%d %H:%M:%S"),
                         "earliest_utc": earliest_str,
                         "latest_utc": latest_str,
                         "timezone": display_tz_str,
-                        "days_span": days_span
+                        "days_span": days_span,
                     }
                     detailed_stats["avg_messages_per_day"] = stats["total_messages"] / days_span if days_span > 0 else 0
-                
+
                 # Get messages over time (for charts) - daily aggregation
                 # Convert dates from UTC to display timezone
                 cursor.execute("""
@@ -1924,19 +1963,16 @@ def create_app() -> FastAPI:
                     GROUP BY date
                     ORDER BY date ASC
                 """)
-                
+
                 daily_messages = []
                 for row in cursor.fetchall():
                     # Date is stored as UTC date, but we want to show it in local timezone
                     # For display purposes, we'll keep the UTC date but note the timezone
-                    daily_messages.append({
-                        "date": row["date"],
-                        "count": row["message_count"]
-                    })
-                
+                    daily_messages.append({"date": row["date"], "count": row["message_count"]})
+
                 detailed_stats["daily_messages"] = daily_messages
                 detailed_stats["daily_messages_timezone"] = display_tz_str
-                
+
                 # Get messages by hour of day (0-23) - convert from UTC to display timezone
                 cursor.execute("""
                     SELECT date, time, COUNT(*) as message_count
@@ -1944,12 +1980,12 @@ def create_app() -> FastAPI:
                     WHERE time IS NOT NULL AND LENGTH(time) >= 2
                     GROUP BY date, time
                 """)
-                
+
                 hourly_messages = [0] * 24
                 for row in cursor.fetchall():
                     try:
                         # Parse UTC datetime from database
-                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", '%Y-%m-%d %H:%M:%S')
+                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", "%Y-%m-%d %H:%M:%S")
                         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
                         # Convert to display timezone
                         dt_local = dt_utc.astimezone(display_tz)
@@ -1958,10 +1994,10 @@ def create_app() -> FastAPI:
                             hourly_messages[hour] += row["message_count"]
                     except Exception:
                         pass
-                
+
                 detailed_stats["hourly_messages"] = hourly_messages
                 detailed_stats["hourly_messages_timezone"] = display_tz_str
-                
+
                 # Get messages by day of week (0=Monday, 6=Sunday) - convert from UTC to display timezone
                 cursor.execute("""
                     SELECT date, time, COUNT(*) as message_count
@@ -1969,12 +2005,12 @@ def create_app() -> FastAPI:
                     WHERE time IS NOT NULL AND LENGTH(time) >= 2
                     GROUP BY date, time
                 """)
-                
+
                 weekday_messages = [0] * 7
                 for row in cursor.fetchall():
                     try:
                         # Parse UTC datetime from database
-                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", '%Y-%m-%d %H:%M:%S')
+                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", "%Y-%m-%d %H:%M:%S")
                         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
                         # Convert to display timezone
                         dt_local = dt_utc.astimezone(display_tz)
@@ -1982,13 +2018,13 @@ def create_app() -> FastAPI:
                         weekday_messages[weekday] += row["message_count"]
                     except Exception:
                         pass
-                
+
                 detailed_stats["weekday_messages"] = weekday_messages
                 detailed_stats["weekday_messages_timezone"] = display_tz_str
-                
+
                 # Get user activity patterns (hourly activity per user) - convert from UTC to display timezone
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         user_id,
                         username,
                         date,
@@ -1998,13 +2034,13 @@ def create_app() -> FastAPI:
                     WHERE time IS NOT NULL AND LENGTH(time) >= 2
                     GROUP BY user_id, username, date, time
                 """)
-                
+
                 user_hourly_activity = defaultdict(lambda: defaultdict(int))
                 for row in cursor.fetchall():
                     try:
                         user_id = str(row["user_id"])
                         # Parse UTC datetime from database
-                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", '%Y-%m-%d %H:%M:%S')
+                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", "%Y-%m-%d %H:%M:%S")
                         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
                         # Convert to display timezone
                         dt_local = dt_utc.astimezone(display_tz)
@@ -2013,7 +2049,7 @@ def create_app() -> FastAPI:
                             user_hourly_activity[user_id][hour] += row["message_count"]
                     except Exception:
                         pass
-                
+
                 # Convert to list format for JSON
                 user_activity_list = []
                 for user_id, hourly_data in user_hourly_activity.items():
@@ -2024,21 +2060,23 @@ def create_app() -> FastAPI:
                     cursor.execute("SELECT username FROM messages WHERE user_id = ? LIMIT 1", (int(user_id),))
                     username_row = cursor.fetchone()
                     username = username_row["username"] if username_row else f"User {user_id}"
-                    user_activity_list.append({
-                        "user_id": user_id,
-                        "username": username,
-                        "hourly_activity": hours,
-                        "total_messages": sum(hours)
-                    })
-                
+                    user_activity_list.append(
+                        {
+                            "user_id": user_id,
+                            "username": username,
+                            "hourly_activity": hours,
+                            "total_messages": sum(hours),
+                        }
+                    )
+
                 # Sort by total messages descending
                 user_activity_list.sort(key=lambda x: x["total_messages"], reverse=True)
                 detailed_stats["user_hourly_activity"] = user_activity_list[:20]  # Top 20 users
                 detailed_stats["user_hourly_activity_timezone"] = display_tz_str
-                
+
                 # Get channel activity by hour - convert from UTC to display timezone
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         channel_id,
                         channel_name,
                         date,
@@ -2048,14 +2086,14 @@ def create_app() -> FastAPI:
                     WHERE time IS NOT NULL AND LENGTH(time) >= 2
                     GROUP BY channel_id, channel_name, date, time
                 """)
-                
+
                 channel_hourly_activity = defaultdict(lambda: {"name": "", "hours": [0] * 24})
                 for row in cursor.fetchall():
                     try:
                         channel_id = str(row["channel_id"])
                         channel_hourly_activity[channel_id]["name"] = row["channel_name"]
                         # Parse UTC datetime from database
-                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", '%Y-%m-%d %H:%M:%S')
+                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", "%Y-%m-%d %H:%M:%S")
                         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
                         # Convert to display timezone
                         dt_local = dt_utc.astimezone(display_tz)
@@ -2064,27 +2102,29 @@ def create_app() -> FastAPI:
                             channel_hourly_activity[channel_id]["hours"][hour] += row["message_count"]
                     except Exception:
                         pass
-                
+
                 # Convert to list format
                 channel_activity_list = []
                 for channel_id, data in channel_hourly_activity.items():
                     total = sum(data["hours"])
-                    channel_activity_list.append({
-                        "channel_id": channel_id,
-                        "channel_name": data["name"],
-                        "hourly_activity": data["hours"],
-                        "total_messages": total,
-                        "peak_hour": data["hours"].index(max(data["hours"])) if max(data["hours"]) > 0 else None
-                    })
-                
+                    channel_activity_list.append(
+                        {
+                            "channel_id": channel_id,
+                            "channel_name": data["name"],
+                            "hourly_activity": data["hours"],
+                            "total_messages": total,
+                            "peak_hour": data["hours"].index(max(data["hours"])) if max(data["hours"]) > 0 else None,
+                        }
+                    )
+
                 # Sort by total messages descending
                 channel_activity_list.sort(key=lambda x: x["total_messages"], reverse=True)
                 detailed_stats["channel_hourly_activity"] = channel_activity_list
                 detailed_stats["channel_hourly_activity_timezone"] = display_tz_str
-                
+
                 # Get user activity by day of week - convert from UTC to display timezone
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         user_id,
                         username,
                         date,
@@ -2094,14 +2134,14 @@ def create_app() -> FastAPI:
                     WHERE time IS NOT NULL AND LENGTH(time) >= 2
                     GROUP BY user_id, username, date, time
                 """)
-                
+
                 user_weekday_activity = defaultdict(lambda: {"username": "", "weekdays": [0] * 7})
                 for row in cursor.fetchall():
                     user_id = str(row["user_id"])
                     user_weekday_activity[user_id]["username"] = row["username"]
                     try:
                         # Parse UTC datetime from database
-                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", '%Y-%m-%d %H:%M:%S')
+                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", "%Y-%m-%d %H:%M:%S")
                         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
                         # Convert to display timezone
                         dt_local = dt_utc.astimezone(display_tz)
@@ -2109,25 +2149,27 @@ def create_app() -> FastAPI:
                         user_weekday_activity[user_id]["weekdays"][weekday] += row["message_count"]
                     except:
                         pass
-                
+
                 # Convert to list
                 user_weekday_list = []
                 for user_id, data in user_weekday_activity.items():
                     total = sum(data["weekdays"])
-                    user_weekday_list.append({
-                        "user_id": user_id,
-                        "username": data["username"],
-                        "weekday_activity": data["weekdays"],
-                        "total_messages": total
-                    })
-                
+                    user_weekday_list.append(
+                        {
+                            "user_id": user_id,
+                            "username": data["username"],
+                            "weekday_activity": data["weekdays"],
+                            "total_messages": total,
+                        }
+                    )
+
                 user_weekday_list.sort(key=lambda x: x["total_messages"], reverse=True)
                 detailed_stats["user_weekday_activity"] = user_weekday_list[:20]  # Top 20 users
-                
+
                 # Get most active channels by time period (morning, afternoon, evening, night)
                 # Convert from UTC to display timezone
                 cursor.execute("""
-                    SELECT 
+                    SELECT
                         channel_id,
                         channel_name,
                         date,
@@ -2137,61 +2179,68 @@ def create_app() -> FastAPI:
                     WHERE time IS NOT NULL AND LENGTH(time) >= 2
                     GROUP BY channel_id, channel_name, date, time
                 """)
-                
-                channel_time_periods = defaultdict(lambda: {"name": "", "morning": 0, "afternoon": 0, "evening": 0, "night": 0})
+
+                channel_time_periods = defaultdict(
+                    lambda: {"name": "", "morning": 0, "afternoon": 0, "evening": 0, "night": 0}
+                )
                 for row in cursor.fetchall():
                     try:
                         channel_id = str(row["channel_id"])
                         channel_time_periods[channel_id]["name"] = row["channel_name"]
                         # Parse UTC datetime from database
-                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", '%Y-%m-%d %H:%M:%S')
+                        dt_utc = datetime.strptime(f"{row['date']} {row['time']}", "%Y-%m-%d %H:%M:%S")
                         dt_utc = dt_utc.replace(tzinfo=timezone.utc)
                         # Convert to display timezone
                         dt_local = dt_utc.astimezone(display_tz)
                         hour = dt_local.hour
                         # Determine time period based on local time
                         if 6 <= hour <= 11:
-                            period = 'morning'
+                            period = "morning"
                         elif 12 <= hour <= 17:
-                            period = 'afternoon'
+                            period = "afternoon"
                         elif 18 <= hour <= 22:
-                            period = 'evening'
+                            period = "evening"
                         else:
-                            period = 'night'
+                            period = "night"
                         channel_time_periods[channel_id][period] += row["message_count"]
                     except Exception:
                         pass
-                
+
                 channel_period_list = []
                 for channel_id, data in channel_time_periods.items():
                     total = data["morning"] + data["afternoon"] + data["evening"] + data["night"]
-                    channel_period_list.append({
-                        "channel_id": channel_id,
-                        "channel_name": data["name"],
-                        "morning": data["morning"],
-                        "afternoon": data["afternoon"],
-                        "evening": data["evening"],
-                        "night": data["night"],
-                        "total_messages": total,
-                        "most_active_period": max(["morning", "afternoon", "evening", "night"], key=lambda p: data[p])
-                    })
-                
+                    channel_period_list.append(
+                        {
+                            "channel_id": channel_id,
+                            "channel_name": data["name"],
+                            "morning": data["morning"],
+                            "afternoon": data["afternoon"],
+                            "evening": data["evening"],
+                            "night": data["night"],
+                            "total_messages": total,
+                            "most_active_period": max(
+                                ["morning", "afternoon", "evening", "night"], key=lambda p: data[p]
+                            ),
+                        }
+                    )
+
                 channel_period_list.sort(key=lambda x: x["total_messages"], reverse=True)
                 detailed_stats["channel_time_periods"] = channel_period_list
                 detailed_stats["channel_time_periods_timezone"] = display_tz_str
-                
+
                 # Add display timezone to all stats for reference
                 detailed_stats["display_timezone"] = display_tz_str
-                
+
                 # Get guild name from basic stats
                 basic_stats = get_stats(int(guild_id))
                 if basic_stats.get("guild_name"):
                     detailed_stats["guild_name"] = basic_stats["guild_name"]
-                
+
                 conn.close()
             except Exception as e:
                 detailed_stats["error"] = str(e)
                 import traceback
+
                 detailed_stats["error_traceback"] = traceback.format_exc()
                 # Ensure analytics fields exist even on error
                 if "user_hourly_activity" not in detailed_stats:
@@ -2200,18 +2249,18 @@ def create_app() -> FastAPI:
                     detailed_stats["channel_hourly_activity"] = []
                 if "channel_time_periods" not in detailed_stats:
                     detailed_stats["channel_time_periods"] = []
-            
+
             # Add guild name to stats if available
             basic_stats = get_stats(int(guild_id))
             if basic_stats.get("guild_name"):
                 detailed_stats["guild_name"] = basic_stats["guild_name"]
-            
+
             return JSONResponse({"ok": True, "stats": detailed_stats})
         except ValueError:
             return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-    
+
     @app.get("/api/database/archive-schedule/{guild_id}")
     async def api_database_archive_schedule_get(guild_id: str):
         """Return auto-archive interval (minutes) for a guild; 0 = off."""
@@ -2259,22 +2308,22 @@ def create_app() -> FastAPI:
         """Trigger an incremental database scan for a specific server."""
         try:
             from soupy_database import create_scan_trigger
-            
+
             guild_id_int = int(guild_id)
-            
+
             # Check if bot is running
             bot_status = await bot_runner.status()
             if not bot_status.get("running"):
                 return JSONResponse({"ok": False, "message": "Bot is not running"}, status_code=400)
-            
+
             # Create a file-based trigger (works even if bot is in separate process)
             success, message = create_scan_trigger(guild_id_int)
-            
+
             if success:
                 return JSONResponse({"ok": True, "message": message})
             else:
                 return JSONResponse({"ok": False, "message": message}, status_code=400)
-                
+
         except ValueError:
             return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
         except Exception as exc:
@@ -2437,5 +2486,3 @@ if __name__ == "__main__":
         reload=True,
         log_level="info",
     )
-
-

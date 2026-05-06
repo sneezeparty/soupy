@@ -20,7 +20,6 @@ from . import (
     s08_handoff,
 )
 
-
 StepFn = Callable[[Dict, "ui.UI"], Dict]  # type: ignore[name-defined]
 
 STEPS: List[Tuple[str, str, StepFn]] = [

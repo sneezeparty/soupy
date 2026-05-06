@@ -38,5 +38,3 @@ class WebsocketManager:
             async with self._lock:
                 for ws in to_remove:
                     self._connections.discard(ws)
-
-

@@ -21,7 +21,6 @@ from typing import Dict, List, Optional, Tuple
 
 from .state import is_secret_key
 
-
 _ASSIGN_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
 
@@ -45,7 +44,7 @@ def _value_needs_quotes(value: str) -> bool:
         return False
     if any(ch.isspace() for ch in value):
         return True
-    return any(ch in value for ch in ('#', '"', "'", "\\"))
+    return any(ch in value for ch in ("#", '"', "'", "\\"))
 
 
 def _format_value(value: str) -> str:

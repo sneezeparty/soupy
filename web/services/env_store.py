@@ -44,10 +44,17 @@ def parse_env(path: Path) -> Tuple[List[EnvLine], Dict[str, str]]:
                 # Decode escape sequences (\\n -> \n, \\" -> ", etc.)
                 # Use codecs.decode for more reliable escape sequence handling
                 try:
-                    content = codecs.decode(content, 'unicode_escape')
+                    content = codecs.decode(content, "unicode_escape")
                 except (UnicodeDecodeError, ValueError):
                     # Fallback: manual replacement for common cases
-                    content = content.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+                    content = (
+                        content.replace("\\n", "\n")
+                        .replace("\\t", "\t")
+                        .replace("\\r", "\r")
+                        .replace('\\"', '"')
+                        .replace("\\'", "'")
+                        .replace("\\\\", "\\")
+                    )
                 lines.append(EnvLine(raw=raw, key=key, value=content))
                 kv[key] = content
                 i += 1
@@ -69,10 +76,17 @@ def parse_env(path: Path) -> Tuple[List[EnvLine], Dict[str, str]]:
             combined = "\n".join(acc)
             # Decode escape sequences for multiline values too
             try:
-                combined = codecs.decode(combined, 'unicode_escape')
+                combined = codecs.decode(combined, "unicode_escape")
             except (UnicodeDecodeError, ValueError):
                 # Fallback: manual replacement for common cases
-                combined = combined.replace('\\n', '\n').replace('\\t', '\t').replace('\\r', '\r').replace('\\"', '"').replace("\\'", "'").replace('\\\\', '\\')
+                combined = (
+                    combined.replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                    .replace("\\r", "\r")
+                    .replace('\\"', '"')
+                    .replace("\\'", "'")
+                    .replace("\\\\", "\\")
+                )
             lines.append(EnvLine(raw=raw, key=key, value=combined))
             kv[key] = combined
             # If not closed, we still record combined; remaining lines already advanced
@@ -90,7 +104,7 @@ def _needs_quotes(value: str) -> bool:
     if value == "":
         return False
     # Quote if spaces or special characters likely to break parsing
-    return ("\n" in value) or any(ch.isspace() for ch in value) or any(ch in value for ch in ['#', '"', "'", '\\'])
+    return ("\n" in value) or any(ch.isspace() for ch in value) or any(ch in value for ch in ["#", '"', "'", "\\"])
 
 
 def _escape_for_env(value: str) -> str:
@@ -124,7 +138,7 @@ def write_env(path: Path, updates: Dict[str, str]) -> None:
             elif _needs_quotes(new_val):
                 # Escape newlines and other special chars for single-line quoted format
                 escaped = _escape_for_env(new_val)
-                out_lines.append(f"{item.key}=\"{escaped}\"")
+                out_lines.append(f'{item.key}="{escaped}"')
             else:
                 out_lines.append(f"{item.key}={new_val}")
         else:
@@ -139,10 +153,8 @@ def write_env(path: Path, updates: Dict[str, str]) -> None:
         for k, v in remaining.items():
             if _needs_quotes(v):
                 escaped = _escape_for_env(v)
-                out_lines.append(f"{k}=\"{escaped}\"")
+                out_lines.append(f'{k}="{escaped}"')
             else:
                 out_lines.append(f"{k}={v}")
 
     path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
-
-

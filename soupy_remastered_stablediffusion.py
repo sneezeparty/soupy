@@ -117,30 +117,31 @@ Logging Configuration
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S,%f"  # Changed from .%f to ,%f
 LOG_FORMAT_FILE = "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s"
 
+
 class CustomFormatter(logging.Formatter):
     """Custom formatter with colors"""
-    
+
     COLORS = {
-        'DEBUG': '\033[95m',    # Purple
-        'INFO': '\033[92m',     # Bright Green
-        'WARNING': '\033[93m',  # Yellow
-        'ERROR': '\033[91m',    # Red
-        'CRITICAL': '\033[41m'  # Red background
+        "DEBUG": "\033[95m",  # Purple
+        "INFO": "\033[92m",  # Bright Green
+        "WARNING": "\033[93m",  # Yellow
+        "ERROR": "\033[91m",  # Red
+        "CRITICAL": "\033[41m",  # Red background
     }
-    
-    RESET = '\033[0m'
-    TIMESTAMP_COLOR = '\033[36m'  # Cyan for timestamps
-    ARROW_COLOR = '\033[90m'      # Grey for the arrow
-    NAME_COLOR = '\033[94m'       # Blue for logger name
-    
+
+    RESET = "\033[0m"
+    TIMESTAMP_COLOR = "\033[36m"  # Cyan for timestamps
+    ARROW_COLOR = "\033[90m"  # Grey for the arrow
+    NAME_COLOR = "\033[94m"  # Blue for logger name
+
     def format(self, record):
         # Format the timestamp with milliseconds
         timestamp = self.formatTime(record, self.datefmt)
-        
+
         # Color the level name with parentheses
-        level_color = self.COLORS.get(record.levelname, '')
+        level_color = self.COLORS.get(record.levelname, "")
         colored_level = f"{level_color}({record.levelname}){self.RESET}"
-        
+
         # Format the full message with colors
         formatted_message = (
             f"{self.TIMESTAMP_COLOR}[{timestamp}]{self.RESET} "
@@ -149,12 +150,12 @@ class CustomFormatter(logging.Formatter):
             f"{self.ARROW_COLOR}=>{self.RESET} "
             f"{record.getMessage()}"
         )
-        
+
         if record.exc_info:
             # If there's an exception, add it to the message
             exc_text = self.formatException(record.exc_info)
             formatted_message = f"{formatted_message}\n{exc_text}"
-            
+
         return formatted_message
 
     def formatTime(self, record, datefmt=None):
@@ -165,19 +166,18 @@ class CustomFormatter(logging.Formatter):
             msec = int((record.created - int(record.created)) * 1000)
             s = time.strftime(datefmt, ct)
             # Replace the milliseconds placeholder with actual milliseconds
-            s = s.replace(',f', f',{msec:03d}')
+            s = s.replace(",f", f",{msec:03d}")
             return s
         return time.strftime(self.default_time_format, ct)
 
+
 # Create the formatters with the correct datetime format
 console_formatter = CustomFormatter(
-    "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S,f"  # Changed from ,%f to ,f
+    "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s", datefmt="%Y-%m-%d %H:%M:%S,f"  # Changed from ,%f to ,f
 )
 
 file_formatter = logging.Formatter(
-    "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S,f"  # Changed from ,%f to ,f
+    "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s", datefmt="%Y-%m-%d %H:%M:%S,f"  # Changed from ,%f to ,f
 )
 
 # Create logs directory if it doesn't exist
@@ -214,34 +214,26 @@ BACKUP_COUNT = 5  # Keep up to 5 backup files
 
 # Pre-load .env-stable so LOG_LEVEL can drive the handler on the next line.
 # (load_dotenv runs again below with override=True for the rest of the env.)
-load_dotenv('.env-stable')
+load_dotenv(".env-stable")
 
 # Set up handlers
 console_handler = logging.StreamHandler(sys.stdout)
 _console_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
 console_handler.setLevel(_console_log_level)
-console_handler.setFormatter(CustomFormatter(
-    "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S,f"
-))
+console_handler.setFormatter(
+    CustomFormatter("[%(asctime)s] (%(levelname)s) %(name)s => %(message)s", datefmt="%Y-%m-%d %H:%M:%S,f")
+)
 
 file_handler = RotatingFileHandler(
-    filename=log_filepath,
-    maxBytes=MAX_LOG_SIZE,
-    backupCount=BACKUP_COUNT,
-    encoding='utf-8'
+    filename=log_filepath, maxBytes=MAX_LOG_SIZE, backupCount=BACKUP_COUNT, encoding="utf-8"
 )
 file_handler.setLevel(logging.DEBUG)
-file_handler.setFormatter(CustomFormatter(
-    "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S,f"
-))
+file_handler.setFormatter(
+    CustomFormatter("[%(asctime)s] (%(levelname)s) %(name)s => %(message)s", datefmt="%Y-%m-%d %H:%M:%S,f")
+)
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    handlers=[console_handler, file_handler]
-)
+logging.basicConfig(level=logging.DEBUG, handlers=[console_handler, file_handler])
 
 # Suppress noisy debug logs from external libraries
 logging.getLogger("openai").setLevel(logging.WARNING)
@@ -251,7 +243,9 @@ logging.getLogger("discord.client").setLevel(logging.INFO)
 logging.getLogger("discord.gateway").setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
-logger.info(f"Logging initialized. Console level: {logging.getLevelName(_console_log_level)} (set LOG_LEVEL to change). File: {log_filepath} (DEBUG).")
+logger.info(
+    f"Logging initialized. Console level: {logging.getLevelName(_console_log_level)} (set LOG_LEVEL to change). File: {log_filepath} (DEBUG)."
+)
 
 """
 ---------------------------------------------------------------------------------
@@ -260,19 +254,13 @@ Load Environment Variables
 """
 
 # Load Environment Variables
-load_dotenv('.env-stable', override=True)
+load_dotenv(".env-stable", override=True)
 
 # The local LLM usage
-client = OpenAI(
-    base_url=os.getenv("OPENAI_BASE_URL"),
-    api_key=os.getenv("OPENAI_API_KEY", "lm-studio")
-)
+client = OpenAI(base_url=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY", "lm-studio"))
 
 # Parse OWNER_IDS from .env
-OWNER_IDS = [
-    int(id.strip()) for id in os.getenv("OWNER_IDS", "").split(",") 
-    if id.strip().isdigit()
-]
+OWNER_IDS = [int(id.strip()) for id in os.getenv("OWNER_IDS", "").split(",") if id.strip().isdigit()]
 
 if not OWNER_IDS:
     logger.warning("No OWNER_IDS specified. Reload functionality will be disabled.")
@@ -280,6 +268,7 @@ if not OWNER_IDS:
 RANDOMPROMPT = os.getenv("RANDOMPROMPT", "")
 if not RANDOMPROMPT:
     logger.warning("No RANDOMPROMPT prompt found. Random functionality will be disabled.")
+
 
 # Categories
 def load_text_file_from_env(env_var):
@@ -289,6 +278,7 @@ def load_text_file_from_env(env_var):
         with open(file_path, "r", encoding="utf-8") as file:
             return [item.strip() for item in file.read().split(",") if item.strip()]
     return []
+
 
 # Load themes, character concepts, and artistic styles from the files specified in the .env
 OVERALL_THEMES = load_text_file_from_env("OVERALL_THEMES")
@@ -328,10 +318,10 @@ if not SD_SERVER_URL:
 SD_IMG2IMG_URL = os.getenv("SD_IMG2IMG_URL")
 SD_INPAINT_URL = os.getenv("SD_INPAINT_URL")
 SD_OUTPAINT_HYBRID_URL = os.getenv("SD_OUTPAINT_HYBRID_URL")
-    
+
 # Provide fallbacks to the main SD server if specific endpoints are not configured
 if SD_SERVER_URL:
-    base_url = SD_SERVER_URL.rstrip('/')
+    base_url = SD_SERVER_URL.rstrip("/")
     if not SD_IMG2IMG_URL:
         SD_IMG2IMG_URL = f"{base_url}/sd_img2img"
         logger.info(f"Using fallback SD_IMG2IMG_URL: {SD_IMG2IMG_URL}")
@@ -347,12 +337,9 @@ OUTPAINT_USE_CANNY = os.getenv("OUTPAINT_USE_CANNY", "true").lower() == "true"
 OUTPAINT_USE_DEPTH = os.getenv("OUTPAINT_USE_DEPTH", "false").lower() == "true"
 OUTPAINT_CONTROL_WEIGHT = float(os.getenv("OUTPAINT_CONTROL_WEIGHT", 0.75))
 OUTPAINT_HARMONIZE_STRENGTH = float(os.getenv("OUTPAINT_HARMONIZE_STRENGTH", 0.0))
-    
+
 CHANNEL_IDS_ENV = os.getenv("CHANNEL_IDS", "")
-CHANNEL_IDS = [
-    int(cid.strip()) for cid in CHANNEL_IDS_ENV.split(",") 
-    if cid.strip().isdigit()
-]
+CHANNEL_IDS = [int(cid.strip()) for cid in CHANNEL_IDS_ENV.split(",") if cid.strip().isdigit()]
 
 if not CHANNEL_IDS:
     logger.warning("No CHANNEL_IDS specified. Shutdown notifications will not be sent.")
@@ -369,15 +356,14 @@ def get_trigger_keywords() -> list[str]:
 
 def message_contains_trigger_keyword(content: str) -> bool:
     """Case-insensitive literal keyword match. Preserves old soup -> soupy behavior."""
-    return any(
-        re.search(re.escape(keyword), content or "", re.IGNORECASE)
-        for keyword in get_trigger_keywords()
-    )
+    return any(re.search(re.escape(keyword), content or "", re.IGNORECASE) for keyword in get_trigger_keywords())
+
 
 REMOVE_BG_API_URL = os.getenv("REMOVE_BG_API_URL")
 
 if not REMOVE_BG_API_URL:
     raise ValueError("No REMOVE_BG_API_URL environment variable set.")
+
 
 async def get_guild_behaviour(guild_id: str) -> str:
     """Get the behaviour prompt. Single behaviour for all guilds.
@@ -385,11 +371,13 @@ async def get_guild_behaviour(guild_id: str) -> str:
     """
     return os.getenv("BEHAVIOUR", "You're a stupid bot.")
 
+
 def format_error_message(error):
     error_prefix = "Error: "
     if isinstance(error, OpenAIError):
         return f"{error_prefix}An OpenAI API error occurred: {str(error)}"
     return f"{error_prefix}{str(error)}"
+
 
 # Dictionary to store image descriptions for context
 image_descriptions = []
@@ -410,11 +398,12 @@ class SoupyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sd_queue = SDQueue()
-        
+
     # Add the async_chat_completion method to the bot class
     async def async_chat_completion(self, *args, **kwargs):
         """Wraps the OpenAI chat completion in an async context"""
         return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
+
 
 # First, let's add a proper Queue class to manage the image generation queue
 class SDQueue:
@@ -451,167 +440,159 @@ class SDQueue:
             try:
                 item = await self.get()
 
-                if item['type'] == 'sd':
-                    await process_sd_image(
-                        item['interaction'],
-                        item['description'],
-                        item['size'],
-                        item['seed']
-                    )
-                elif item['type'] == 'outpaint':
+                if item["type"] == "sd":
+                    await process_sd_image(item["interaction"], item["description"], item["size"], item["seed"])
+                elif item["type"] == "outpaint":
                     await handle_outpaint(
-                        item['interaction'],
-                        item['prompt'],
-                        item['direction'],
-                        item['width'],
-                        item['height'],
-                        item['seed'],
+                        item["interaction"],
+                        item["prompt"],
+                        item["direction"],
+                        item["width"],
+                        item["height"],
+                        item["seed"],
                         self.qsize(),
-                        item.get('strength', 0.8),
-                        item.get('steps'),
-                        item.get('guidance')
+                        item.get("strength", 0.8),
+                        item.get("steps"),
+                        item.get("guidance"),
                     )
-                elif item['type'] == 'button':
-                    if item['action'] == 'random':
+                elif item["type"] == "button":
+                    if item["action"] == "random":
                         # Pass the prompt directly to handle_random if it exists
                         await handle_random(
-                            item['interaction'],
-                            item['width'],
-                            item['height'],
+                            item["interaction"],
+                            item["width"],
+                            item["height"],
                             self.qsize(),
-                            direct_prompt=item.get('prompt')
+                            direct_prompt=item.get("prompt"),
                         )
-                    elif item['action'] == 'remix':
+                    elif item["action"] == "remix":
                         await handle_remix(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
-                            self.qsize()
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
                         )
-                    elif item['action'] == 'fancy':
+                    elif item["action"] == "fancy":
                         await handle_fancy(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
-                            self.qsize()
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
                         )
-                    elif item['action'] == 'wide':
+                    elif item["action"] == "wide":
                         await handle_wide(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
-                            self.qsize()
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
                         )
-                    elif item['action'] == 'tall':
+                    elif item["action"] == "tall":
                         await handle_tall(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
-                            self.qsize()
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
                         )
-                    elif item['action'] == 'edit':
+                    elif item["action"] == "edit":
                         await handle_edit(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
-                            self.qsize()
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
                         )
-                    elif item['action'] == '2x2_grid':
+                    elif item["action"] == "2x2_grid":
                         await handle_2x2_grid(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
-                            self.qsize()
-                        )
-                    elif item['action'] == 'outpaint_horizontal':
-                        await handle_outpaint(
-                            item['interaction'],
-                            item['prompt'],
-                            'horizontal',
-                            item['width'],
-                            item['height'],
-                            item['seed'],
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
                             self.qsize(),
-                            item.get('strength', 0.8),
-                            item.get('steps'),
-                            item.get('guidance')
                         )
-                    elif item['action'] == 'outpaint_vertical':
+                    elif item["action"] == "outpaint_horizontal":
                         await handle_outpaint(
-                            item['interaction'],
-                            item['prompt'],
-                            'vertical',
-                            item['width'],
-                            item['height'],
-                            item['seed'],
+                            item["interaction"],
+                            item["prompt"],
+                            "horizontal",
+                            item["width"],
+                            item["height"],
+                            item["seed"],
                             self.qsize(),
-                            item.get('strength', 0.8),
-                            item.get('steps'),
-                            item.get('guidance')
+                            item.get("strength", 0.8),
+                            item.get("steps"),
+                            item.get("guidance"),
                         )
-                    elif item['action'] == 'outpaint_both':
+                    elif item["action"] == "outpaint_vertical":
                         await handle_outpaint(
-                            item['interaction'],
-                            item['prompt'],
-                            'both',
-                            item['width'],
-                            item['height'],
-                            item['seed'],
+                            item["interaction"],
+                            item["prompt"],
+                            "vertical",
+                            item["width"],
+                            item["height"],
+                            item["seed"],
                             self.qsize(),
-                            item.get('strength', 0.8),
-                            item.get('steps'),
-                            item.get('guidance')
+                            item.get("strength", 0.8),
+                            item.get("steps"),
+                            item.get("guidance"),
                         )
-                    elif item['action'] == 'thumbnail_upscale':
+                    elif item["action"] == "outpaint_both":
+                        await handle_outpaint(
+                            item["interaction"],
+                            item["prompt"],
+                            "both",
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
+                            item.get("strength", 0.8),
+                            item.get("steps"),
+                            item.get("guidance"),
+                        )
+                    elif item["action"] == "thumbnail_upscale":
                         await handle_thumbnail_upscale(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['thumbnail_data'],
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["thumbnail_data"],
                             self.qsize(),
-                            item['thumbnail_index']
+                            item["thumbnail_index"],
                         )
-                    elif item['action'] == 'regenerate_selected':
+                    elif item["action"] == "regenerate_selected":
                         await handle_regenerate_selected(
-                            item['interaction'],
-                            item['prompt'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
                             self.qsize(),
-                            item['thumbnail_index']
+                            item["thumbnail_index"],
                         )
-                    elif item['action'] == 'outpaint':
+                    elif item["action"] == "outpaint":
                         await handle_outpaint(
-                            item['interaction'],
-                            item['prompt'],
-                            item['direction'],
-                            item['width'],
-                            item['height'],
-                            item['seed'],
+                            item["interaction"],
+                            item["prompt"],
+                            item["direction"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
                             self.qsize(),
-                            item.get('strength', 0.8),
-                            item.get('steps'),
-                            item.get('guidance')
+                            item.get("strength", 0.8),
+                            item.get("steps"),
+                            item.get("guidance"),
                         )
-                elif item['type'] == 'chat':
-                    await process_chat_message(
-                        item['message'],
-                        item['image_descriptions']
-                    )
+                elif item["type"] == "chat":
+                    await process_chat_message(item["message"], item["image_descriptions"])
 
             except Exception as e:
                 logger.error(f"Error processing queue item: {e}")
@@ -625,22 +606,17 @@ intents.members = True
 
 allowed_mentions = discord.AllowedMentions(users=True)
 
-bot = SoupyBot(
-    command_prefix='!',
-    intents=intents,
-    allowed_mentions=allowed_mentions
-)
+bot = SoupyBot(command_prefix="!", intents=intents, allowed_mentions=allowed_mentions)
 
 
 @bot.tree.interaction_check
 async def global_command_toggle_check(interaction: discord.Interaction) -> bool:
     """Block slash commands that have been disabled via the dashboard."""
     from soupy_database.runtime_flags import is_command_disabled
+
     cmd_name = interaction.command.name if interaction.command else None
     if cmd_name and is_command_disabled(cmd_name):
-        await interaction.response.send_message(
-            f"the `/{cmd_name}` command is currently disabled.", ephemeral=True
-        )
+        await interaction.response.send_message(f"the `/{cmd_name}` command is currently disabled.", ephemeral=True)
         return False
     return True
 
@@ -666,18 +642,18 @@ async def read_user_stats():
         try:
             data = json.loads(USER_STATS_FILE.read_text())
             # Convert old format to new format if necessary
-            if data and not any('servers' in user_data for user_data in data.values()):
+            if data and not any("servers" in user_data for user_data in data.values()):
                 new_data = {}
                 for user_id, stats in data.items():
                     new_data[user_id] = {
-                        'username': stats.get('username', 'Unknown'),
-                        'servers': {
-                            'global': {  # Store old stats as global stats
-                                'images_generated': stats.get('images_generated', 0),
-                                'chat_responses': stats.get('chat_responses', 0),
-                                'mentions': stats.get('mentions', 0)
+                        "username": stats.get("username", "Unknown"),
+                        "servers": {
+                            "global": {  # Store old stats as global stats
+                                "images_generated": stats.get("images_generated", 0),
+                                "chat_responses": stats.get("chat_responses", 0),
+                                "mentions": stats.get("mentions", 0),
                             }
-                        }
+                        },
                     }
                 return new_data
             return data
@@ -688,6 +664,7 @@ async def read_user_stats():
             logger.error(f"Error reading 'user_stats.json': {e}")
             return {}
 
+
 async def write_user_stats(data):
     # Writes the user statistics to the JSON file.
     async with user_stats_lock:
@@ -696,11 +673,13 @@ async def write_user_stats(data):
         except Exception as e:
             logger.error(f"Error writing to 'user_stats.json': {e}")
 
+
 def universal_cooldown_check():
     """
     One decorator to handle both slash commands (func(interaction, ...))
     and UI callbacks (func(self, interaction, ...)).
     """
+
     def decorator(func):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -714,7 +693,7 @@ def universal_cooldown_check():
             else:
                 # It's a normal slash command function, so args[0] is the interaction
                 interaction = args[0]
-            
+
             # Now that we have `interaction`, do your existing rate-limit logic
             user_id = interaction.user.id
             current_time = time.time()
@@ -725,8 +704,7 @@ def universal_cooldown_check():
 
             # Remove old timestamps
             user_interaction_timestamps[user_id] = [
-                ts for ts in user_interaction_timestamps[user_id]
-                if current_time - ts < 60
+                ts for ts in user_interaction_timestamps[user_id] if current_time - ts < 60
             ]
 
             # Check if user has any exempt roles
@@ -740,7 +718,7 @@ def universal_cooldown_check():
             if not is_exempt and len(user_interaction_timestamps[user_id]) >= MAX_INTERACTIONS_PER_MINUTE:
                 await interaction.response.send_message(
                     f"❌ You have reached the maximum of {MAX_INTERACTIONS_PER_MINUTE} interactions per minute. Please wait.",
-                    ephemeral=True
+                    ephemeral=True,
                 )
                 logger.warning(f"User {interaction.user} exceeded interaction limit.")
                 return
@@ -749,30 +727,33 @@ def universal_cooldown_check():
 
             # Finally, call the wrapped function
             return await func(*args, **kwargs)
+
         return wrapper
+
     return decorator
+
 
 # Update the shutdown function
 async def shutdown():
     """Graceful shutdown procedure."""
     logger.info("🔄 Initiating graceful shutdown...")
-    
+
     try:
         # Commented out notification code
-        '''
+        """
         # Create shutdown embed
         shutdown_embed = discord.Embed(
             description="Soupy is now going offline.",
             color=discord.Color.red(),
         )
-        
+
         # Safely get avatar URL
         avatar_url = None
         if bot.user and bot.user.avatar:
             avatar_url = bot.user.avatar.url
-        
+
         shutdown_embed.set_footer(text="Soupy Bot | Shutdown", icon_url=avatar_url)
-        
+
         # Notify channels about shutdown and wait for completion
         logger.info("🔄 Starting channel notifications...")
         try:
@@ -783,36 +764,37 @@ async def shutdown():
             logger.warning("⚠️ Shutdown notifications timed out")
         except Exception as e:
             logger.error(f"❌ Error sending shutdown notifications: {e}")
-        '''
+        """
         # Initiate queue shutdown if it exists
-        if hasattr(bot, 'sd_queue'):
+        if hasattr(bot, "sd_queue"):
             await bot.sd_queue.initiate_shutdown()
-        
+
         # Close Discord connection
         logger.info("🔒 Closing the Discord bot connection...")
         await bot.close()
         logger.info("✅ Discord bot connection closed.")
-        
+
         # Final log message
         logger.info("🔚 Shutdown process completed.")
-        
+
         # Get the current loop and schedule delayed exit
         loop = asyncio.get_running_loop()
-        
+
         # Increased delay to ensure notifications are sent
         def delayed_exit():
             sys.exit(0)
-        
+
         loop.call_later(3, delayed_exit)  # Increased to 3 seconds
-        
+
     except Exception as e:
         logger.error(f"❌ Error during shutdown: {e}")
         sys.exit(1)
 
+
 def handle_signal(signum, frame):
     """Handle termination signals by scheduling the shutdown coroutine."""
     logger.info(f"🛑 Received termination signal ({signum}). Initiating shutdown...")
-    
+
     # Get the current event loop
     try:
         loop = asyncio.get_event_loop()
@@ -824,45 +806,45 @@ def handle_signal(signum, frame):
         logger.error(f"❌ Error in signal handler: {e}")
         sys.exit(1)
 
+
 def get_random_terms():
     terms = {}
-    
+
     if OVERALL_THEMES:
         num_themes = random.randint(1, 3)
         chosen_themes = random.sample(OVERALL_THEMES, num_themes)
-        terms['Overall Theme'] = ', '.join(chosen_themes)
-    
+        terms["Overall Theme"] = ", ".join(chosen_themes)
+
     if CHARACTER_CONCEPTS:
         rand_val = random.random()
         if rand_val < 0.05:  # 5% chance of no character
             pass  # Skip adding a character
         elif rand_val < 0.25:  # 20% chance of Grey Sphynx Cat (0.05 to 0.25)
-            terms['Character Concept'] = "Grey Sphynx Cat"
+            terms["Character Concept"] = "Grey Sphynx Cat"
         else:  # 75% chance of random character
-            terms['Character Concept'] = random.choice(CHARACTER_CONCEPTS)
-    
+            terms["Character Concept"] = random.choice(CHARACTER_CONCEPTS)
+
     if ARTISTIC_RENDERING_STYLES:
         # Randomly decide how many styles to pick (1-4)
         num_styles = random.randint(1, 4)
         # Get random styles without repeats
         chosen_styles = random.sample(ARTISTIC_RENDERING_STYLES, num_styles)
-        terms['Artistic Rendering Style'] = ', '.join(chosen_styles)
+        terms["Artistic Rendering Style"] = ", ".join(chosen_styles)
 
     # Always include a handful of SD-specific keywords if available
     if SD_KEYWORDS_LIST:
         num_sd = min(4, len(SD_KEYWORDS_LIST))
         chosen_sd = random.sample(SD_KEYWORDS_LIST, num_sd)
-        terms['SD Keywords'] = ', '.join(chosen_sd)
-    
-    return terms
+        terms["SD Keywords"] = ", ".join(chosen_sd)
 
+    return terms
 
 
 async def handle_random(interaction, width, height, queue_size, direct_prompt=None):
     """
     Handles the generation of a random image by selecting random terms from categories
     and combining them with the base random prompt.
-    
+
     Args:
         interaction: The Discord interaction
         width: Image width
@@ -896,32 +878,36 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
 
                 # Get random terms first
                 random_terms = get_random_terms()
-                formatted_descriptors = "\n".join([f"**{category}:** {term}" for category, term in random_terms.items()])
+                formatted_descriptors = "\n".join(
+                    [f"**{category}:** {term}" for category, term in random_terms.items()]
+                )
                 logger.info(f"🔀 Selected Descriptors for {interaction.user}:\n{formatted_descriptors}")
-                
+
                 # Combine with base prompt, but emphasize artistic style
-                art_style = random_terms.get('Artistic Rendering Style', '')
-                other_terms = [term for category, term in random_terms.items() if category != 'Artistic Rendering Style']
-                
+                art_style = random_terms.get("Artistic Rendering Style", "")
+                other_terms = [
+                    term for category, term in random_terms.items() if category != "Artistic Rendering Style"
+                ]
+
                 # Create a more detailed artistic style instruction
                 style_emphasis = (
                     f"The image should be rendered combining these artistic styles: {art_style}. "
                     f"These artistic styles should be the dominant visual characteristics, "
                     f"blended together, with the following elements incorporated within these styles: {', '.join(other_terms)}"
                 )
-                
+
                 # If SD keywords exist, append a clear instruction to leverage them
                 sd_hint = ""
-                if 'SD Keywords' in random_terms:
+                if "SD Keywords" in random_terms:
                     sd_hint = f"\nFocus on these rendering/photographic cues as global style constraints: {random_terms['SD Keywords']}."
                 combined_prompt = f"{RANDOMPROMPT} {style_emphasis}{sd_hint}"
                 logger.info(f"🔀 Combined Prompt for {interaction.user}:\n{combined_prompt}")
 
                 # Now send to LLM with modified system message
                 system_msg = {
-                    "role": "system", 
+                    "role": "system",
                     "content": "You are an assistant that creates image prompts with strong emphasis on artistic style. "
-                              "The artistic rendering style should be prominently featured in your prompt, affecting every element described."
+                    "The artistic rendering style should be prominently featured in your prompt, affecting every element described.",
                 }
                 user_msg = {"role": "user", "content": combined_prompt}
                 messages_for_llm = [system_msg, user_msg]
@@ -934,7 +920,7 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
                     model=os.getenv("LOCAL_CHAT"),
                     messages=messages_for_llm,
                     temperature=float(os.getenv("RANDOM_PROMPT_TEMPERATURE", 0.8)),
-                    max_tokens=325          
+                    max_tokens=325,
                 )
                 random_prompt = response.choices[0].message.content.strip()
                 logger.info(f"🔀 Generated random prompt for {interaction.user}: {random_prompt}")
@@ -944,10 +930,10 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
                 selected_terms_list = []
                 for category, terms in random_terms.items():
                     # Split by comma in case there are multiple terms in a single category
-                    split_terms = [term.strip() for term in terms.split(',')]
+                    split_terms = [term.strip() for term in terms.split(",")]
                     selected_terms_list.extend(split_terms)
                 selected_terms_str = ", ".join(selected_terms_list)
-                
+
                 # End timing for LLM prompt generation
                 prompt_end_time = time.perf_counter()
                 prompt_duration = prompt_end_time - prompt_start_time
@@ -965,10 +951,10 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
             action_name="Random",
             queue_size=queue_size,
             pre_duration=prompt_duration,
-            selected_terms=selected_terms_str
+            selected_terms=selected_terms_str,
         )
 
-        await increment_user_stat(interaction.user.id, 'images_generated')
+        await increment_user_stat(interaction.user.id, "images_generated")
 
     except Exception as e:
         logger.error(f"🔀 Error generating random prompt for {interaction.user}: {e}")
@@ -978,23 +964,10 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
             await interaction.followup.send(f"❌ Error generating random prompt: {e}", ephemeral=True)
 
 
-
-
-
-
 # Initialize the JSON file if it doesn't exist
 if not USER_STATS_FILE.exists():
     USER_STATS_FILE.write_text(json.dumps({}))
     logger.info("Created 'user_stats.json' for tracking user statistics.")
-
-
-
-
-
-
-
-
-
 
 
 async def increment_user_stat(user_id: int, stat: str, server_id: Optional[int] = None):
@@ -1008,55 +981,42 @@ async def increment_user_stat(user_id: int, stat: str, server_id: Optional[int] 
     """
     stats = await read_user_stats()
     str_user_id = str(user_id)
-    
+
     # Initialize user entry if it doesn't exist
     if str_user_id not in stats:
         stats[str_user_id] = {
-            'username': 'Unknown',
-            'servers': {
-                'global': {
-                    'images_generated': 0,
-                    'chat_responses': 0,
-                    'mentions': 0
-                }
-            }
+            "username": "Unknown",
+            "servers": {"global": {"images_generated": 0, "chat_responses": 0, "mentions": 0}},
         }
-    
+
     # Update username if possible
     user = bot.get_user(user_id)
     if user:
-        stats[str_user_id]['username'] = user.name
-    
+        stats[str_user_id]["username"] = user.name
+
     # Initialize server stats if needed
     if server_id:
         str_server_id = str(server_id)
-        if 'servers' not in stats[str_user_id]:
-            stats[str_user_id]['servers'] = {}
-        if str_server_id not in stats[str_user_id]['servers']:
-            stats[str_user_id]['servers'][str_server_id] = {
-                'images_generated': 0,
-                'chat_responses': 0,
-                'mentions': 0
-            }
-    
+        if "servers" not in stats[str_user_id]:
+            stats[str_user_id]["servers"] = {}
+        if str_server_id not in stats[str_user_id]["servers"]:
+            stats[str_user_id]["servers"][str_server_id] = {"images_generated": 0, "chat_responses": 0, "mentions": 0}
+
     # Increment both global and server-specific stats
-    if 'global' not in stats[str_user_id]['servers']:
-        stats[str_user_id]['servers']['global'] = {
-            'images_generated': 0,
-            'chat_responses': 0,
-            'mentions': 0
-        }
-    
+    if "global" not in stats[str_user_id]["servers"]:
+        stats[str_user_id]["servers"]["global"] = {"images_generated": 0, "chat_responses": 0, "mentions": 0}
+
     # Increment global stat
-    stats[str_user_id]['servers']['global'][stat] += 1
-    
+    stats[str_user_id]["servers"]["global"][stat] += 1
+
     # Increment server-specific stat if applicable
     if server_id:
         str_server_id = str(server_id)
-        stats[str_user_id]['servers'][str_server_id][stat] += 1
-    
+        stats[str_user_id]["servers"][str_server_id][stat] += 1
+
     await write_user_stats(stats)
     logger.debug(f"📈 Updated '{stat}' for user ID {user_id} (server ID: {server_id})")
+
 
 # Format uptime
 def format_uptime(td: timedelta) -> str:
@@ -1071,8 +1031,8 @@ def format_uptime(td: timedelta) -> str:
     """
     total_seconds = int(td.total_seconds())
     days, remainder = divmod(total_seconds, 86400)  # 86400 seconds in a day
-    hours, remainder = divmod(remainder, 3600)      # 3600 seconds in an hour
-    minutes, _ = divmod(remainder, 60)              # 60 seconds in a minute
+    hours, remainder = divmod(remainder, 3600)  # 3600 seconds in an hour
+    minutes, _ = divmod(remainder, 60)  # 60 seconds in a minute
 
     parts = []
     if days > 0:
@@ -1084,8 +1044,8 @@ def format_uptime(td: timedelta) -> str:
 
     if not parts:
         return "less than a minute"
-    
-    return ', '.join(parts)
+
+    return ", ".join(parts)
 
 
 # Track bot start time for uptime calculation
@@ -1101,11 +1061,31 @@ timer_state = {
     "archive_scan": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "rag_reindex": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "self_reflect": {"last_run": None, "next_run": None, "interval": None, "enabled": False},
-    "daily_post": {"last_run": None, "next_run": None, "interval": None, "enabled": False,
-                    "schedule": [], "posts_today": 0, "last_failure": None, "last_title": None, "last_channel": None},
-    "bluesky": {"last_run": None, "next_run": None, "interval": None, "enabled": False,
-                "schedule": [], "last_reply": None, "last_post": None, "last_repost": None,
-                "last_failure": None, "replies_today": 0, "posts_today": 0, "reposts_today": 0},
+    "daily_post": {
+        "last_run": None,
+        "next_run": None,
+        "interval": None,
+        "enabled": False,
+        "schedule": [],
+        "posts_today": 0,
+        "last_failure": None,
+        "last_title": None,
+        "last_channel": None,
+    },
+    "bluesky": {
+        "last_run": None,
+        "next_run": None,
+        "interval": None,
+        "enabled": False,
+        "schedule": [],
+        "last_reply": None,
+        "last_post": None,
+        "last_repost": None,
+        "last_failure": None,
+        "replies_today": 0,
+        "posts_today": 0,
+        "reposts_today": 0,
+    },
 }
 
 
@@ -1116,10 +1096,12 @@ async def check_chat_functions():
         test_prompt = "Hello, are you operational?"
         response = await async_chat_completion(
             model=os.getenv("LOCAL_CHAT"),
-            messages=[{"role": "system", "content": "You are a helpful assistant."},
-                      {"role": "user", "content": test_prompt}],
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": test_prompt},
+            ],
             temperature=float(os.getenv("HEALTHCHECK_TEMPERATURE", 0.0)),
-            max_tokens=10
+            max_tokens=10,
         )
         reply = response.choices[0].message.content.strip().lower()
         if reply:
@@ -1131,6 +1113,7 @@ async def check_chat_functions():
     except Exception as e:
         chat_functions_online = False
         logger.error(f"Chat functions are offline or encountered an error: {e}")
+
 
 # Send notifications to all configured channels
 async def notify_channels(embed: discord.Embed = None):
@@ -1146,13 +1129,13 @@ async def notify_channels(embed: discord.Embed = None):
 
     channel_ids = channel_ids_str.split(",")
     notifications_sent = False
-    
+
     for channel_id in channel_ids:
         try:
             if channel_id:  # Skip empty strings
                 channel_id = int(channel_id.strip())
                 channel = bot.get_channel(channel_id)
-                
+
                 if channel is None:
                     # Try fetching the channel if get_channel returns None
                     try:
@@ -1163,7 +1146,7 @@ async def notify_channels(embed: discord.Embed = None):
                     except Exception as e:
                         logger.error(f"❌ Error fetching channel {channel_id}: {e}")
                         continue
-                
+
                 if embed:
                     await channel.send(embed=embed)
                     notifications_sent = True
@@ -1172,36 +1155,39 @@ async def notify_channels(embed: discord.Embed = None):
             logger.error(f"❌ Invalid channel ID format: {channel_id}")
         except Exception as e:
             logger.error(f"❌ Error notifying channel {channel_id}: {e}")
-    
+
     logger.info("✅ Channel notifications complete")
     return notifications_sent
+
 
 @bot.event
 async def on_close():
     """Logs detailed information during bot shutdown"""
     logger.info("🔄 Bot close event triggered")
-    
+
     # Log active connections
     logger.info(f"📡 Active voice connections: {len(bot.voice_clients)}")
     logger.info(f"🌐 Connected to {len(bot.guilds)} guilds")
-    
+
     # Log remaining tasks
     remaining_tasks = [task for task in asyncio.all_tasks() if not task.done()]
     logger.info(f"📝 Remaining tasks to complete: {len(remaining_tasks)}")
     for task in remaining_tasks:
         logger.info(f"  - Task: {task.get_name()}")
-    
+
     logger.info("👋 Bot shutdown complete")
+
 
 # Injected before the current user turn when RAG runs; also used to tag that block in LLM log summaries.
 RAG_CONTEXT_MESSAGE_SENTINEL = "Below are snippets from earlier messages in this server"
+
 
 # Format message history for logging
 def format_messages(messages):
     formatted = ""
     for msg in messages:
-        role = msg.get('role', 'UNKNOWN').upper()
-        content = msg.get('content', '').replace('\n', ' ').strip()
+        role = msg.get("role", "UNKNOWN").upper()
+        content = msg.get("content", "").replace("\n", " ").strip()
         formatted += f"[{role}] {content}\n"
     return formatted.strip()
 
@@ -1246,6 +1232,7 @@ def trim_messages_to_token_budget(messages: list, budget_tokens: int) -> list:
         trimmed.pop(0)
     return trimmed
 
+
 # Determine if bot should respond to a message based on mentions and channel settings
 def should_bot_respond_to_message(message):
     if message.author == bot.user:
@@ -1254,9 +1241,9 @@ def should_bot_respond_to_message(message):
     # Check for bot mention
     if bot.user in message.mentions:
         # Increment @mention count
-        asyncio.create_task(increment_user_stat(message.author.id, 'mentions'))
+        asyncio.create_task(increment_user_stat(message.author.id, "mentions"))
         return True
-    
+
     # Check if any configured trigger keyword is mentioned
     if message_contains_trigger_keyword(message.content):
         return True
@@ -1264,11 +1251,7 @@ def should_bot_respond_to_message(message):
     # Check if message is in allowed channel
     channel_ids_str = os.getenv("CHANNEL_IDS", "")
     if channel_ids_str:
-        allowed_channels = [
-            int(cid.strip())
-            for cid in channel_ids_str.split(",")
-            if cid.strip().isdigit()
-        ]
+        allowed_channels = [int(cid.strip()) for cid in channel_ids_str.split(",") if cid.strip().isdigit()]
         if message.channel.id in allowed_channels:
             return True
 
@@ -1288,6 +1271,7 @@ async def async_chat_completion(*args, **kwargs):
             response.usage.total_tokens,
         )
     return response
+
 
 def clean_response(text: str) -> str:
     text = text.strip()
@@ -1326,7 +1310,12 @@ def clean_response(text: str) -> str:
     text = re.sub(r"\[link:[^\]]*\]", "", text, flags=re.IGNORECASE)
 
     # Remove "--- Member sketches" or "--- end sketches ---" or "--- related conversation" headers
-    text = re.sub(r"---\s*(?:Member sketches|end sketches|related conversation|your own memories)[^\n]*", "", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"---\s*(?:Member sketches|end sketches|related conversation|your own memories)[^\n]*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
 
     # Remove self-knowledge section headers leaked: "[self-knowledge: ...]"
     text = re.sub(r"\[self-knowledge:[^\]]*\]", "", text, flags=re.IGNORECASE)
@@ -1354,42 +1343,45 @@ def clean_response(text: str) -> str:
         for end_char in [". ", "! ", "? "]:
             last = truncated.rfind(end_char)
             if last > len(truncated) // 2:
-                truncated = truncated[:last + 1]
+                truncated = truncated[: last + 1]
                 break
         text = truncated.strip()
         logger.warning("clean_response: truncated runaway response from %d to %d words", len(words), len(text.split()))
 
     return text
 
-async def generate_parallel_candidates(messages: list, model: str, temperature: float, max_tokens: int, num_candidates: int = 2) -> list:
+
+async def generate_parallel_candidates(
+    messages: list, model: str, temperature: float, max_tokens: int, num_candidates: int = 2
+) -> list:
     """
     Generate multiple candidate replies concurrently using the chat model.
     Uses slightly varied temperatures for diversity.
     Returns a list of candidate strings (length <= num_candidates).
     """
+
     # Get temperature variation settings from environment variables
     # Handle empty strings by using defaults
     def get_float_env(key: str, default: float) -> float:
         value = os.getenv(key, "")
         return float(value) if value and value.strip() else default
-    
+
     temp_variation_down = get_float_env("CHAT_TEMP_VARIATION_DOWN", 0.15)  # How much to subtract for lower temp
-    temp_variation_up = get_float_env("CHAT_TEMP_VARIATION_UP", 0.15)      # How much to add for higher temp
-    temp_variation_up2 = get_float_env("CHAT_TEMP_VARIATION_UP2", 0.25)   # Additional variation for most creative
-    temp_min = get_float_env("CHAT_TEMP_MIN", 0.3)                        # Minimum temperature
-    temp_max = get_float_env("CHAT_TEMP_MAX", 1.0)                        # Maximum temperature
+    temp_variation_up = get_float_env("CHAT_TEMP_VARIATION_UP", 0.15)  # How much to add for higher temp
+    temp_variation_up2 = get_float_env("CHAT_TEMP_VARIATION_UP2", 0.25)  # Additional variation for most creative
+    temp_min = get_float_env("CHAT_TEMP_MIN", 0.3)  # Minimum temperature
+    temp_max = get_float_env("CHAT_TEMP_MAX", 1.0)  # Maximum temperature
     frequency_penalty = get_float_env("CHAT_FREQUENCY_PENALTY", 0.6)
     presence_penalty = get_float_env("CHAT_PRESENCE_PENALTY", 0.3)
-    
+
     # Create temperature variations for diversity (capped at temp_max to avoid hallucinations)
     # Base temp, slightly lower (more focused), slightly higher (more creative), highest (but capped)
     temp_variations = [
-        temperature,                                    # Candidate A: base temperature
+        temperature,  # Candidate A: base temperature
         max(temp_min, temperature - temp_variation_down),  # Candidate B: slightly more focused
-        min(temp_max, temperature + temp_variation_up),  # Candidate C: slightly more creative  
+        min(temp_max, temperature + temp_variation_up),  # Candidate C: slightly more creative
         min(temp_max, temperature + temp_variation_up2),  # Candidate D: most creative (capped at temp_max)
     ]
-    
 
     async def generate_with_retry(candidate_idx: int, retries: int = 2, backoff_seconds: float = 2.0):
         attempt = 0
@@ -1407,20 +1399,19 @@ async def generate_parallel_candidates(messages: list, model: str, temperature: 
                 )
             except Exception as e:
                 err_text = str(e)
-                logger.error(f"❌ Candidate #{candidate_idx} (temp={temp:.2f}) attempt {attempt+1} failed: {format_error_message(e)}")
+                logger.error(
+                    f"❌ Candidate #{candidate_idx} (temp={temp:.2f}) attempt {attempt+1} failed: {format_error_message(e)}"
+                )
                 # Retry on model_not_found or HTTP 404 from gateway warm-up
                 should_retry = (
-                    'model_not_found' in err_text or '404' in err_text or 'Not Found' in err_text
+                    "model_not_found" in err_text or "404" in err_text or "Not Found" in err_text
                 ) and attempt < retries
                 if not should_retry:
                     raise
                 await asyncio.sleep(backoff_seconds * (attempt + 1))
                 attempt += 1
 
-    generation_tasks = [
-        asyncio.create_task(generate_with_retry(i))
-        for i in range(max(1, num_candidates))
-    ]
+    generation_tasks = [asyncio.create_task(generate_with_retry(i)) for i in range(max(1, num_candidates))]
 
     results = await asyncio.gather(*generation_tasks, return_exceptions=True)
 
@@ -1433,7 +1424,9 @@ async def generate_parallel_candidates(messages: list, model: str, temperature: 
             msg = result.choices[0].message
             candidate_text = msg.content or ""
             if not candidate_text.strip():
-                logger.warning(f"⚠ Candidate #{idx+1} generated tokens but content is empty (thinking model may have used all tokens on reasoning)")
+                logger.warning(
+                    f"⚠ Candidate #{idx+1} generated tokens but content is empty (thinking model may have used all tokens on reasoning)"
+                )
                 continue
             candidate_replies.append(candidate_text)
             temp_used = temp_variations[idx % len(temp_variations)]
@@ -1442,6 +1435,7 @@ async def generate_parallel_candidates(messages: list, model: str, temperature: 
             logger.error(f"❌ Failed to parse candidate #{idx+1} response: {format_error_message(parse_error)}")
 
     return candidate_replies
+
 
 async def judge_best_of_candidates(messages_context: list, candidates: list, model: str) -> int:
     """
@@ -1456,15 +1450,15 @@ async def judge_best_of_candidates(messages_context: list, candidates: list, mod
     # Get more context for better judgment (last 12 messages)
     recent_context = messages_context[-12:] if len(messages_context) > 12 else messages_context
     formatted_context = format_messages(recent_context)
-    
+
     # Extract the most recent user message to emphasize what we're responding to
     last_user_msg = None
     for msg in reversed(recent_context):
-        if msg.get('role') == 'user':
-            last_user_msg = msg.get('content', '').strip()
+        if msg.get("role") == "user":
+            last_user_msg = msg.get("content", "").strip()
             break
 
-    labels = ["A", "B", "C", "D"][:len(candidates)]
+    labels = ["A", "B", "C", "D"][: len(candidates)]
     allowed = ", ".join(labels)
 
     system_prompt = (
@@ -1492,17 +1486,16 @@ async def judge_best_of_candidates(messages_context: list, candidates: list, mod
     if last_user_msg:
         user_prompt += f"MOST RECENT MESSAGE to respond to:\n{last_user_msg}\n\n"
     user_prompt += f"Now evaluate how well EACH candidate continues this conversation:\n\n{candidates_block}\n\n"
-    user_prompt += f"Which candidate best fits the conversation flow and addresses what was just said? Reply with only: {allowed}"
+    user_prompt += (
+        f"Which candidate best fits the conversation flow and addresses what was just said? Reply with only: {allowed}"
+    )
 
     try:
         response = await async_chat_completion(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=0.1,  # Very low but not 0 to allow slight variation
-            max_tokens=5
+            max_tokens=5,
         )
         raw_choice = response.choices[0].message.content.strip().upper()
         # Try to extract the letter from the response
@@ -1516,13 +1509,12 @@ async def judge_best_of_candidates(messages_context: list, candidates: list, mod
         logger.error(f"❌ Error during judge selection: {format_error_message(e)}")
         return 0
 
+
 def enhance_img2img_prompt(prompt: str, strength: float) -> str:
     """Enhance img2img prompts based on strength for better results."""
     # Base quality enhancers
-    quality_enhancers = [
-        "high quality", "detailed", "sharp focus", "professional photography"
-    ]
-    
+    quality_enhancers = ["high quality", "detailed", "sharp focus", "professional photography"]
+
     # Style enhancers based on strength
     if strength <= 0.3:
         # Low strength - subtle changes, preserve original style
@@ -1533,11 +1525,11 @@ def enhance_img2img_prompt(prompt: str, strength: float) -> str:
     else:
         # High strength - major changes
         style_enhancers = ["dramatic transformation", "complete style change", "artistic reinterpretation"]
-    
+
     # Combine enhancers
     all_enhancers = quality_enhancers + style_enhancers
     enhanced_prompt = f"{prompt}, {', '.join(all_enhancers)}"
-    
+
     return enhanced_prompt
 
 
@@ -1550,32 +1542,32 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
     message_history = []
     seen_messages = set()
     current_topic_messages = []  # Track messages in current topic
-    background_messages = []     # Track older context messages
-    
+    background_messages = []  # Track older context messages
+
     # Create a single session for all URL requests
     async with aiohttp.ClientSession() as session:
         async for msg in channel.history(limit=limit, oldest_first=False):
             # Skip command messages and bot's image generation messages
             if msg.content.startswith("!") or (msg.author == bot.user and "Generated Image" in msg.content):
                 continue
-                
+
             # Skip current message if provided
             if current_message_id and msg.id == current_message_id:
                 continue
-            
+
             # Create base message content (no URL processing for historical messages)
             message_content = msg.content
-            
+
             # Check if this message has image descriptions stored
             image_desc_for_msg = message_image_descriptions.get(msg.id, [])
-            
+
             # Create unique message identifier
             message_key = f"{msg.author.display_name}:{message_content}"
             if message_key in seen_messages:
                 continue
-                
+
             seen_messages.add(message_key)
-            
+
             # Format message with role assignment and author
             # Bot messages: role="assistant", no name prefix (role already indicates it's the bot)
             # User messages: role="user", include nickname/display name prefix (multiple users can speak)
@@ -1586,35 +1578,33 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
             else:
                 # Include user's display name (nickname) to distinguish between multiple users
                 formatted_content = f"{msg.author.display_name}: {message_content}"
-            
+
             # If there are image descriptions for this message, prepend them
             if image_desc_for_msg:
                 image_context = "\n".join(image_desc_for_msg)
                 formatted_content = f"{image_context}\n{formatted_content}" if formatted_content else image_context
-            
+
             formatted_message = {"role": role, "content": formatted_content}
-            
+
             # Prioritize recent messages much more heavily
             if len(current_topic_messages) < 8:  # Keep most recent 8 messages for current topic
                 current_topic_messages.append(formatted_message)
             elif len(background_messages) < 4:  # Only keep 4 background messages maximum
                 background_messages.append(formatted_message)
-    
+
     # Clean up old URL cache entries
     current_time = time.time()
-    expired_urls = [url for url, (_, timestamp) in url_cache.items() 
-                   if current_time - timestamp > URL_CACHE_TTL]
+    expired_urls = [url for url, (_, timestamp) in url_cache.items() if current_time - timestamp > URL_CACHE_TTL]
     for url in expired_urls:
         del url_cache[url]
-    
+
     # Clean up old image descriptions to prevent memory bloat
     # Keep only descriptions for message IDs that were actually seen in recent history
-    seen_message_ids = {msg.id async for msg in channel.history(limit=limit*2, oldest_first=False)}
-    message_ids_to_remove = [msg_id for msg_id in message_image_descriptions.keys() 
-                             if msg_id not in seen_message_ids]
+    seen_message_ids = {msg.id async for msg in channel.history(limit=limit * 2, oldest_first=False)}
+    message_ids_to_remove = [msg_id for msg_id in message_image_descriptions.keys() if msg_id not in seen_message_ids]
     for msg_id in message_ids_to_remove:
         del message_image_descriptions[msg_id]
-    
+
     # Put minimal background context first, then focus heavily on recent messages
     message_history = list(reversed(background_messages)) + list(reversed(current_topic_messages))
     return message_history  # This would have oldest → newest order
@@ -1624,6 +1614,7 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
 # Vision: Process images using LM Studio vision model
 # ---------------------------------------------
 
+
 async def process_image_attachment(attachment, message):
     """
     Process an image attachment using LM Studio's vision model via direct HTTP.
@@ -1632,7 +1623,7 @@ async def process_image_attachment(attachment, message):
     """
     if os.getenv("ENABLE_VISION", "false").lower() != "true":
         return None
-    
+
     if not any(attachment.filename.lower().endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".gif", ".webp"]):
         return None
 
@@ -1649,6 +1640,7 @@ async def process_image_attachment(attachment, message):
         # Transcode to JPEG for maximum compatibility
         try:
             from io import BytesIO
+
             with Image.open(BytesIO(image_data)) as im:
                 if im.mode in ("P", "RGBA"):
                     im = im.convert("RGB")
@@ -1708,11 +1700,11 @@ async def process_image_attachment(attachment, message):
                     description = (out.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
                     if description:
                         logger.info(f"🖼️ Image from {message.author.display_name}: {description}")
-                        
+
                         # Archive the image and log to activity
                         guild_id = message.guild.id if message.guild else None
                         channel_id = message.channel.id if message.channel else None
-                        
+
                         filename = archive_vision_image(
                             original_image_data,
                             description=description,
@@ -1720,9 +1712,9 @@ async def process_image_attachment(attachment, message):
                             username=str(message.author),
                             guild_id=guild_id,
                             channel_id=channel_id,
-                            original_url=attachment.url
+                            original_url=attachment.url,
                         )
-                        
+
                         if filename:
                             archive_sent_message(
                                 f"🖼️ Vision: {description}",
@@ -1731,9 +1723,9 @@ async def process_image_attachment(attachment, message):
                                 guild_id=guild_id,
                                 channel_id=channel_id,
                                 image_filename=filename,
-                                event_type="vision"
+                                event_type="vision",
                             )
-                        
+
                         return description
 
             # Second try: OpenAI-style input_image with data URI
@@ -1743,7 +1735,10 @@ async def process_image_attachment(attachment, message):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "input_image", "image_url": {"url": f"data:image/{image_subtype};base64,{encoded_image}"}},
+                            {
+                                "type": "input_image",
+                                "image_url": {"url": f"data:image/{image_subtype};base64,{encoded_image}"},
+                            },
                             {"type": "text", "text": prompt_text},
                         ],
                     }
@@ -1757,11 +1752,11 @@ async def process_image_attachment(attachment, message):
                     description = (out.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
                     if description:
                         logger.info(f"🖼️ Image from {message.author.display_name}: {description}")
-                        
+
                         # Archive the image and log to activity
                         guild_id = message.guild.id if message.guild else None
                         channel_id = message.channel.id if message.channel else None
-                        
+
                         filename = archive_vision_image(
                             original_image_data,
                             description=description,
@@ -1769,9 +1764,9 @@ async def process_image_attachment(attachment, message):
                             username=str(message.author),
                             guild_id=guild_id,
                             channel_id=channel_id,
-                            original_url=attachment.url
+                            original_url=attachment.url,
                         )
-                        
+
                         if filename:
                             archive_sent_message(
                                 f"🖼️ Vision: {description}",
@@ -1780,9 +1775,9 @@ async def process_image_attachment(attachment, message):
                                 guild_id=guild_id,
                                 channel_id=channel_id,
                                 image_filename=filename,
-                                event_type="vision"
+                                event_type="vision",
                             )
-                        
+
                         return description
 
                 # Third try: data URI (image_url) then raw with mime_type
@@ -1792,7 +1787,10 @@ async def process_image_attachment(attachment, message):
                         {
                             "role": "user",
                             "content": [
-                                {"type": "image_url", "image_url": {"url": f"data:image/{image_subtype};base64,{encoded_image}"}},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/{image_subtype};base64,{encoded_image}"},
+                                },
                                 {"type": "text", "text": prompt_text},
                             ],
                         }
@@ -1806,11 +1804,11 @@ async def process_image_attachment(attachment, message):
                         description = (out.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
                         if description:
                             logger.info(f"🖼️ Image from {message.author.display_name}: {description}")
-                            
+
                             # Archive the image and log to activity
                             guild_id = message.guild.id if message.guild else None
                             channel_id = message.channel.id if message.channel else None
-                            
+
                             filename = archive_vision_image(
                                 original_image_data,
                                 description=description,
@@ -1818,9 +1816,9 @@ async def process_image_attachment(attachment, message):
                                 username=str(message.author),
                                 guild_id=guild_id,
                                 channel_id=channel_id,
-                                original_url=attachment.url
+                                original_url=attachment.url,
                             )
-                            
+
                             if filename:
                                 archive_sent_message(
                                     f"🖼️ Vision: {description}",
@@ -1829,9 +1827,9 @@ async def process_image_attachment(attachment, message):
                                     guild_id=guild_id,
                                     channel_id=channel_id,
                                     image_filename=filename,
-                                    event_type="vision"
+                                    event_type="vision",
                                 )
-                            
+
                             return description
 
                     payload_raw_b64 = {
@@ -1840,7 +1838,10 @@ async def process_image_attachment(attachment, message):
                             {
                                 "role": "user",
                                 "content": [
-                                    {"type": "image_url", "image_url": {"url": encoded_image, "mime_type": f"image/{image_subtype}"}},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {"url": encoded_image, "mime_type": f"image/{image_subtype}"},
+                                    },
                                     {"type": "text", "text": prompt_text},
                                 ],
                             }
@@ -1851,14 +1852,16 @@ async def process_image_attachment(attachment, message):
                     async with session.post(endpoint, headers=headers, json=payload_raw_b64) as r3:
                         if r3.status == 200:
                             out = await r3.json()
-                            description = (out.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+                            description = (
+                                out.get("choices", [{}])[0].get("message", {}).get("content", "") or ""
+                            ).strip()
                             if description:
                                 logger.info(f"🖼️ Image from {message.author.display_name}: {description}")
-                                
+
                                 # Archive the image and log to activity
                                 guild_id = message.guild.id if message.guild else None
                                 channel_id = message.channel.id if message.channel else None
-                                
+
                                 filename = archive_vision_image(
                                     original_image_data,
                                     description=description,
@@ -1866,9 +1869,9 @@ async def process_image_attachment(attachment, message):
                                     username=str(message.author),
                                     guild_id=guild_id,
                                     channel_id=channel_id,
-                                    original_url=attachment.url
+                                    original_url=attachment.url,
                                 )
-                                
+
                                 if filename:
                                     archive_sent_message(
                                         f"🖼️ Vision: {description}",
@@ -1877,9 +1880,9 @@ async def process_image_attachment(attachment, message):
                                         guild_id=guild_id,
                                         channel_id=channel_id,
                                         image_filename=filename,
-                                        event_type="vision"
+                                        event_type="vision",
                                     )
-                                
+
                                 return description
 
                         # Compact debug only
@@ -1899,7 +1902,9 @@ async def process_image_attachment(attachment, message):
                             e3 = await r3.text()
                         except Exception:
                             e3 = str(r3.status)
-                        logger.debug(f"Vision processing failed: HTTP {r0.status}/{r1.status}/{r2.status}/{r3.status} - {e0[:70]} | {e1[:70]} | {e2[:70]} | {e3[:70]}")
+                        logger.debug(
+                            f"Vision processing failed: HTTP {r0.status}/{r1.status}/{r2.status}/{r3.status} - {e0[:70]} | {e1[:70]} | {e2[:70]} | {e3[:70]}"
+                        )
                         return None
 
     except Exception as e:
@@ -1910,6 +1915,7 @@ async def process_image_attachment(attachment, message):
 # ---------------------------------------------
 # New Slash Commands: /img2img and /inpaint
 # ---------------------------------------------
+
 
 @bot.tree.command(name="img2img", description="Stable Diffusion 3.5: transform an image with a prompt.")
 @app_commands.describe(
@@ -1922,8 +1928,8 @@ async def img2img_cmd(
     interaction: discord.Interaction,
     prompt: str,
     strength: app_commands.Range[float, 0.0, 1.0] = 0.3,  # Better default - more subtle
-    steps: app_commands.Range[int, 1, 50] = 20,           # Optimized for speed/quality
-    guidance: app_commands.Range[float, 0.0, 20.0] = 7.5, # Better for SD 3.5 Medium
+    steps: app_commands.Range[int, 1, 50] = 20,  # Optimized for speed/quality
+    guidance: app_commands.Range[float, 0.0, 20.0] = 7.5,  # Better for SD 3.5 Medium
 ):
     if not SD_IMG2IMG_URL:
         await interaction.response.send_message("❌ SD_IMG2IMG_URL not configured.", ephemeral=True)
@@ -1941,7 +1947,9 @@ async def img2img_cmd(
             break
 
     if not last_image:
-        await interaction.response.send_message("❌ Attach an image (or have one recently in the channel) and try again.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Attach an image (or have one recently in the channel) and try again.", ephemeral=True
+        )
         return
 
     await interaction.response.defer()
@@ -2019,8 +2027,8 @@ async def inpaint_cmd(
     interaction: discord.Interaction,
     prompt: str,
     strength: app_commands.Range[float, 0.0, 1.0] = 0.8,  # Good for inpaint
-    steps: app_commands.Range[int, 1, 50] = 20,          # Optimized
-    guidance: app_commands.Range[float, 0.0, 20.0] = 7.5, # Better for SD 3.5
+    steps: app_commands.Range[int, 1, 50] = 20,  # Optimized
+    guidance: app_commands.Range[float, 0.0, 20.0] = 7.5,  # Better for SD 3.5
 ):
     if not SD_INPAINT_URL:
         await interaction.response.send_message("❌ SD_INPAINT_URL not configured.", ephemeral=True)
@@ -2036,7 +2044,9 @@ async def inpaint_cmd(
             break
 
     if len(attachments) < 2:
-        await interaction.response.send_message("❌ Please upload an image and a mask (white=edit, black=keep) and try again.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ Please upload an image and a mask (white=edit, black=keep) and try again.", ephemeral=True
+        )
         return
 
     image_att, mask_att = attachments[0], attachments[1]
@@ -2113,18 +2123,20 @@ async def inpaint_cmd(
     steps="Inference steps (20-30 recommended)",
     guidance="CFG guidance scale (7.5-12 recommended for SD 3.5)",
 )
-@app_commands.choices(direction=[
-    app_commands.Choice(name="Horizontal (left + right)", value="horizontal"),
-    app_commands.Choice(name="Vertical (top + bottom)", value="vertical"),
-    app_commands.Choice(name="Both (all directions)", value="both"),
-])
+@app_commands.choices(
+    direction=[
+        app_commands.Choice(name="Horizontal (left + right)", value="horizontal"),
+        app_commands.Choice(name="Vertical (top + bottom)", value="vertical"),
+        app_commands.Choice(name="Both (all directions)", value="both"),
+    ]
+)
 async def outpaint_cmd(
     interaction: discord.Interaction,
     prompt: str,
     direction: app_commands.Choice[str],
     strength: app_commands.Range[float, 0.0, 1.0] = 0.8,  # Higher for outpaint
-    steps: app_commands.Range[int, 1, 50] = 20,          # Optimized
-    guidance: app_commands.Range[float, 0.0, 20.0] = 7.5, # Better for SD 3.5
+    steps: app_commands.Range[int, 1, 50] = 20,  # Optimized
+    guidance: app_commands.Range[float, 0.0, 20.0] = 7.5,  # Better for SD 3.5
 ):
     # Prefer hybrid outpaint endpoint if available
     if not SD_OUTPAINT_HYBRID_URL and not SD_INPAINT_URL:
@@ -2146,9 +2158,11 @@ async def outpaint_cmd(
         await interaction.response.send_message("❌ Please upload an image and try again.", ephemeral=True)
         return
 
-    logger.info(f"🖼️ Slash Command 'outpaint' invoked by {interaction.user} with prompt: '{prompt}', direction: '{direction.value}', strength: '{strength}'")
+    logger.info(
+        f"🖼️ Slash Command 'outpaint' invoked by {interaction.user} with prompt: '{prompt}', direction: '{direction.value}', strength: '{strength}'"
+    )
     await interaction.response.send_message("🛠️ Your outpaint request has been queued...", ephemeral=True)
-    
+
     # Determine dimensions based on direction
     direction_value = direction.value
     if direction_value == "horizontal":
@@ -2160,24 +2174,28 @@ async def outpaint_cmd(
     else:  # both
         width = int(SD_DEFAULT_WIDTH * 1.25)
         height = int(SD_DEFAULT_HEIGHT * 1.25)
-    
+
     # Ensure dimensions are multiples of 64
     width = ((width + 63) // 64) * 64
     height = ((height + 63) // 64) * 64
-    
-    await bot.sd_queue.put({
-        'type': 'outpaint',
-        'interaction': interaction,
-        'prompt': prompt,
-        'direction': direction_value,
-        'width': width,
-        'height': height,
-        'seed': -1,  # Random seed
-        'strength': strength,
-        'steps': steps,
-        'guidance': guidance,
-    })
-    logger.info(f"🖼️ Queued outpaint generation for {interaction.user}: prompt='{prompt}', direction='{direction_value}', strength='{strength}'")
+
+    await bot.sd_queue.put(
+        {
+            "type": "outpaint",
+            "interaction": interaction,
+            "prompt": prompt,
+            "direction": direction_value,
+            "width": width,
+            "height": height,
+            "seed": -1,  # Random seed
+            "strength": strength,
+            "steps": steps,
+            "guidance": guidance,
+        }
+    )
+    logger.info(
+        f"🖼️ Queued outpaint generation for {interaction.user}: prompt='{prompt}', direction='{direction_value}', strength='{strength}'"
+    )
 
 
 """
@@ -2186,7 +2204,8 @@ Other commands
 ---------------------------------------------------------------------------------
 """
 
-@bot.command(name='reloadenv', help='Reloads environment variables and text files (Owner only)')
+
+@bot.command(name="reloadenv", help="Reloads environment variables and text files (Owner only)")
 async def reload_env(ctx):
     # Check if the user is in OWNER_IDS
     if ctx.author.id not in OWNER_IDS:
@@ -2213,21 +2232,21 @@ async def reload_env(ctx):
         logger.error(f"Error during env and file reload by {ctx.author}: {str(e)}")
 
 
-@bot.command(name='synccommands', help='Syncs slash commands to Discord (Owner only)')
+@bot.command(name="synccommands", help="Syncs slash commands to Discord (Owner only)")
 async def sync_commands(ctx):
     # Check if the user is in OWNER_IDS
     if ctx.author.id not in OWNER_IDS:
         await ctx.send("❌ You don't have permission to use this command.", ephemeral=True)
         logger.warning(f"Unauthorized attempt to sync commands by {ctx.author}")
         return
-    
+
     await ctx.send("🔄 Syncing slash commands...", ephemeral=True)
-    
+
     try:
         # List all registered commands for debugging
         registered_commands = [cmd.name for cmd in bot.tree.get_commands()]
         logger.info(f"Registered commands before sync: {registered_commands}")
-        
+
         # Sync to guild first (instant) if GUILD_ID is set, then globally
         guild_id_str = os.getenv("GUILD_ID")
         if guild_id_str:
@@ -2257,7 +2276,7 @@ async def sync_commands(ctx):
             response_msg += f"Commands: {', '.join(synced_names)}"
             await ctx.send(response_msg, ephemeral=True)
             logger.info(f"Commands synced globally by {ctx.author}")
-        
+
     except Exception as e:
         error_message = f"❌ Error syncing commands: {str(e)}"
         await ctx.send(error_message, ephemeral=True)
@@ -2268,13 +2287,15 @@ async def sync_commands(ctx):
 @app_commands.describe(
     action="What to do: view (default), core (view core summary), archive (view pruned entries), reflect (force reflection now), or reset"
 )
-@app_commands.choices(action=[
-    app_commands.Choice(name="view", value="view"),
-    app_commands.Choice(name="core", value="core"),
-    app_commands.Choice(name="archive", value="archive"),
-    app_commands.Choice(name="reflect", value="reflect"),
-    app_commands.Choice(name="reset", value="reset"),
-])
+@app_commands.choices(
+    action=[
+        app_commands.Choice(name="view", value="view"),
+        app_commands.Choice(name="core", value="core"),
+        app_commands.Choice(name="archive", value="archive"),
+        app_commands.Choice(name="reflect", value="reflect"),
+        app_commands.Choice(name="reset", value="reset"),
+    ]
+)
 async def soupyself_command(
     interaction: discord.Interaction,
     action: Optional[app_commands.Choice[str]] = None,
@@ -2283,7 +2304,7 @@ async def soupyself_command(
         await interaction.response.send_message("not for you.", ephemeral=True)
         return
 
-    act = (action.value if action else "view")
+    act = action.value if action else "view"
     guild_id = interaction.guild_id
 
     if not guild_id:
@@ -2299,6 +2320,7 @@ async def soupyself_command(
 
     if act == "view":
         from soupy_database.self_context import load_self_archive
+
         content = load_self_md(guild_id)
         pending = pending_interaction_count(guild_id)
         archive = load_self_archive(guild_id)
@@ -2327,10 +2349,12 @@ async def soupyself_command(
 
     elif act == "core":
         from soupy_database.self_context import load_self_core
+
         core = load_self_core(guild_id)
         if not core:
             await interaction.response.send_message(
-                "no core summary yet. run `/soupyself reflect` first.", ephemeral=True,
+                "no core summary yet. run `/soupyself reflect` first.",
+                ephemeral=True,
             )
         else:
             header = f"**SELF.MD CORE** ({len(core)} chars — always in system prompt)\n"
@@ -2348,6 +2372,7 @@ async def soupyself_command(
 
     elif act == "archive":
         from soupy_database.self_context import load_self_archive
+
         archive = load_self_archive(guild_id)
         if not archive:
             await interaction.response.send_message("no archive yet.", ephemeral=True)
@@ -2370,10 +2395,13 @@ async def soupyself_command(
         pending = pending_interaction_count(guild_id)
         logger.info(
             "🪞 /soupyself reflect invoked by %s for guild %s (%d pending interaction(s))",
-            interaction.user, guild_id, pending,
+            interaction.user,
+            guild_id,
+            pending,
         )
         try:
             from soupy_database.rag import embed_texts_lm_studio
+
             async with aiohttp.ClientSession() as embed_session:
                 result = await self_md_reflect(
                     guild_id=guild_id,
@@ -2383,6 +2411,7 @@ async def soupyself_command(
                     embed_session=embed_session,
                 )
             from soupy_database.self_context import load_self_core
+
             core = load_self_core(guild_id)
             core_len = len(core) if core else 0
             await interaction.followup.send(
@@ -2395,6 +2424,7 @@ async def soupyself_command(
 
     elif act == "reset":
         from soupy_database.self_context import save_self_md, save_self_core
+
         save_self_md(guild_id, "")
         save_self_core(guild_id, "")
         await interaction.response.send_message("self-document and core cleared.", ephemeral=True)
@@ -2411,7 +2441,7 @@ async def help_command(interaction: discord.Interaction):
 
     # Owner-only commands to exclude
     owner_only_commands = {"soupyscan", "reloadenv", "synccommands", "soupyself"}
-    
+
     # Commands to exclude from help (deprecated or not meant for users)
     excluded_commands = {"img2img", "inpaint", "outpaint", "testurl", "soupyscan"}
 
@@ -2427,7 +2457,7 @@ async def help_command(interaction: discord.Interaction):
         "stats": "",
         "status": "",
     }
-    
+
     # Improved command descriptions
     command_descriptions = {
         "sd": "Generate an image using Stable Diffusion. Provide a description of what you want to see, optionally choose a size and seed.",
@@ -2462,19 +2492,19 @@ async def help_command(interaction: discord.Interaction):
         commands_text.append("**🔹 Slash Commands:**\n")
         for cmd in sorted(slash_commands_list, key=lambda x: x.name):
             cmd_name = f"/{cmd.name}"
-            
+
             # Use improved description if available, otherwise fall back to command description
             cmd_desc = command_descriptions.get(cmd.name, cmd.description or "No description provided.")
-            
+
             # Get usage from manual mapping
             usage = command_usage_examples.get(cmd.name, "")
-            
+
             if usage:
                 commands_text.append(f"**{cmd_name}** {usage}")
             else:
                 commands_text.append(f"**{cmd_name}**")
             commands_text.append(f"  → {cmd_desc}\n")
-        
+
         commands_text.append("\n")
 
     # Add prefix commands
@@ -2493,46 +2523,46 @@ async def help_command(interaction: discord.Interaction):
 
     # Split into multiple embeds if needed (Discord embed description limit is 4096 chars)
     full_text = "\n".join(commands_text)
-    
+
     # Create embeds, splitting if necessary
     embeds = []
-    
+
     if len(full_text) <= 4000:  # Leave some buffer
         embed = discord.Embed(
             title="📚 Soupy Help Menu",
             description=f"Here's a list of all available commands:\n\n{full_text}",
             color=discord.Color.blue(),
-            timestamp=datetime.utcnow()
+            timestamp=datetime.utcnow(),
         )
         embeds.append(embed)
     else:
         # Split into multiple embeds
         chunks = []
         current_chunk = "Here's a list of all available commands:\n\n"
-        
+
         for line in commands_text:
             if len(current_chunk) + len(line) + 1 > 4000:
                 chunks.append(current_chunk)
                 current_chunk = line + "\n"
             else:
                 current_chunk += line + "\n"
-        
+
         if current_chunk:
             chunks.append(current_chunk)
-        
+
         for i, chunk in enumerate(chunks):
             embed = discord.Embed(
                 title=f"📚 Soupy Help Menu" + (f" (Part {i+1}/{len(chunks)})" if len(chunks) > 1 else ""),
                 description=chunk,
                 color=discord.Color.blue(),
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
             )
             embeds.append(embed)
-    
+
     # Add footer to last embed
     embeds[-1].set_footer(
         text="Use the commands as shown above to interact with me!",
-        icon_url=bot.user.avatar.url if bot.user.avatar else None
+        icon_url=bot.user.avatar.url if bot.user.avatar else None,
     )
 
     # Send the embed(s) as an ephemeral message
@@ -2542,15 +2572,12 @@ async def help_command(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embeds[0], ephemeral=True)
         for embed in embeds[1:]:
             await interaction.followup.send(embed=embed, ephemeral=True)
-    
+
     logger.info(f"📚 Sent help menu to {interaction.user}")
 
 
 # Setup the scan command - all database functionality is in soupy_database module
 setup_scan_command(bot, OWNER_IDS)
-
-
-
 
 
 @bot.tree.command(name="soupystats", description="Server and bot statistics dashboard.")
@@ -2564,6 +2591,7 @@ async def stats_command(interaction: discord.Interaction):
         import sqlite3
 
         from soupy_database.database import get_stats as get_db_stats, get_db_path
+
         db_stats = get_db_stats(guild_id)
 
         embed = discord.Embed(
@@ -2600,38 +2628,32 @@ async def stats_command(interaction: discord.Interaction):
                 _conn.row_factory = sqlite3.Row
                 _cur = _conn.cursor()
 
-                _cur.execute(
-                    """
+                _cur.execute("""
                     SELECT MAX(COALESCE(NULLIF(TRIM(nickname),''), NULLIF(TRIM(username),''))) AS name,
                            COUNT(*) AS cnt
                     FROM messages GROUP BY user_id ORDER BY cnt DESC LIMIT 10
-                    """
-                )
+                    """)
                 top_senders = _cur.fetchall()
                 if top_senders:
                     embed.add_field(
                         name="💬 Most Active Users",
                         value="\n".join(
-                            f"{i+1}. **{r['name'] or '?'}** — {r['cnt']:,}"
-                            for i, r in enumerate(top_senders)
+                            f"{i+1}. **{r['name'] or '?'}** — {r['cnt']:,}" for i, r in enumerate(top_senders)
                         ),
                         inline=True,
                     )
 
                 # ── Most Active Channels ─────────────────────────
-                _cur.execute(
-                    """
+                _cur.execute("""
                     SELECT channel_name, COUNT(*) AS cnt
                     FROM messages GROUP BY channel_id ORDER BY cnt DESC LIMIT 5
-                    """
-                )
+                    """)
                 top_channels = _cur.fetchall()
                 if top_channels:
                     embed.add_field(
                         name="📁 Most Active Channels",
                         value="\n".join(
-                            f"{i+1}. **#{r['channel_name']}** — {r['cnt']:,}"
-                            for i, r in enumerate(top_channels)
+                            f"{i+1}. **#{r['channel_name']}** — {r['cnt']:,}" for i, r in enumerate(top_channels)
                         ),
                         inline=True,
                     )
@@ -2646,7 +2668,10 @@ async def stats_command(interaction: discord.Interaction):
                 _cur.execute("SELECT COUNT(*) AS cnt FROM messages WHERE date >= date('now', '-1 day')")
                 day_count = int(_cur.fetchone()["cnt"])
 
-                activity_parts = [f"Last 24h: **{day_count:,}** msgs", f"Last 7d: **{week_count:,}** msgs from **{week_users}** users"]
+                activity_parts = [
+                    f"Last 24h: **{day_count:,}** msgs",
+                    f"Last 7d: **{week_count:,}** msgs from **{week_users}** users",
+                ]
                 if date_range and date_range["oldest"]:
                     activity_parts.append(f"Archive: {date_range['oldest']} → {date_range['newest']}")
                 embed.add_field(name="📈 Recent Activity", value="\n".join(activity_parts), inline=False)
@@ -2670,8 +2695,7 @@ async def stats_command(interaction: discord.Interaction):
                 embed.add_field(
                     name="🎨 Top Image Generators",
                     value="\n".join(
-                        f"{i+1}. **{u['username']}** — {u['images_generated']:,}"
-                        for i, u in enumerate(top_images)
+                        f"{i+1}. **{u['username']}** — {u['images_generated']:,}" for i, u in enumerate(top_images)
                     ),
                     inline=True,
                 )
@@ -2706,13 +2730,14 @@ async def check_sd_server_status() -> bool:
         logger.error(f"SD server URL: {SD_SERVER_URL}")
         return False
 
+
 @bot.tree.command(name="status", description="Displays the current status of the bot, SD server, and chat functions.")
 async def status_command(interaction: discord.Interaction):
     logger.info(f"Command 'status' invoked by {interaction.user}")
-    
+
     # Defer the response immediately
     await interaction.response.defer()
-    
+
     # Calculate uptime
     if bot_start_time:
         current_time = datetime.utcnow()
@@ -2720,25 +2745,25 @@ async def status_command(interaction: discord.Interaction):
         uptime_str = format_uptime(uptime_duration)
     else:
         uptime_str = "Uptime information not available."
-    
+
     # Check SD server status
     sd_server_online = await check_sd_server_status()
     sd_status = "🟢 Online" if sd_server_online else "🔴 Offline"
-    
+
     # Check chat functions status
     await check_chat_functions()
     chat_status = "🟢 Online" if chat_functions_online else "🔴 Offline"
-    
+
     # Create an embed message
-    embed = discord.Embed(
-        title="Bot Status",
-        color=discord.Color.blue()
-    )
+    embed = discord.Embed(title="Bot Status", color=discord.Color.blue())
     embed.add_field(name="SD Server", value=sd_status, inline=False)
     embed.add_field(name="Chat Functions", value=chat_status, inline=False)
     embed.add_field(name="Uptime", value=uptime_str, inline=False)
-    embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-    
+    embed.set_footer(
+        text=f"Requested by {interaction.user}",
+        icon_url=interaction.user.avatar.url if interaction.user.avatar else None,
+    )
+
     # Send as a followup instead of direct response
     await interaction.followup.send(embed=embed)
     logger.info(f"Sent status information to {interaction.user}")
@@ -2787,8 +2812,9 @@ magic_8ball_responses = [
     "Maybe touch some grass first.",
     "I'm just a ball, man.",
     "Can you not?",
-    "Six seven six seven."
+    "Six seven six seven.",
 ]
+
 
 @bot.tree.command(name="8ball", description="Ask the Magic 8-Ball a question and get a response.")
 @app_commands.describe(question="Your question for the Magic 8-Ball.")
@@ -2803,42 +2829,42 @@ async def eight_ball_command(interaction: discord.Interaction, question: str):
 # 9Ball Command
 # ---------------------------------------------------------------------------
 
+
 @bot.tree.command(
-    name="9ball", 
-    description="Ask the mystical 9-ball (local LLM) a question and receive a custom response."
+    name="9ball", description="Ask the mystical 9-ball (local LLM) a question and receive a custom response."
 )
 @app_commands.describe(question="Your mystical question for the 9-ball.")
 async def nine_ball_command(interaction: discord.Interaction, question: str):
     logger.info(f"Command '9ball' invoked by {interaction.user} with question: '{question}'")
-    
+
     nineball_behaviour = os.getenv("9BALL", "You are a mystical 9-ball that provides enigmatic answers.")
-    
+
     # Compose system and user prompts
     system_prompt = {"role": "system", "content": nineball_behaviour}
     user_prompt = {"role": "user", "content": question}
     messages_for_llm = [system_prompt, user_prompt]
-    
+
     # Debug logging
     formatted_messages = format_messages(messages_for_llm)
     logger.debug(f"Sending the following messages to LLM (9ball):\n{formatted_messages}")
-    
+
     try:
         # Defer the interaction to extend the response time
         await interaction.response.defer()
-        
+
         async with interaction.channel.typing():
             response = await async_chat_completion(
                 model=os.getenv("LOCAL_CHAT"),
                 messages=messages_for_llm,
                 temperature=float(os.getenv("NINE_BALL_TEMPERATURE", 0.8)),
-                max_tokens=45 
+                max_tokens=45,
             )
             reply = response.choices[0].message.content.strip()
-        
+
         # Send the response as a follow-up with the question included
         await interaction.followup.send(f'Question: "{question}"\nThe 9-Ball says: "{reply}"')
         logger.info(f"Responded to {interaction.user} with: '{reply}'")
-    
+
     except Exception as e:
         error_msg = f"Error in '9ball' command for {interaction.user}: {format_error_message(e)}"
         logger.error(error_msg)
@@ -2850,42 +2876,41 @@ async def nine_ball_command(interaction: discord.Interaction, question: str):
             logger.error("Failed to send follow-up error message for '9ball' command.")
 
 
-
 @bot.tree.command(name="testurl", description="Test URL extraction functionality")
 @app_commands.describe(text="Text containing URLs to test extraction")
 async def test_url_command(interaction: discord.Interaction, text: str):
     """Test command to verify URL extraction is working"""
     logger.info(f"URL test command invoked by {interaction.user} with text: '{text}'")
-    
+
     # Extract URLs
     urls = extract_urls(text)
-    
+
     if not urls:
         await interaction.response.send_message("No URLs found in the provided text.", ephemeral=True)
         return
-    
+
     # Create response message
     response_parts = [f"Found {len(urls)} URL(s):"]
     for i, url in enumerate(urls, 1):
         response_parts.append(f"{i}. {url}")
-    
+
     response_text = "\n".join(response_parts)
-    
+
     # Test content extraction for first URL
     if urls:
         await interaction.response.defer(ephemeral=True)
-        
+
         async with aiohttp.ClientSession() as session:
             content = await extract_url_content(urls[0], session)
             if content:
                 response_text += f"\n\nContent preview from first URL:\n{content[:500]}..."
             else:
                 response_text += f"\n\nFailed to extract content from first URL: {urls[0]}"
-        
+
         await interaction.followup.send(response_text, ephemeral=True)
     else:
         await interaction.response.send_message(response_text, ephemeral=True)
-    
+
     logger.info(f"URL test completed for {interaction.user}")
 
 
@@ -2893,54 +2918,53 @@ async def test_url_command(interaction: discord.Interaction, text: str):
 @app_commands.describe(location="The city for which to fetch the current time.")
 async def whattime_command(interaction: discord.Interaction, location: str):
     logger.info(f"Command 'whattime' invoked by {interaction.user} for location: '{location}'")
-    
+
     # Defer the response immediately to avoid interaction timeout
     await interaction.response.defer(ephemeral=False)
-    
+
     try:
         # Use a more descriptive user agent to comply with Nominatim usage policy
         geolocator = Nominatim(
-            user_agent="SoupyDiscordBot/1.0 (Discord Bot for time queries; contact: bot owner)",
-            timeout=10
+            user_agent="SoupyDiscordBot/1.0 (Discord Bot for time queries; contact: bot owner)", timeout=10
         )
-        location_obj = geolocator.geocode(location, addressdetails=True, language='en', timeout=10)
+        location_obj = geolocator.geocode(location, addressdetails=True, language="en", timeout=10)
         if not location_obj:
             await interaction.followup.send(f"Could not geocode the location: {location}", ephemeral=True)
             logger.error(f"[/whattime Command Error] Could not geocode: {location}")
             return
-    
-        address = location_obj.raw.get('address', {})
-        country = address.get('country', 'Unknown country')
-        admin_area = address.get('state', address.get('region', address.get('county', '')))
-    
+
+        address = location_obj.raw.get("address", {})
+        country = address.get("country", "Unknown country")
+        admin_area = address.get("state", address.get("region", address.get("county", "")))
+
         is_country_query = location.strip().lower() == country.lower()
         location_str = country if is_country_query else f"{location.title()}, {country}"
         if admin_area and not is_country_query:
             location_str = f"{location.title()}, {admin_area}, {country}"
-    
+
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lng=location_obj.longitude, lat=location_obj.latitude)
         if not timezone_str:
             await interaction.followup.send(f"Could not find timezone for the location: {location}", ephemeral=True)
             logger.error(f"[/whattime Command Error] Could not find timezone for: {location}")
             return
-    
+
         timezone = pytz.timezone(timezone_str)
-        current_time = datetime.now(timezone).strftime('%I:%M %p on %Y-%m-%d')
+        current_time = datetime.now(timezone).strftime("%I:%M %p on %Y-%m-%d")
         await interaction.followup.send(f"It is currently {current_time} in {location_str}.")
         logger.info(f"Provided time for {interaction.user}: {current_time} in {location_str}")
-    
+
     except AdapterHTTPError as e:
         # Handle specific HTTP errors - parse status code from error message
         error_str = str(e)
         status_code = None
-        if '403' in error_str:
+        if "403" in error_str:
             status_code = 403
-        elif '503' in error_str:
+        elif "503" in error_str:
             status_code = 503
-        elif '429' in error_str:
+        elif "429" in error_str:
             status_code = 429
-        
+
         if status_code == 403:
             error_msg = "The geocoding service has temporarily blocked requests. Please try again in a few minutes."
             logger.warning(f"[/whattime Command] Nominatim returned 403 (blocked): {e}")
@@ -2953,12 +2977,12 @@ async def whattime_command(interaction: discord.Interaction, location: str):
         else:
             error_msg = f"The geocoding service returned an error. Please try again later."
             logger.error(f"[/whattime Command] Nominatim HTTP error: {e}")
-        
+
         try:
             await interaction.followup.send(error_msg, ephemeral=True)
         except Exception as followup_error:
             logger.error(f"[/whattime Command] Failed to send followup message: {followup_error}")
-    
+
     except (GeocoderTimedOut, GeocoderServiceError) as e:
         error_msg = "The geocoding service timed out or is unavailable. Please try again in a moment."
         try:
@@ -2966,7 +2990,7 @@ async def whattime_command(interaction: discord.Interaction, location: str):
         except Exception as followup_error:
             logger.error(f"[/whattime Command] Failed to send followup message: {followup_error}")
         logger.error(f"[/whattime Command] Geocoding service error: {e}")
-    
+
     except Exception as e:
         error_msg = "Sorry, I'm unable to process your request at the moment. Please try again later."
         try:
@@ -2980,60 +3004,61 @@ async def whattime_command(interaction: discord.Interaction, location: str):
 @app_commands.describe(location="The city or location for which to fetch the weather.")
 async def weather_command(interaction: discord.Interaction, location: str):
     logger.info(f"Command 'weather' invoked by {interaction.user} for location: '{location}'")
-    
+
     # Defer the response immediately to avoid interaction timeout
     await interaction.response.defer(ephemeral=False)
-    
+
     try:
         # Geocode the location to get coordinates
         geolocator = Nominatim(
-            user_agent="SoupyDiscordBot/1.0 (Discord Bot for weather queries; contact: bot owner)",
-            timeout=10
+            user_agent="SoupyDiscordBot/1.0 (Discord Bot for weather queries; contact: bot owner)", timeout=10
         )
-        location_obj = geolocator.geocode(location, addressdetails=True, language='en', timeout=10)
+        location_obj = geolocator.geocode(location, addressdetails=True, language="en", timeout=10)
         if not location_obj:
             await interaction.followup.send(f"Could not find the location: {location}", ephemeral=True)
             logger.error(f"[/weather Command Error] Could not geocode: {location}")
             return
-        
-        address = location_obj.raw.get('address', {})
-        country = address.get('country', 'Unknown country')
-        admin_area = address.get('state', address.get('region', address.get('county', '')))
-        city = address.get('city', address.get('town', address.get('village', address.get('municipality', location.title()))))
-        
+
+        address = location_obj.raw.get("address", {})
+        country = address.get("country", "Unknown country")
+        admin_area = address.get("state", address.get("region", address.get("county", "")))
+        city = address.get(
+            "city", address.get("town", address.get("village", address.get("municipality", location.title())))
+        )
+
         is_country_query = location.strip().lower() == country.lower()
-        
+
         # Build location string using address components, avoiding duplicates
         if is_country_query:
             location_str = country
         else:
             location_parts = []
-            
+
             # Add city (or user input if city not available)
             if city and city.lower() != location.lower():
                 location_parts.append(city)
             else:
                 location_parts.append(location.title())
-            
+
             # Add admin_area only if it's different from city and not already in parts
             if admin_area:
                 current_str = ", ".join(location_parts).lower()
                 # Check if admin_area is not already in the location string
                 if admin_area.lower() not in current_str:
                     location_parts.append(admin_area)
-            
+
             # Add country only if not already included
             current_str = ", ".join(location_parts).lower()
             if country.lower() not in current_str:
                 location_parts.append(country)
-            
+
             location_str = ", ".join(location_parts)
-        
+
         # Fetch weather data from Open-Meteo (free, no API key required)
         lat = location_obj.latitude
         lon = location_obj.longitude
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,cloud_cover,surface_pressure,precipitation_probability&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_sum,precipitation_probability_max&temperature_unit=fahrenheit&windspeed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=7"
-        
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
@@ -3041,109 +3066,119 @@ async def weather_command(interaction: discord.Interaction, location: str):
                     await interaction.followup.send(error_msg, ephemeral=True)
                     logger.error(f"[/weather Command] Open-Meteo API error: HTTP {response.status}")
                     return
-                
+
                 data = await response.json()
-        
+
         # Parse weather data from Open-Meteo format
-        current = data.get('current', {})
+        current = data.get("current", {})
         if not current:
             error_msg = "Weather data is not available for this location."
             await interaction.followup.send(error_msg, ephemeral=True)
             logger.error("[/weather Command] No current weather data in response")
             return
-        
-        temp = current.get('temperature_2m', 0)
-        feels_like = current.get('apparent_temperature', temp)
-        humidity = current.get('relative_humidity_2m', 0)
-        pressure = current.get('surface_pressure', 0)
-        wind_speed = current.get('wind_speed_10m', 0)
-        wind_direction = current.get('wind_direction_10m', None)
-        cloudiness = current.get('cloud_cover', 0)
-        weather_code = current.get('weather_code', 0)
-        precip_probability = current.get('precipitation_probability', 0)
-        
+
+        temp = current.get("temperature_2m", 0)
+        feels_like = current.get("apparent_temperature", temp)
+        humidity = current.get("relative_humidity_2m", 0)
+        pressure = current.get("surface_pressure", 0)
+        wind_speed = current.get("wind_speed_10m", 0)
+        wind_direction = current.get("wind_direction_10m", None)
+        cloudiness = current.get("cloud_cover", 0)
+        weather_code = current.get("weather_code", 0)
+        precip_probability = current.get("precipitation_probability", 0)
+
         # Convert weather code to description (WMO Weather interpretation codes)
         weather_descriptions = {
-            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-            45: "Foggy", 48: "Depositing rime fog",
-            51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
-            56: "Light freezing drizzle", 57: "Dense freezing drizzle",
-            61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
-            66: "Light freezing rain", 67: "Heavy freezing rain",
-            71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
+            0: "Clear sky",
+            1: "Mainly clear",
+            2: "Partly cloudy",
+            3: "Overcast",
+            45: "Foggy",
+            48: "Depositing rime fog",
+            51: "Light drizzle",
+            53: "Moderate drizzle",
+            55: "Dense drizzle",
+            56: "Light freezing drizzle",
+            57: "Dense freezing drizzle",
+            61: "Slight rain",
+            63: "Moderate rain",
+            65: "Heavy rain",
+            66: "Light freezing rain",
+            67: "Heavy freezing rain",
+            71: "Slight snow",
+            73: "Moderate snow",
+            75: "Heavy snow",
             77: "Snow grains",
-            80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
-            85: "Slight snow showers", 86: "Heavy snow showers",
-            95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail"
+            80: "Slight rain showers",
+            81: "Moderate rain showers",
+            82: "Violent rain showers",
+            85: "Slight snow showers",
+            86: "Heavy snow showers",
+            95: "Thunderstorm",
+            96: "Thunderstorm with slight hail",
+            99: "Thunderstorm with heavy hail",
         }
         description = weather_descriptions.get(weather_code, "Unknown")
-        
+
         # Get forecast for today's high/low (from hourly data)
-        hourly = data.get('hourly', {})
-        hourly_temps = hourly.get('temperature_2m', [])
+        hourly = data.get("hourly", {})
+        hourly_temps = hourly.get("temperature_2m", [])
         temp_max = max(hourly_temps) if hourly_temps else temp
         temp_min = min(hourly_temps) if hourly_temps else temp
-        
+
         # Parse daily forecast data
-        daily = data.get('daily', {})
-        daily_dates = daily.get('time', [])
-        daily_max_temps = daily.get('temperature_2m_max', [])
-        daily_min_temps = daily.get('temperature_2m_min', [])
-        daily_weather_codes = daily.get('weather_code', [])
-        daily_precipitation = daily.get('precipitation_sum', [])
-        daily_precip_probability = daily.get('precipitation_probability_max', [])
-        
+        daily = data.get("daily", {})
+        daily_dates = daily.get("time", [])
+        daily_max_temps = daily.get("temperature_2m_max", [])
+        daily_min_temps = daily.get("temperature_2m_min", [])
+        daily_weather_codes = daily.get("weather_code", [])
+        daily_precipitation = daily.get("precipitation_sum", [])
+        daily_precip_probability = daily.get("precipitation_probability_max", [])
+
         # Convert wind direction to compass direction
         wind_dir_str = "N/A"
         if wind_direction is not None:
-            directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
-                         "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+            directions = [
+                "N",
+                "NNE",
+                "NE",
+                "ENE",
+                "E",
+                "ESE",
+                "SE",
+                "SSE",
+                "S",
+                "SSW",
+                "SW",
+                "WSW",
+                "W",
+                "WNW",
+                "NW",
+                "NNW",
+            ]
             wind_dir_str = directions[int((wind_direction + 11.25) / 22.5) % 16]
-        
+
         # Create embed
         embed = discord.Embed(
-            title=f"🌤️ Weather in {location_str}",
-            description=f"**{description}**",
-            color=discord.Color.blue()
+            title=f"🌤️ Weather in {location_str}", description=f"**{description}**", color=discord.Color.blue()
         )
-        
+
         embed.add_field(
             name="🌡️ Temperature",
-            value=f"{temp:.1f}°F (feels like {feels_like:.1f}°F)\n"
-                  f"High: {temp_max:.1f}°F | Low: {temp_min:.1f}°F",
-            inline=False
+            value=f"{temp:.1f}°F (feels like {feels_like:.1f}°F)\n" f"High: {temp_max:.1f}°F | Low: {temp_min:.1f}°F",
+            inline=False,
         )
-        
-        embed.add_field(
-            name="💨 Wind",
-            value=f"{wind_speed:.1f} mph {wind_dir_str}",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="💧 Humidity",
-            value=f"{humidity}%",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="☁️ Clouds",
-            value=f"{cloudiness}%",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="📊 Pressure",
-            value=f"{pressure:.1f} hPa",
-            inline=True
-        )
-        
-        embed.add_field(
-            name="🌧️ Rain Chance",
-            value=f"{precip_probability:.0f}%",
-            inline=True
-        )
-        
+
+        embed.add_field(name="💨 Wind", value=f"{wind_speed:.1f} mph {wind_dir_str}", inline=True)
+
+        embed.add_field(name="💧 Humidity", value=f"{humidity}%", inline=True)
+
+        embed.add_field(name="☁️ Clouds", value=f"{cloudiness}%", inline=True)
+
+        embed.add_field(name="📊 Pressure", value=f"{pressure:.1f} hPa", inline=True)
+
+        embed.add_field(name="🌧️ Rain Chance", value=f"{precip_probability:.0f}%", inline=True)
+
         # Add 7-day forecast if available
         if daily_dates and len(daily_dates) > 0:
             forecast_lines = []
@@ -3151,17 +3186,17 @@ async def weather_command(interaction: discord.Interaction, location: str):
                 date_str = daily_dates[i]
                 try:
                     # Parse date and format as "Mon 1" (day of week and day number only)
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                    formatted_date = date_obj.strftime('%a %d')
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                    formatted_date = date_obj.strftime("%a %d")
                 except:
                     formatted_date = date_str
-                
+
                 max_temp = daily_max_temps[i] if i < len(daily_max_temps) else 0
                 min_temp = daily_min_temps[i] if i < len(daily_min_temps) else 0
                 weather_code_daily = daily_weather_codes[i] if i < len(daily_weather_codes) else 0
                 precip = daily_precipitation[i] if i < len(daily_precipitation) else 0
                 precip_prob = daily_precip_probability[i] if i < len(daily_precip_probability) else 0
-                
+
                 # Get weather emoji/description for forecast
                 weather_desc = weather_descriptions.get(weather_code_daily, "Unknown")
                 # Use shorter descriptions for forecast
@@ -3179,19 +3214,19 @@ async def weather_command(interaction: discord.Interaction, location: str):
                     emoji = "🌫️"
                 else:
                     emoji = "🌤️"
-                
+
                 # Convert mm to inches if needed (Open-Meteo might return mm even with precipitation_unit=inch)
                 # If precipitation is > 10, it's likely in mm (convert: 1 mm = 0.0393701 inches)
                 precip_inches = precip
                 if precip > 10:
                     precip_inches = precip * 0.0393701
-                
+
                 # Format with fixed-width fields for uniform spacing
                 # Use proper formatting to ensure alignment
                 date_padded = formatted_date.ljust(8)  # "Wed 31 " = 8 chars (no month)
                 temp_formatted = f"{max_temp:3.0f}°/{min_temp:3.0f}°F"
                 temp_padded = temp_formatted.ljust(12)  # " 58°/ 48°F" = 12 chars
-                
+
                 # Format precipitation with fixed width (always same length)
                 # Check if it's snow based on weather code
                 is_snow = "snow" in weather_desc.lower()
@@ -3199,51 +3234,47 @@ async def weather_command(interaction: discord.Interaction, location: str):
                 if precip_inches > 0:
                     # Show actual amount, even if small (e.g., 0.005")
                     if is_snow:
-                        precip_str = f"{precip_inches:5.2f}\" snow"
+                        precip_str = f'{precip_inches:5.2f}" snow'
                     else:
-                        precip_str = f"{precip_inches:5.2f}\" rain"
+                        precip_str = f'{precip_inches:5.2f}" rain'
                     # Pad to fixed width (12 chars to accommodate "X.XX\" rain" or "X.XX\" snow")
                     precip_str = precip_str.ljust(12)
                 elif precip_prob > 0:
                     # Only show "<0.01" when amount is exactly 0 but there's a probability
                     # This handles cases where probability exists but expected accumulation is negligible
                     if is_snow:
-                        precip_str = "<0.01\" snow".ljust(12)
+                        precip_str = '<0.01" snow'.ljust(12)
                     else:
-                        precip_str = "<0.01\" rain".ljust(12)
+                        precip_str = '<0.01" rain'.ljust(12)
                 else:
                     precip_str = "            "  # 12 spaces to match "X.XX\" rain/snow" width
-                
+
                 # Format precipitation probability with fixed width (always 4 chars: "XX%" or "XXX%")
                 precip_prob_str = f"{precip_prob:3.0f}%"
-                
+
                 forecast_lines.append(f"{emoji} {date_padded}{temp_padded}{precip_str}{precip_prob_str}")
-            
+
             forecast_text = "\n".join(forecast_lines)
             # Use code block for monospace font to ensure proper alignment
-            embed.add_field(
-                name="📅 7-Day Forecast",
-                value=f"```\n{forecast_text}\n```",
-                inline=False
-            )
-        
+            embed.add_field(name="📅 7-Day Forecast", value=f"```\n{forecast_text}\n```", inline=False)
+
         # Add timestamp
         embed.set_footer(text=f"Data from Open-Meteo • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        
+
         await interaction.followup.send(embed=embed)
         logger.info(f"Provided weather for {interaction.user}: {location_str}")
-    
+
     except AdapterHTTPError as e:
         # Handle geocoding HTTP errors
         error_str = str(e)
         status_code = None
-        if '403' in error_str:
+        if "403" in error_str:
             status_code = 403
-        elif '503' in error_str:
+        elif "503" in error_str:
             status_code = 503
-        elif '429' in error_str:
+        elif "429" in error_str:
             status_code = 429
-        
+
         if status_code == 403:
             error_msg = "The geocoding service has temporarily blocked requests. Please try again in a few minutes."
             logger.warning(f"[/weather Command] Nominatim returned 403 (blocked): {e}")
@@ -3256,12 +3287,12 @@ async def weather_command(interaction: discord.Interaction, location: str):
         else:
             error_msg = "The geocoding service returned an error. Please try again later."
             logger.error(f"[/weather Command] Nominatim HTTP error: {e}")
-        
+
         try:
             await interaction.followup.send(error_msg, ephemeral=True)
         except Exception as followup_error:
             logger.error(f"[/weather Command] Failed to send followup message: {followup_error}")
-    
+
     except (GeocoderTimedOut, GeocoderServiceError) as e:
         error_msg = "The geocoding service timed out or is unavailable. Please try again in a moment."
         try:
@@ -3269,7 +3300,7 @@ async def weather_command(interaction: discord.Interaction, location: str):
         except Exception as followup_error:
             logger.error(f"[/weather Command] Failed to send followup message: {followup_error}")
         logger.error(f"[/weather Command] Geocoding service error: {e}")
-    
+
     except aiohttp.ClientError as e:
         error_msg = "Failed to fetch weather data. Please try again later."
         try:
@@ -3277,7 +3308,7 @@ async def weather_command(interaction: discord.Interaction, location: str):
         except Exception as followup_error:
             logger.error(f"[/weather Command] Failed to send followup message: {followup_error}")
         logger.error(f"[/weather Command] HTTP client error: {e}")
-    
+
     except Exception as e:
         error_msg = "Sorry, I'm unable to process your request at the moment. Please try again later."
         try:
@@ -3298,6 +3329,7 @@ Stable Diffusion-Related Functionality
 # Track user interactions for rate limiting
 # => user_interaction_timestamps = defaultdict(list)  # Already defined above
 
+
 async def user_has_exempt_role(interaction: discord.Interaction) -> bool:
     """Checks if the user has any of the exempt roles for rate-limiting."""
     member = interaction.user
@@ -3308,20 +3340,29 @@ async def user_has_exempt_role(interaction: discord.Interaction) -> bool:
     return False
 
 
-
-
-
 # Archive helpers for web dashboard
 def _ensure_media_dirs():
     from pathlib import Path
+
     media = Path("media")
     (media / "images").mkdir(parents=True, exist_ok=True)
     (media / "thumbs").mkdir(parents=True, exist_ok=True)
     return media
 
 
-def archive_image_bytes(image_bytes: bytes, *, filename: str, prompt: str, user_id: int, username: str,
-                        width: int, height: int, seed: int, guild_id: int | None, channel_id: int | None) -> None:
+def archive_image_bytes(
+    image_bytes: bytes,
+    *,
+    filename: str,
+    prompt: str,
+    user_id: int,
+    username: str,
+    width: int,
+    height: int,
+    seed: int,
+    guild_id: int | None,
+    channel_id: int | None,
+) -> None:
     try:
         import json
         from datetime import datetime, timezone
@@ -3366,12 +3407,22 @@ def archive_image_bytes(image_bytes: bytes, *, filename: str, prompt: str, user_
         logger.debug(f"archive_image_bytes failed: {_e}")
 
 
-def archive_sent_message(content: str, *, user_id: int, username: str, guild_id: int | None, channel_id: int | None, 
-                         image_filename: str | None = None, event_type: str = "message", terminal_output: str | None = None) -> None:
+def archive_sent_message(
+    content: str,
+    *,
+    user_id: int,
+    username: str,
+    guild_id: int | None,
+    channel_id: int | None,
+    image_filename: str | None = None,
+    event_type: str = "message",
+    terminal_output: str | None = None,
+) -> None:
     try:
         import json
         from datetime import datetime, timezone
         from pathlib import Path
+
         media = _ensure_media_dirs()
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -3393,8 +3444,16 @@ def archive_sent_message(content: str, *, user_id: int, username: str, guild_id:
         logger.debug(f"archive_sent_message failed: {_e}")
 
 
-def archive_vision_image(image_bytes: bytes, *, description: str, user_id: int, username: str, 
-                         guild_id: int | None, channel_id: int | None, original_url: str) -> str | None:
+def archive_vision_image(
+    image_bytes: bytes,
+    *,
+    description: str,
+    user_id: int,
+    username: str,
+    guild_id: int | None,
+    channel_id: int | None,
+    original_url: str,
+) -> str | None:
     """
     Archives a vision-processed image to the media directory.
     Returns the filename if successful, None otherwise.
@@ -3408,13 +3467,13 @@ def archive_vision_image(image_bytes: bytes, *, description: str, user_id: int, 
         import hashlib
 
         media = _ensure_media_dirs()
-        
+
         # Create a unique filename using timestamp and hash
         timestamp = datetime.now(timezone.utc)
         ts_str = timestamp.strftime("%Y%m%d_%H%M%S")
         hash_suffix = hashlib.md5(image_bytes).hexdigest()[:8]
         filename = f"vision_{ts_str}_{hash_suffix}.png"
-        
+
         img_path = media / "images" / filename
         thumb_path = media / "thumbs" / filename
 
@@ -3422,7 +3481,7 @@ def archive_vision_image(image_bytes: bytes, *, description: str, user_id: int, 
         try:
             im = Image.open(BytesIO(image_bytes)).convert("RGB")
             im.save(img_path, format="PNG")
-            
+
             # Create thumbnail
             im_thumb = im.copy()
             im_thumb.thumbnail((400, 400))
@@ -3449,10 +3508,10 @@ def archive_vision_image(image_bytes: bytes, *, description: str, user_id: int, 
         index_path = media / "images" / "index.jsonl"
         with open(index_path, "a", encoding="utf-8") as idx:
             idx.write(json.dumps(meta, ensure_ascii=False) + "\n")
-        
+
         logger.debug(f"Archived vision image: {filename}")
         return filename
-        
+
     except Exception as _e:
         logger.debug(f"archive_vision_image failed: {_e}")
         return None
@@ -3460,23 +3519,27 @@ def archive_vision_image(image_bytes: bytes, *, description: str, user_id: int, 
 
 @bot.tree.command(name="sd", description="Generates an image using Stable Diffusion.")
 @app_commands.describe(
-    description="Description of the image to generate",
-    size="Size of the image",
-    seed="Seed for random generation"
+    description="Description of the image to generate", size="Size of the image", seed="Seed for random generation"
 )
-@app_commands.choices(size=[
-    app_commands.Choice(name=f"Default ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="default"),
-    app_commands.Choice(name=f"Wide ({SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT})", value="wide"),
-    app_commands.Choice(name=f"Tall ({SD_TALL_WIDTH}x{SD_TALL_HEIGHT})", value="tall"),
-    app_commands.Choice(name=f"Square ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="square"),
-])
-async def sd(interaction: discord.Interaction, 
-               description: str,
-               size: Optional[app_commands.Choice[str]] = None,
-               seed: Optional[int] = None):
-    size_value = size.value if size else 'default'
-    
-    logger.info(f"🎨 Slash Command 'sd' invoked by {interaction.user} with description: '{description}', size: '{size_value}', seed: '{seed if seed else 'random'}'")
+@app_commands.choices(
+    size=[
+        app_commands.Choice(name=f"Default ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="default"),
+        app_commands.Choice(name=f"Wide ({SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT})", value="wide"),
+        app_commands.Choice(name=f"Tall ({SD_TALL_WIDTH}x{SD_TALL_HEIGHT})", value="tall"),
+        app_commands.Choice(name=f"Square ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="square"),
+    ]
+)
+async def sd(
+    interaction: discord.Interaction,
+    description: str,
+    size: Optional[app_commands.Choice[str]] = None,
+    seed: Optional[int] = None,
+):
+    size_value = size.value if size else "default"
+
+    logger.info(
+        f"🎨 Slash Command 'sd' invoked by {interaction.user} with description: '{description}', size: '{size_value}', seed: '{seed if seed else 'random'}'"
+    )
     # Use defer + followup to avoid Unknown interaction issues
     try:
         if not interaction.response.is_done():
@@ -3486,70 +3549,81 @@ async def sd(interaction: discord.Interaction,
             await interaction.response.defer(thinking=True)
     except Exception as e:
         logger.debug(f"Defer failed: {e}")
-    await bot.sd_queue.put({
-        'type': 'sd',
-        'interaction': interaction,
-        'description': description,
-        'size': size_value,
-        'seed': seed,
-    })
-    logger.info(f"🎨 Queued image generation for {interaction.user}: description='{description}', size='{size_value}', seed='{seed if seed else 'random'}'")
+    await bot.sd_queue.put(
+        {
+            "type": "sd",
+            "interaction": interaction,
+            "description": description,
+            "size": size_value,
+            "seed": seed,
+        }
+    )
+    logger.info(
+        f"🎨 Queued image generation for {interaction.user}: description='{description}', size='{size_value}', seed='{seed if seed else 'random'}'"
+    )
     # Avoid sending extra followup ack to prevent 40060/10062 errors if interaction state changes
-
 
 
 # -------------------------------------------------------------------------
 # Define the button-handling methods BEFORE process_flux_queue()
 # -------------------------------------------------------------------------
 
+
 async def handle_remix(interaction, prompt, width, height, seed, queue_size):
     # Update to include server ID
-    await increment_user_stat(interaction.user.id, 'images_generated', interaction.guild_id)
-    
+    await increment_user_stat(interaction.user.id, "images_generated", interaction.guild_id)
+
     # Proceed with image generation
     await generate_sd_image(interaction, prompt, width, height, seed, action_name="Remix", queue_size=queue_size)
 
+
 async def handle_wide(interaction, prompt, width, height, seed, queue_size):
     # Increment the images_generated stat
-    await increment_user_stat(interaction.user.id, 'images_generated')
-    
+    await increment_user_stat(interaction.user.id, "images_generated")
+
     # Proceed with image generation
     await generate_sd_image(interaction, prompt, width, height, seed, action_name="Wide", queue_size=queue_size)
 
+
 async def handle_tall(interaction, prompt, width, height, seed, queue_size):
     # Increment the images_generated stat
-    await increment_user_stat(interaction.user.id, 'images_generated')
-    
+    await increment_user_stat(interaction.user.id, "images_generated")
+
     # Proceed with image generation
     await generate_sd_image(interaction, prompt, width, height, seed, action_name="Tall", queue_size=queue_size)
 
+
 async def handle_edit(interaction, prompt, width, height, seed, queue_size):
     # Increment the images_generated stat
-    await increment_user_stat(interaction.user.id, 'images_generated')
-    
+    await increment_user_stat(interaction.user.id, "images_generated")
+
     # Proceed with image generation
     await generate_sd_image(interaction, prompt, width, height, seed, action_name="Edit", queue_size=queue_size)
+
 
 async def handle_regenerate_selected(interaction, prompt, width, height, seed, queue_size, thumbnail_index):
     """Handle regenerating a full 1024x1024 image using the selected thumbnail's seed."""
     # Increment the images_generated stat
-    await increment_user_stat(interaction.user.id, 'images_generated')
-    
+    await increment_user_stat(interaction.user.id, "images_generated")
+
     # Proceed with image generation using normal SD settings
     action_label = f"Selected #{thumbnail_index}"
     await generate_sd_image(interaction, prompt, width, height, seed, action_name=action_label, queue_size=queue_size)
 
+
 async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail_data, queue_size, thumbnail_index):
     """Handle regenerating thumbnail with 30 steps then upscaling to full-size image"""
     try:
-        logger.info(f"🔲 Regenerating and upscaling thumbnail {thumbnail_index} for {interaction.user}: prompt='{prompt}', seed={thumbnail_data['seed']}")
-        
+        logger.info(
+            f"🔲 Regenerating and upscaling thumbnail {thumbnail_index} for {interaction.user}: prompt='{prompt}', seed={thumbnail_data['seed']}"
+        )
+
         # Check if we need to send an initial response
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
 
-        sd_server_url = SD_SERVER_URL.rstrip('/')
-        
+        sd_server_url = SD_SERVER_URL.rstrip("/")
+
         # Use typing context manager for consistent behavior
         async with interaction.channel.typing():
             # Use optimized session with connection pooling and keep-alive
@@ -3557,70 +3631,78 @@ async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail
                 limit=100,  # Total connection pool size
                 limit_per_host=30,  # Per-host connection limit
                 keepalive_timeout=30,  # Keep connections alive
-                enable_cleanup_closed=True
+                enable_cleanup_closed=True,
             )
             # Increased timeout for SD 3.5 Medium on Mac (can take 2-5 minutes)
             timeout = aiohttp.ClientTimeout(total=600, connect=10)
-            
+
             async with aiohttp.ClientSession(
-                connector=connector, 
-                timeout=timeout,
-                headers={'Connection': 'keep-alive'}
+                connector=connector, timeout=timeout, headers={"Connection": "keep-alive"}
             ) as session:
                 # Start timing the entire process
                 total_start_time = time.perf_counter()
-                
+
                 # Step 1: Regenerate thumbnail with steps from env at same resolution and seed
                 steps = int(os.getenv("SD_STEPS", 20))
-                logger.info(f"🔲 Step 1: Regenerating thumbnail {thumbnail_index} with {steps} steps at {thumbnail_data['width']}x{thumbnail_data['height']}")
+                logger.info(
+                    f"🔲 Step 1: Regenerating thumbnail {thumbnail_index} with {steps} steps at {thumbnail_data['width']}x{thumbnail_data['height']}"
+                )
                 regenerate_start_time = time.perf_counter()
-                
+
                 regenerate_payload = {
                     "prompt": prompt,
                     "negative_prompt": os.getenv("SD_NEGATIVE_PROMPT", "") or "",
                     "steps": str(int(os.getenv("SD_STEPS", 20))),  # Deprecated in new flow; kept for compatibility
                     "guidance_scale": str(float(os.getenv("SD_GUIDANCE", 7.5))),
-                    "width": str(thumbnail_data['width']),
-                    "height": str(thumbnail_data['height']),
-                    "seed": str(thumbnail_data['seed'])
+                    "width": str(thumbnail_data["width"]),
+                    "height": str(thumbnail_data["height"]),
+                    "seed": str(thumbnail_data["seed"]),
                 }
-                
+
                 async with session.post(f"{sd_server_url}/sd", data=regenerate_payload) as regenerate_response:
                     if regenerate_response.status != 200:
-                        logger.error(f"🔲 Regeneration failed for thumbnail {thumbnail_index}: HTTP {regenerate_response.status}")
-                        await interaction.followup.send(f"❌ Failed to regenerate thumbnail: HTTP {regenerate_response.status}", ephemeral=True)
+                        logger.error(
+                            f"🔲 Regeneration failed for thumbnail {thumbnail_index}: HTTP {regenerate_response.status}"
+                        )
+                        await interaction.followup.send(
+                            f"❌ Failed to regenerate thumbnail: HTTP {regenerate_response.status}", ephemeral=True
+                        )
                         return
-                    
+
                     regenerated_bytes = await regenerate_response.read()
                     regenerate_end_time = time.perf_counter()
                     regenerate_duration = regenerate_end_time - regenerate_start_time
                     logger.info(f"⏱️ Thumbnail regeneration completed in {regenerate_duration:.2f} seconds")
-                
+
                 # Step 2: Upscale the regenerated thumbnail
                 logger.info(f"🔲 Step 2: Upscaling regenerated thumbnail to {width}x{height}")
                 upscale_start_time = time.perf_counter()
-                
+
                 # Prepare form data for upscaling
                 form = aiohttp.FormData()
-                form.add_field('image', regenerated_bytes, filename='regenerated_thumbnail.jpg', content_type='image/jpeg')
-                form.add_field('target_width', str(width))
-                form.add_field('target_height', str(height))
+                form.add_field(
+                    "image", regenerated_bytes, filename="regenerated_thumbnail.jpg", content_type="image/jpeg"
+                )
+                form.add_field("target_width", str(width))
+                form.add_field("target_height", str(height))
 
                 async with session.post(f"{sd_server_url}/upscale", data=form) as upscale_response:
                     if upscale_response.status == 200:
                         upscaled_bytes = await upscale_response.read()
-                        
+
                         # End timing the upscaling process
                         upscale_end_time = time.perf_counter()
                         upscale_duration = upscale_end_time - upscale_start_time
                         total_duration = upscale_end_time - total_start_time
-                        
+
                         logger.info(f"⏱️ Upscaling completed in {upscale_duration:.2f} seconds")
-                        logger.info(f"⏱️ Total process completed in {total_duration:.2f} seconds for {interaction.user}")
+                        logger.info(
+                            f"⏱️ Total process completed in {total_duration:.2f} seconds for {interaction.user}"
+                        )
 
                         # Generate a unique filename
                         random_number = random.randint(100000, 999999)
-                        safe_prompt = re.sub(r'\W+', '', prompt[:40]).lower()
+                        safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
                         filename = f"{random_number}_{safe_prompt}_regenerated_upscaled.png"
 
                         # Create a Discord File object from the upscaled image bytes
@@ -3629,18 +3711,18 @@ async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail
                         # Create embed messages
                         description_embed = discord.Embed(
                             description=f"**Prompt:** {prompt}\n**Regenerated & Upscaled from thumbnail {thumbnail_index}**",
-                            color=discord.Color.purple()
+                            color=discord.Color.purple(),
                         )
                         details_embed = discord.Embed(color=discord.Color.green())
 
                         queue_total = queue_size + 1
-                        details_text = f"🔲 Regen+Upscale Thumbnail {thumbnail_index} ⏱️ {total_duration:.2f}s 📋 {queue_total}"
+                        details_text = (
+                            f"🔲 Regen+Upscale Thumbnail {thumbnail_index} ⏱️ {total_duration:.2f}s 📋 {queue_total}"
+                        )
                         details_embed.description = details_text
 
                         # Initialize the SDRemixView with current image parameters
-                        new_view = SDRemixView(
-                            prompt=prompt, width=width, height=height, seed=thumbnail_data['seed']
-                        )
+                        new_view = SDRemixView(prompt=prompt, width=width, height=height, seed=thumbnail_data["seed"])
 
                         # When sending the final message, use followup if the initial response was deferred
                         if interaction.response.is_done():
@@ -3648,32 +3730,34 @@ async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail
                                 content=f"{interaction.user.mention} 🔲 Regenerated & Upscaled Image:",
                                 embeds=[description_embed, details_embed],
                                 file=image_file,
-                                view=new_view
+                                view=new_view,
                             )
                         else:
                             await interaction.channel.send(
                                 content=f"{interaction.user.mention} 🔲 Regenerated & Upscaled Image:",
                                 embeds=[description_embed, details_embed],
                                 file=image_file,
-                                view=new_view
+                                view=new_view,
                             )
-                        logger.info(f"🔲 Regeneration and upscaling completed for {interaction.user}: filename='{filename}', total_duration={total_duration:.2f}s")
+                        logger.info(
+                            f"🔲 Regeneration and upscaling completed for {interaction.user}: filename='{filename}', total_duration={total_duration:.2f}s"
+                        )
                     else:
-                        logger.error(f"🔲 Upscaling server error for {interaction.user}: HTTP {upscale_response.status}")
+                        logger.error(
+                            f"🔲 Upscaling server error for {interaction.user}: HTTP {upscale_response.status}"
+                        )
                         try:
                             await interaction.followup.send(
                                 f"❌ Upscaling server error: HTTP {upscale_response.status}", ephemeral=True
                             )
                         except Exception as send_error:
                             logger.error(f"❌ Failed to send follow-up message: {send_error}")
-        
+
     except (ClientConnectorError, ClientOSError):
         logger.error(f"🔲 Server is offline or unreachable for {interaction.user}.")
         if isinstance(interaction, discord.Interaction):
             try:
-                await interaction.followup.send(
-                    "❌ The server is currently offline.", ephemeral=True
-                )
+                await interaction.followup.send("❌ The server is currently offline.", ephemeral=True)
             except Exception as send_error:
                 logger.error(f"❌ Failed to send follow-up message: {send_error}")
     except ServerTimeoutError:
@@ -3695,11 +3779,16 @@ async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail
             except Exception as send_error:
                 logger.error(f"❌ Failed to send follow-up message: {send_error}")
 
-async def handle_outpaint(interaction, prompt, direction, width, height, seed, queue_size, strength=0.8, steps=None, guidance=None):
+
+async def handle_outpaint(
+    interaction, prompt, direction, width, height, seed, queue_size, strength=0.8, steps=None, guidance=None
+):
     """Handle outpainting - extend image by 25% in specified directions using inpaint mask to preserve interior"""
     try:
-        logger.info(f"🖼️ Starting outpainting for {interaction.user}: prompt='{prompt}', direction='{direction}', size={width}x{height}")
-        
+        logger.info(
+            f"🖼️ Starting outpainting for {interaction.user}: prompt='{prompt}', direction='{direction}', size={width}x{height}"
+        )
+
         # Check if we need to send an initial response
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
@@ -3735,7 +3824,9 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
             try:
                 await interaction.followup.send("❌ Please upload an image and try again.", ephemeral=True)
             except Exception as send_error:
-                logger.warning(f"Failed to send outpaint error via followup; falling back to channel.send: {send_error}")
+                logger.warning(
+                    f"Failed to send outpaint error via followup; falling back to channel.send: {send_error}"
+                )
                 await interaction.channel.send(f"{interaction.user.mention} ❌ Please upload an image and try again.")
             return
 
@@ -3746,15 +3837,13 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                 limit=100,  # Total connection pool size
                 limit_per_host=30,  # Per-host connection limit
                 keepalive_timeout=30,  # Keep connections alive
-                enable_cleanup_closed=True
+                enable_cleanup_closed=True,
             )
             # Increased timeout for SD 3.5 Medium on Mac (can take 2-5 minutes)
             timeout = aiohttp.ClientTimeout(total=600, connect=10)
-            
+
             async with aiohttp.ClientSession(
-                connector=connector, 
-                timeout=timeout,
-                headers={'Connection': 'keep-alive'}
+                connector=connector, timeout=timeout, headers={"Connection": "keep-alive"}
             ) as session:
                 # Download the image
                 async with session.get(last_image.url) as resp:
@@ -3791,22 +3880,20 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                     left = paste_x
                     right = new_width - (paste_x + original_width)
 
-                    cv_img = cv2.cvtColor(np.array(original_image.convert('RGB')), cv2.COLOR_RGB2BGR)
-                    extended = cv2.copyMakeBorder(
-                        cv_img, top, bottom, left, right, borderType=cv2.BORDER_REFLECT_101
-                    )
+                    cv_img = cv2.cvtColor(np.array(original_image.convert("RGB")), cv2.COLOR_RGB2BGR)
+                    extended = cv2.copyMakeBorder(cv_img, top, bottom, left, right, borderType=cv2.BORDER_REFLECT_101)
                     # Do NOT blur the entire canvas; keep the original interior pixel-perfect
                     padded_image = Image.fromarray(cv2.cvtColor(extended, cv2.COLOR_BGR2RGB))
 
                     # Build mask that covers ONLY the new outpainted areas (not the original image)
                     # This ensures the original image remains untouched, preventing visible borders
-                    mask_img = Image.new('L', (new_width, new_height), 0)
+                    mask_img = Image.new("L", (new_width, new_height), 0)
                     draw = ImageDraw.Draw(mask_img)
-                    
+
                     # Create a feather zone width for smooth blending at the border
                     # This will be applied only in the new area, not extending into original
                     feather_width = max(8, min(original_width, original_height) // 64)
-                    
+
                     # Mask should start exactly at the border of the original image
                     # We'll add a small feather zone that extends slightly into the new area for blending
                     if direction == "horizontal" or direction == "both":
@@ -3830,14 +3917,13 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
 
                     # Now create a hard mask that protects the original image area completely
                     # This ensures no part of the original image gets modified
-                    protection_mask = Image.new('L', (new_width, new_height), 255)
+                    protection_mask = Image.new("L", (new_width, new_height), 255)
                     protect_draw = ImageDraw.Draw(protection_mask)
                     # The original image area should be black (protected) in the protection mask
                     protect_draw.rectangle(
-                        [paste_x, paste_y, paste_x + original_width - 1, paste_y + original_height - 1],
-                        fill=0
+                        [paste_x, paste_y, paste_x + original_width - 1, paste_y + original_height - 1], fill=0
                     )
-                    
+
                     # Apply feathering to the mask for smooth blending
                     try:
                         mask_np = np.array(mask_img)
@@ -3848,17 +3934,17 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                         # Ensure the original image area is completely protected (0 in final mask)
                         # by multiplying with the protection mask (inverted: 0=protected, 255=editable)
                         mask_np = np.minimum(mask_np, protection_np)
-                        mask_img = Image.fromarray(mask_np).convert('L')
+                        mask_img = Image.fromarray(mask_np).convert("L")
                     except Exception as e:
                         logger.warning(f"Mask blur failed, using hard mask: {e}")
 
                     padded_png_bytes = BytesIO()
-                    padded_image.save(padded_png_bytes, format='PNG')
+                    padded_image.save(padded_png_bytes, format="PNG")
                     padded_png_bytes.seek(0)
                     padded_raw = padded_png_bytes.getvalue()
 
                     mask_png_bytes = BytesIO()
-                    mask_img.save(mask_png_bytes, format='PNG')
+                    mask_img.save(mask_png_bytes, format="PNG")
                     mask_png_bytes.seek(0)
                     mask_raw = mask_png_bytes.getvalue()
                 except Exception as e:
@@ -3924,12 +4010,14 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                             out_bytes = await r.read()
                         else:
                             logger.error(f"🖼️ Outpaint server error for {interaction.user}: HTTP {r.status}")
-                            await interaction.followup.send(f"❌ Outpaint server error: HTTP {r.status}", ephemeral=True)
+                            await interaction.followup.send(
+                                f"❌ Outpaint server error: HTTP {r.status}", ephemeral=True
+                            )
                             return
 
                 # Generate a unique filename
                 random_number = random.randint(100000, 999999)
-                safe_prompt = re.sub(r'\W+', '', prompt[:40]).lower()
+                safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
                 filename = f"{random_number}_{safe_prompt}_outpaint_{direction}.png"
 
                 # If hybrid used, server already harmonized/blended; send directly
@@ -3937,10 +4025,10 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                 if not use_hybrid:
                     # Safeguard: composite the original interior back onto the result
                     try:
-                        result_img = Image.open(BytesIO(out_bytes)).convert('RGB')
-                        result_img.paste(original_image.convert('RGB'), (paste_x, paste_y))
+                        result_img = Image.open(BytesIO(out_bytes)).convert("RGB")
+                        result_img.paste(original_image.convert("RGB"), (paste_x, paste_y))
                         final_io = BytesIO()
-                        result_img.save(final_io, format='PNG')
+                        result_img.save(final_io, format="PNG")
                         final_io.seek(0)
                         final_bytes = final_io.getvalue()
                     except Exception as e:
@@ -3953,7 +4041,7 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                 # Create embed messages
                 description_embed = discord.Embed(
                     description=f"**Prompt:** {prompt}\n**Direction:** {direction.title()}",
-                    color=discord.Color.purple()
+                    color=discord.Color.purple(),
                 )
                 details_embed = discord.Embed(color=discord.Color.green())
 
@@ -3962,9 +4050,7 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                 details_embed.description = details_text
 
                 # Initialize the SDRemixView with new image parameters
-                new_view = SDRemixView(
-                    prompt=prompt, width=new_width, height=new_height, seed=seed
-                )
+                new_view = SDRemixView(prompt=prompt, width=new_width, height=new_height, seed=seed)
 
                 # Send the result
                 # Component interactions can expire if the queue is long; fall back to a normal channel send.
@@ -3974,17 +4060,19 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                         embeds=[description_embed, details_embed],
                         file=image_file,
                         view=new_view,
-                        ephemeral=False
+                        ephemeral=False,
                     )
                 except Exception as send_error:
-                    logger.error(f"❌ Failed to send outpaint result via followup, falling back to channel.send: {send_error}")
+                    logger.error(
+                        f"❌ Failed to send outpaint result via followup, falling back to channel.send: {send_error}"
+                    )
                     await interaction.channel.send(
                         content=f"{interaction.user.mention} 🖼️ Outpainted Image:",
                         embeds=[description_embed, details_embed],
                         file=image_file,
-                        view=new_view
+                        view=new_view,
                     )
-                
+
                 # Archive the outpaint generation
                 try:
                     archive_image_bytes(
@@ -4006,12 +4094,14 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
                         guild_id=(interaction.guild.id if interaction.guild else None),
                         channel_id=(interaction.channel.id if interaction.channel else None),
                         image_filename=filename,
-                        event_type="image_generation"
+                        event_type="image_generation",
                     )
                 except Exception:
                     pass
-                
-                logger.info(f"🖼️ Outpainting completed for {interaction.user}: filename='{filename}', direction='{direction}'")
+
+                logger.info(
+                    f"🖼️ Outpainting completed for {interaction.user}: filename='{filename}', direction='{direction}'"
+                )
 
     except Exception as e:
         logger.error(f"🖼️ Error in handle_outpaint for {interaction.user}: {e}")
@@ -4022,55 +4112,53 @@ async def handle_outpaint(interaction, prompt, direction, width, height, seed, q
             else:
                 await interaction.followup.send(f"❌ Error during outpainting: {e}", ephemeral=True)
         except Exception as send_error:
-            logger.error(f"❌ Failed to send outpaint error via interaction; falling back to channel.send: {send_error}")
+            logger.error(
+                f"❌ Failed to send outpaint error via interaction; falling back to channel.send: {send_error}"
+            )
             try:
                 await interaction.channel.send(f"{interaction.user.mention} ❌ Error during outpainting: {e}")
             except Exception:
                 pass
 
+
 async def handle_2x2_grid(interaction, prompt, width, height, seed, queue_size):
     """Handle 2x2 grid generation - creates 4 candidate images and combines them"""
     try:
         logger.info(f"🔲 Starting 2x2 grid generation for {interaction.user}: prompt='{prompt}', size={width}x{height}")
-        
+
         # For the new flow, generate four 1024x1024 candidates regardless of the current view size
         thumbnail_width = 1024
         thumbnail_height = 1024
         # Ensure dimensions are multiples of 64 for SD (defensive)
         thumbnail_width = ((thumbnail_width + 63) // 64) * 64
         thumbnail_height = ((thumbnail_height + 63) // 64) * 64
-        
+
         # Generate 4 unique seeds
         thumbnail_seeds = []
         base_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
         for i in range(4):
             thumbnail_seeds.append(base_seed + i)
-        
+
         logger.info(f"🔲 Generated seeds for thumbnails: {thumbnail_seeds}")
-        
+
         # Generate 4 thumbnail images
         thumbnail_images = []
         thumbnail_data = []  # Store individual thumbnail data for upscaling
-        sd_server_url = SD_SERVER_URL.rstrip('/')
+        sd_server_url = SD_SERVER_URL.rstrip("/")
         # Use 10 steps for the candidate images
         num_steps = 10
         guidance = float(os.getenv("SD_GUIDANCE", 7.5))
         negative_prompt = os.getenv("SD_NEGATIVE_PROMPT", "") or ""
-        
+
         async with interaction.channel.typing():
             connector = aiohttp.TCPConnector(
-                limit=100,
-                limit_per_host=30,
-                keepalive_timeout=30,
-                enable_cleanup_closed=True
+                limit=100, limit_per_host=30, keepalive_timeout=30, enable_cleanup_closed=True
             )
             # Increased timeout for SD 3.5 Medium on Mac (can take 2-5 minutes)
             timeout = aiohttp.ClientTimeout(total=600, connect=10)
-            
+
             async with aiohttp.ClientSession(
-                connector=connector, 
-                timeout=timeout,
-                headers={'Connection': 'keep-alive'}
+                connector=connector, timeout=timeout, headers={"Connection": "keep-alive"}
             ) as session:
                 for i, thumb_seed in enumerate(thumbnail_seeds):
                     payload = {
@@ -4080,93 +4168,89 @@ async def handle_2x2_grid(interaction, prompt, width, height, seed, queue_size):
                         "guidance_scale": str(guidance),
                         "width": str(thumbnail_width),
                         "height": str(thumbnail_height),
-                        "seed": str(thumb_seed)
+                        "seed": str(thumb_seed),
                     }
-                    
+
                     logger.info(f"🔲 Generating thumbnail {i+1}/4 with seed {thumb_seed}")
-                    
+
                     async with session.post(f"{sd_server_url}/sd", data=payload) as response:
                         if response.status == 200:
                             image_bytes = await response.read()
                             thumbnail_images.append(image_bytes)
                             # Store individual thumbnail data for upscaling
-                            thumbnail_data.append({
-                                'image_bytes': image_bytes,
-                                'seed': thumb_seed,
-                                'width': thumbnail_width,
-                                'height': thumbnail_height
-                            })
+                            thumbnail_data.append(
+                                {
+                                    "image_bytes": image_bytes,
+                                    "seed": thumb_seed,
+                                    "width": thumbnail_width,
+                                    "height": thumbnail_height,
+                                }
+                            )
                             logger.info(f"🔲 Successfully generated thumbnail {i+1}/4")
                         else:
                             logger.error(f"🔲 Failed to generate thumbnail {i+1}/4: HTTP {response.status}")
                             raise Exception(f"Failed to generate thumbnail {i+1}/4: HTTP {response.status}")
-        
+
         # Combine thumbnails into 2x2 grid
         logger.info(f"🔲 Combining {len(thumbnail_images)} thumbnails into 2x2 grid")
-        
+
         # Create the combined image (2x2 grid of 1024x1024 => 2048x2048)
         combined_width = thumbnail_width * 2
         combined_height = thumbnail_height * 2
-        combined_image = Image.new('RGB', (combined_width, combined_height))
-        
+        combined_image = Image.new("RGB", (combined_width, combined_height))
+
         # Paste each thumbnail into the grid
         positions = [
             (0, 0),  # Top-left
             (thumbnail_width, 0),  # Top-right
             (0, thumbnail_height),  # Bottom-left
-            (thumbnail_width, thumbnail_height)  # Bottom-right
+            (thumbnail_width, thumbnail_height),  # Bottom-right
         ]
-        
+
         for i, (image_bytes, pos) in enumerate(zip(thumbnail_images, positions)):
             thumbnail_img = Image.open(BytesIO(image_bytes))
             combined_image.paste(thumbnail_img, pos)
             logger.debug(f"🔲 Pasted thumbnail {i+1} at position {pos}")
-        
+
         # Convert combined image to bytes
         combined_bytes = BytesIO()
-        combined_image.save(combined_bytes, format='PNG')
+        combined_image.save(combined_bytes, format="PNG")
         combined_bytes.seek(0)
-        
+
         # Generate filename
         random_number = random.randint(100000, 999999)
-        safe_prompt = re.sub(r'\W+', '', prompt[:40]).lower()
+        safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
         filename = f"{random_number}_{safe_prompt}_2x2grid.png"
-        
+
         # Create Discord file
         image_file = discord.File(combined_bytes, filename=filename)
-        
+
         # Create embeds
         description_embed = discord.Embed(
             description=f"**Prompt:** {prompt}\n**Seeds:** {', '.join(map(str, thumbnail_seeds))}",
-            color=discord.Color.purple()
+            color=discord.Color.purple(),
         )
-        
+
         details_embed = discord.Embed(
-            description=f"🔲 2x2 Grid ⏱️ 10 steps each 📋 {queue_size + 1}",
-            color=discord.Color.green()
+            description=f"🔲 2x2 Grid ⏱️ 10 steps each 📋 {queue_size + 1}", color=discord.Color.green()
         )
-        
+
         # Create thumbnail selection view
-        thumbnail_view = ThumbnailSelectionView(
-            prompt=prompt,
-            width=1024,
-            height=1024,
-            thumbnail_data=thumbnail_data
-        )
-        
+        thumbnail_view = ThumbnailSelectionView(prompt=prompt, width=1024, height=1024, thumbnail_data=thumbnail_data)
+
         # Send the combined image with selection buttons
         await interaction.followup.send(
             content=f"{interaction.user.mention} 🔲 2x2 Thumbnail Grid:",
             embeds=[description_embed, details_embed],
             file=image_file,
-            view=thumbnail_view
+            view=thumbnail_view,
         )
-        
+
         logger.info(f"🔲 Successfully created 2x2 grid for {interaction.user}: {filename}")
-        
+
         # Increment the images_generated stat
-        await increment_user_stat(interaction.user.id, 'images_generated')
-        
+        await increment_user_stat(interaction.user.id, "images_generated")
+
     except Exception as e:
         logger.error(f"🔲 Error generating 2x2 grid for {interaction.user}: {e}")
         if not interaction.response.is_done():
@@ -4182,7 +4266,7 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
     """Handle the 'Fancy' button click."""
     try:
         logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{prompt}'")
-        
+
         # If this is a new interaction (not a followup), defer it
         if not interaction.response.is_done():
             await interaction.response.defer()  # Remove thinking=True to make it visible to channel
@@ -4201,7 +4285,7 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
         # Generate fancy prompt
         messages = [
             {"role": "system", "content": combined_instructions},
-            {"role": "user", "content": "Please rewrite the above prompt accordingly."}
+            {"role": "user", "content": "Please rewrite the above prompt accordingly."},
         ]
 
         logger.debug(f"📜 Sending the following messages to LLM (Fancy):\n{format_messages(messages)}")
@@ -4210,7 +4294,7 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             model=os.getenv("LOCAL_CHAT"),
             messages=messages,
             temperature=float(os.getenv("FANCY_PROMPT_TEMPERATURE", 0.7)),
-            max_tokens=int(os.getenv("FANCY_MAX_TOKENS", 150))
+            max_tokens=int(os.getenv("FANCY_MAX_TOKENS", 150)),
         )
 
         fancy_prompt = response.choices[0].message.content.strip()
@@ -4223,7 +4307,9 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
 
         # Strip surrounding quotes from the prompt (don't use full clean_response — no truncation or RAG sanitization needed)
         cleaned_prompt = fancy_prompt.strip()
-        while (cleaned_prompt.startswith('"') and cleaned_prompt.endswith('"')) or (cleaned_prompt.startswith("'") and cleaned_prompt.endswith("'")):
+        while (cleaned_prompt.startswith('"') and cleaned_prompt.endswith('"')) or (
+            cleaned_prompt.startswith("'") and cleaned_prompt.endswith("'")
+        ):
             cleaned_prompt = cleaned_prompt[1:-1].strip()
         logger.debug(f"🪄 Cleaned fancy prompt for {interaction.user}: '{cleaned_prompt}'")
 
@@ -4236,7 +4322,7 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             seed=seed,
             action_name="Fancy",
             queue_size=queue_size,
-            pre_duration=prompt_duration
+            pre_duration=prompt_duration,
         )
 
         logger.info(f"🪄 Passed cleaned fancy prompt to image generator for {interaction.user}")
@@ -4248,6 +4334,8 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             await interaction.response.send_message(error_msg, ephemeral=True)
         else:
             await interaction.followup.send(error_msg, ephemeral=True)
+
+
 class ThumbnailSelectionView(View):
     def __init__(self, prompt: str, width: int, height: int, thumbnail_data: List[Dict]):
         super().__init__(timeout=None)
@@ -4255,7 +4343,9 @@ class ThumbnailSelectionView(View):
         self.width = width
         self.height = height
         self.thumbnail_data = thumbnail_data
-        logger.debug(f"ThumbnailSelectionView initialized: prompt='{prompt}', {width}x{height}, {len(thumbnail_data)} thumbnails")
+        logger.debug(
+            f"ThumbnailSelectionView initialized: prompt='{prompt}', {width}x{height}, {len(thumbnail_data)} thumbnails"
+        )
 
     @discord.ui.button(label="1", style=discord.ButtonStyle.primary, custom_id="thumbnail_1_button", row=0)
     @universal_cooldown_check()
@@ -4281,27 +4371,33 @@ class ThumbnailSelectionView(View):
         """Handle thumbnail selection and regenerate at 1024x1024 using selected seed"""
         logger.info(f"Thumbnail {thumbnail_index + 1} selected by {interaction.user} for prompt: '{self.prompt}'")
         try:
-            await interaction.response.send_message(f"🛠️ Generating selected image at 1024x1024 using its seed...", ephemeral=True)
-            
+            await interaction.response.send_message(
+                f"🛠️ Generating selected image at 1024x1024 using its seed...", ephemeral=True
+            )
+
             selected_thumbnail = self.thumbnail_data[thumbnail_index]
             queue_size = bot.sd_queue.qsize()
-            
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'regenerate_selected',
-                'prompt': self.prompt,
-                'width': 1024,
-                'height': 1024,
-                'seed': selected_thumbnail['seed'],
-                'thumbnail_index': thumbnail_index + 1
-            })
-            
-            logger.info(f"Enqueued regenerate_selected for thumbnail {thumbnail_index + 1} for {interaction.user}: prompt='{self.prompt}', size=1024x1024, seed={selected_thumbnail['seed']}")
-            
+
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "regenerate_selected",
+                    "prompt": self.prompt,
+                    "width": 1024,
+                    "height": 1024,
+                    "seed": selected_thumbnail["seed"],
+                    "thumbnail_index": thumbnail_index + 1,
+                }
+            )
+
+            logger.info(
+                f"Enqueued regenerate_selected for thumbnail {thumbnail_index + 1} for {interaction.user}: prompt='{self.prompt}', size=1024x1024, seed={selected_thumbnail['seed']}"
+            )
+
             # Increment the images_generated stat
-            await increment_user_stat(interaction.user.id, 'images_generated')
-            
+            await increment_user_stat(interaction.user.id, "images_generated")
+
         except Exception as e:
             logger.error(f"Error during thumbnail selection for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating selected image.", ephemeral=True)
@@ -4320,7 +4416,7 @@ class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
             style=discord.TextStyle.paragraph,
             default=prompt,
             required=True,
-            max_length=2000
+            max_length=2000,
         )
         self.width_input = TextInput(
             label="📏 Width",
@@ -4328,7 +4424,7 @@ class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
             default=str(width),
             required=True,
             min_length=1,
-            max_length=5
+            max_length=5,
         )
         self.height_input = TextInput(
             label="📐 Height",
@@ -4336,14 +4432,14 @@ class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
             default=str(height),
             required=True,
             min_length=1,
-            max_length=5
+            max_length=5,
         )
         self.seed_input = TextInput(
             label="🌱 Seed",
             style=discord.TextStyle.short,
             default=str(seed) if seed is not None else "",
             required=False,
-            max_length=10
+            max_length=10,
         )
 
         self.add_item(self.image_description)
@@ -4380,20 +4476,23 @@ class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
             else:
                 new_seed = random.randint(0, 2**32 - 1)
 
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'edit',
-                'prompt': new_prompt,
-                'width': new_width,
-                'height': new_height,
-                'seed': new_seed,
-            })
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "edit",
+                    "prompt": new_prompt,
+                    "width": new_width,
+                    "height": new_height,
+                    "seed": new_seed,
+                }
+            )
 
             logger.info(f"Edit requested: prompt='{new_prompt}', dimensions={new_width}x{new_height}, seed={new_seed}")
         except Exception as e:
             await interaction.followup.send("❌ An error occurred while processing your edit.", ephemeral=True)
             logger.error(f"Error in EditImageModal submission: {e}")
+
 
 # UI view class for image remixing and manipulation
 class SDRemixView(View):
@@ -4429,16 +4528,20 @@ class SDRemixView(View):
         try:
             await interaction.response.send_message("🛠️ Making it fancy...", ephemeral=True)
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'fancy',
-                'prompt': self.cleaned_prompt,  # The original prompt
-                'width': self.width,
-                'height': self.height,
-                'seed': self.seed,
-            })
-            logger.info(f"Enqueued 'Fancy' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={self.seed}")
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "fancy",
+                    "prompt": self.cleaned_prompt,  # The original prompt
+                    "width": self.width,
+                    "height": self.height,
+                    "seed": self.seed,
+                }
+            )
+            logger.info(
+                f"Enqueued 'Fancy' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={self.seed}"
+            )
         except Exception as e:
             logger.error(f"Error during fancy transformation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error during fancy transformation.", ephemeral=True)
@@ -4451,25 +4554,30 @@ class SDRemixView(View):
             await interaction.response.send_message("🛠️ Remixing...", ephemeral=True)
             queue_size = bot.sd_queue.qsize()
             new_seed = random.randint(0, 2**32 - 1)
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'remix',
-                'prompt': self.cleaned_prompt,
-                'width': self.width,
-                'height': self.height,
-                'seed': new_seed,
-            })
-            logger.info(f"Enqueued 'Remix' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={new_seed}")
-            
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "remix",
+                    "prompt": self.cleaned_prompt,
+                    "width": self.width,
+                    "height": self.height,
+                    "seed": new_seed,
+                }
+            )
+            logger.info(
+                f"Enqueued 'Remix' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={new_seed}"
+            )
+
             # Increment the images_generated stat
-            await increment_user_stat(interaction.user.id, 'images_generated')
+            await increment_user_stat(interaction.user.id, "images_generated")
         except Exception as e:
             logger.error(f"Error during remix for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error during remix.", ephemeral=True)
 
-
-    @discord.ui.button(label="🎨 R-Fancy", style=discord.ButtonStyle.danger, custom_id="flux_random_fancy_button", row=1)
+    @discord.ui.button(
+        label="🎨 R-Fancy", style=discord.ButtonStyle.danger, custom_id="flux_random_fancy_button", row=1
+    )
     @universal_cooldown_check()
     async def random_fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """
@@ -4479,36 +4587,40 @@ class SDRemixView(View):
         logger.info(f"🎨 'R-Fancy' button clicked by {interaction.user}.")
         try:
             await interaction.response.send_message("🛠️ Generating fancy random image...", ephemeral=True)
-            
+
             # Randomly select dimensions with equal probability
             dimensions = [
                 (SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT),  # Square
                 (SD_WIDE_WIDTH, SD_WIDE_HEIGHT),  # Wide
-                (SD_TALL_WIDTH, SD_TALL_HEIGHT)   # Tall
+                (SD_TALL_WIDTH, SD_TALL_HEIGHT),  # Tall
             ]
             width, height = random.choice(dimensions)
-            
+
             # Use LLM-generated prompt (set prompt to None so handle_random generates it)
             prompt = None  # Will be generated in handle_random
-            
+
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'random',
-                'width': width,
-                'height': height,
-                'seed': None,  # Random will generate its own seed
-                'prompt': prompt  # None for LLM-generated prompt
-            })
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "random",
+                    "width": width,
+                    "height": height,
+                    "seed": None,  # Random will generate its own seed
+                    "prompt": prompt,  # None for LLM-generated prompt
+                }
+            )
             logger.info(f"🎨 Enqueued 'R-Fancy' action for {interaction.user} with dimensions {width}x{height}")
-            
+
             # Increment the images_generated stat
-            await increment_user_stat(interaction.user.id, 'images_generated')
+            await increment_user_stat(interaction.user.id, "images_generated")
         except Exception as e:
             logger.error(f"🎨 Error queueing fancy random generation for {interaction.user}: {e}")
 
-    @discord.ui.button(label="🔤 R-Keyword", style=discord.ButtonStyle.danger, custom_id="flux_random_keyword_button", row=1)
+    @discord.ui.button(
+        label="🔤 R-Keyword", style=discord.ButtonStyle.danger, custom_id="flux_random_keyword_button", row=1
+    )
     @universal_cooldown_check()
     async def random_keyword_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """
@@ -4518,40 +4630,42 @@ class SDRemixView(View):
         logger.info(f"🔤 'R-Keyword' button clicked by {interaction.user}.")
         try:
             await interaction.response.send_message("🛠️ Generating keyword random image...", ephemeral=True)
-            
+
             # Randomly select dimensions with equal probability
             dimensions = [
                 (SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT),  # Square
                 (SD_WIDE_WIDTH, SD_WIDE_HEIGHT),  # Wide
-                (SD_TALL_WIDTH, SD_TALL_HEIGHT)   # Tall
+                (SD_TALL_WIDTH, SD_TALL_HEIGHT),  # Tall
             ]
             width, height = random.choice(dimensions)
-            
+
             # Get random terms and use them directly as the prompt
             random_terms = get_random_terms()
             # Flatten the terms from the dictionary into a comma-separated string
             terms_list = []
             for category, terms in random_terms.items():
                 # Split by comma in case there are multiple terms in a single category
-                split_terms = [term.strip() for term in terms.split(',')]
+                split_terms = [term.strip() for term in terms.split(",")]
                 terms_list.extend(split_terms)
             prompt = ", ".join(terms_list)
             logger.info(f"🔤 Using only random terms for {interaction.user}: {prompt}")
-            
+
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'random',
-                'width': width,
-                'height': height,
-                'seed': None,  # Random will generate its own seed
-                'prompt': prompt  # Direct terms-only prompt
-            })
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "random",
+                    "width": width,
+                    "height": height,
+                    "seed": None,  # Random will generate its own seed
+                    "prompt": prompt,  # Direct terms-only prompt
+                }
+            )
             logger.info(f"🔤 Enqueued 'R-Keyword' action for {interaction.user} with dimensions {width}x{height}")
-            
+
             # Increment the images_generated stat
-            await increment_user_stat(interaction.user.id, 'images_generated')
+            await increment_user_stat(interaction.user.id, "images_generated")
         except Exception as e:
             logger.error(f"🔤 Error queueing keyword random generation for {interaction.user}: {e}")
 
@@ -4562,16 +4676,20 @@ class SDRemixView(View):
         try:
             await interaction.response.send_message("🛠️ Generating wide version...", ephemeral=True)
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'wide',
-                'prompt': self.cleaned_prompt,
-                'width': SD_WIDE_WIDTH,
-                'height': SD_WIDE_HEIGHT,
-                'seed': self.seed,
-            })
-            logger.info(f"Enqueued 'Wide' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT}, seed={self.seed}")
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "wide",
+                    "prompt": self.cleaned_prompt,
+                    "width": SD_WIDE_WIDTH,
+                    "height": SD_WIDE_HEIGHT,
+                    "seed": self.seed,
+                }
+            )
+            logger.info(
+                f"Enqueued 'Wide' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT}, seed={self.seed}"
+            )
         except Exception as e:
             logger.error(f"Error during wide generation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating wide version.", ephemeral=True)
@@ -4583,16 +4701,20 @@ class SDRemixView(View):
         try:
             await interaction.response.send_message("🛠️ Generating tall version...", ephemeral=True)
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'tall',
-                'prompt': self.cleaned_prompt,
-                'width': SD_TALL_WIDTH,
-                'height': SD_TALL_HEIGHT,
-                'seed': self.seed,
-            })
-            logger.info(f"Enqueued 'Tall' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={SD_TALL_WIDTH}x{SD_TALL_HEIGHT}, seed={self.seed}")
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "tall",
+                    "prompt": self.cleaned_prompt,
+                    "width": SD_TALL_WIDTH,
+                    "height": SD_TALL_HEIGHT,
+                    "seed": self.seed,
+                }
+            )
+            logger.info(
+                f"Enqueued 'Tall' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={SD_TALL_WIDTH}x{SD_TALL_HEIGHT}, seed={self.seed}"
+            )
         except Exception as e:
             logger.error(f"Error during tall generation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating tall version.", ephemeral=True)
@@ -4602,18 +4724,24 @@ class SDRemixView(View):
     async def grid_2x2_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         logger.info(f"'2x2 Grid' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
-            await interaction.response.send_message("🛠️ Generating 2x2 grid (4× 1024×1024 @ 10 steps)...", ephemeral=True)
+            await interaction.response.send_message(
+                "🛠️ Generating 2x2 grid (4× 1024×1024 @ 10 steps)...", ephemeral=True
+            )
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': '2x2_grid',
-                'prompt': self.cleaned_prompt,
-                'width': self.width,
-                'height': self.height,
-                'seed': self.seed,
-            })
-            logger.info(f"Enqueued '2x2 Grid' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={self.seed}")
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "2x2_grid",
+                    "prompt": self.cleaned_prompt,
+                    "width": self.width,
+                    "height": self.height,
+                    "seed": self.seed,
+                }
+            )
+            logger.info(
+                f"Enqueued '2x2 Grid' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={self.seed}"
+            )
         except Exception as e:
             logger.error(f"Error during 2x2 grid generation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating 2x2 grid.", ephemeral=True)
@@ -4625,18 +4753,22 @@ class SDRemixView(View):
         try:
             await interaction.response.send_message("🛠️ Extending image in all directions...", ephemeral=True)
             queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put({
-                'type': 'button',
-                'interaction': interaction,
-                'action': 'outpaint',
-                'prompt': self.cleaned_prompt,
-                'direction': 'both',
-                'width': self.width,
-                'height': self.height,
-                'seed': self.seed,
-                'strength': 0.8,  # Higher for outpaint
-            })
-            logger.info(f"Enqueued 'Outpaint Both' action for {interaction.user}: prompt='{self.cleaned_prompt}', direction='both'")
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "outpaint",
+                    "prompt": self.cleaned_prompt,
+                    "direction": "both",
+                    "width": self.width,
+                    "height": self.height,
+                    "seed": self.seed,
+                    "strength": 0.8,  # Higher for outpaint
+                }
+            )
+            logger.info(
+                f"Enqueued 'Outpaint Both' action for {interaction.user}: prompt='{self.cleaned_prompt}', direction='both'"
+            )
         except Exception as e:
             logger.error(f"Error during outpainting in all directions for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error extending image in all directions.", ephemeral=True)
@@ -4651,14 +4783,14 @@ async def generate_sd_image(
     action_name="SD",
     queue_size=0,
     pre_duration=0,
-    selected_terms: Optional[str] = None  # New parameter
+    selected_terms: Optional[str] = None,  # New parameter
 ):
     try:
         # Check if we need to send an initial response
         if not interaction.response.is_done():
             await interaction.response.defer(thinking=True)
 
-        sd_server_url = SD_SERVER_URL.rstrip('/')  # Ensure no trailing slash
+        sd_server_url = SD_SERVER_URL.rstrip("/")  # Ensure no trailing slash
         num_steps = int(os.getenv("SD_STEPS", 20))
         guidance = float(os.getenv("SD_GUIDANCE", 7.5))
         negative_prompt = os.getenv("SD_NEGATIVE_PROMPT", "") or ""
@@ -4669,7 +4801,7 @@ async def generate_sd_image(
             "guidance_scale": str(guidance),
             "width": str(width),
             "height": str(height),
-            "seed": str(seed)
+            "seed": str(seed),
         }
 
         # Use typing context manager for consistent behavior
@@ -4679,36 +4811,35 @@ async def generate_sd_image(
                 limit=100,  # Total connection pool size
                 limit_per_host=30,  # Per-host connection limit
                 keepalive_timeout=30,  # Keep connections alive
-                enable_cleanup_closed=True
+                enable_cleanup_closed=True,
             )
             # Increased timeout for SD 3.5 Medium on Mac (can take 2-5 minutes)
             timeout = aiohttp.ClientTimeout(total=600, connect=10)
-            
+
             async with aiohttp.ClientSession(
-                connector=connector, 
-                timeout=timeout,
-                headers={'Connection': 'keep-alive'}
+                connector=connector, timeout=timeout, headers={"Connection": "keep-alive"}
             ) as session:
                 # Start timing the image generation process
                 image_start_time = time.perf_counter()
 
                 async with session.post(f"{sd_server_url}/sd", data=payload) as response:
                     if response.status == 200:
-                        content_type = response.headers.get('Content-Type', '').lower()
-                        
+                        content_type = response.headers.get("Content-Type", "").lower()
+
                         # Handle different response formats
-                        if content_type.startswith('application/json'):
+                        if content_type.startswith("application/json"):
                             # API might return JSON with base64 image
                             try:
                                 data = await response.json()
-                                if 'image' in data:
+                                if "image" in data:
                                     import base64
-                                    if isinstance(data['image'], str):
-                                        image_bytes = base64.b64decode(data['image'])
+
+                                    if isinstance(data["image"], str):
+                                        image_bytes = base64.b64decode(data["image"])
                                     else:
-                                        image_bytes = data['image']
-                                elif 'image_bytes' in data:
-                                    image_bytes = data['image_bytes']
+                                        image_bytes = data["image"]
+                                elif "image_bytes" in data:
+                                    image_bytes = data["image_bytes"]
                                 else:
                                     raise ValueError(f"JSON response missing image data: {list(data.keys())}")
                                 logger.debug(f"🖼️ Received image from JSON response: {len(image_bytes)} bytes")
@@ -4716,7 +4847,7 @@ async def generate_sd_image(
                                 logger.error(f"🖼️ Failed to parse JSON response: {json_error}")
                                 error_text = await response.text()
                                 raise ValueError(f"SD server returned JSON but couldn't parse: {error_text[:200]}")
-                        elif content_type.startswith('image/'):
+                        elif content_type.startswith("image/"):
                             # Direct image response
                             image_bytes = await response.read()
                             logger.debug(f"🖼️ Received image bytes: {len(image_bytes)} bytes")
@@ -4724,15 +4855,23 @@ async def generate_sd_image(
                             # Unknown format, try to read as image anyway
                             logger.warning(f"🖼️ Unknown content type '{content_type}', attempting to read as image")
                             image_bytes = await response.read()
-                        
+
                         # Validate we got actual image data
                         if not image_bytes or len(image_bytes) < 100:
-                            raise ValueError(f"Received invalid image data: {len(image_bytes) if image_bytes else 0} bytes")
-                        
+                            raise ValueError(
+                                f"Received invalid image data: {len(image_bytes) if image_bytes else 0} bytes"
+                            )
+
                         # Try to validate it's actually an image by checking magic bytes
-                        if not (image_bytes.startswith(b'\x89PNG') or image_bytes.startswith(b'\xff\xd8\xff') or image_bytes.startswith(b'GIF')):
-                            logger.warning(f"🖼️ Image data doesn't start with PNG/JPEG/GIF magic bytes, but continuing anyway")
-                        
+                        if not (
+                            image_bytes.startswith(b"\x89PNG")
+                            or image_bytes.startswith(b"\xff\xd8\xff")
+                            or image_bytes.startswith(b"GIF")
+                        ):
+                            logger.warning(
+                                f"🖼️ Image data doesn't start with PNG/JPEG/GIF magic bytes, but continuing anyway"
+                            )
+
                         # End timing the image generation process
                         image_end_time = time.perf_counter()
                         image_generation_duration = image_end_time - image_start_time
@@ -4745,7 +4884,7 @@ async def generate_sd_image(
 
                         # Generate a unique filename
                         random_number = random.randint(100000, 999999)
-                        safe_prompt = re.sub(r'\W+', '', prompt[:40]).lower()
+                        safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
                         filename = f"{random_number}_{safe_prompt}.png"  # Changed to .png
 
                         # Archive to media for web dashboard
@@ -4776,9 +4915,7 @@ async def generate_sd_image(
                             # For simple prompts or when terms are the same as prompt, just show the prompt
                             description_content = f"**Prompt:** {prompt}"
 
-                        description_embed = discord.Embed(
-                            description=description_content, color=discord.Color.blue()
-                        )
+                        description_embed = discord.Embed(description=description_content, color=discord.Color.blue())
                         details_embed = discord.Embed(color=discord.Color.green())
 
                         queue_total = queue_size + 1
@@ -4788,9 +4925,7 @@ async def generate_sd_image(
                         details_embed.description = details_text
 
                         # Initialize the SDRemixView with current image parameters
-                        new_view = SDRemixView(
-                            prompt=prompt, width=width, height=height, seed=seed
-                        )
+                        new_view = SDRemixView(prompt=prompt, width=width, height=height, seed=seed)
 
                         # When sending the final message, use followup if the initial response was deferred
                         if interaction.response.is_done():
@@ -4801,24 +4936,26 @@ async def generate_sd_image(
                                     embeds=[description_embed, details_embed],
                                     file=image_file,
                                     view=new_view,
-                                    ephemeral=False
+                                    ephemeral=False,
                                 )
                             except Exception as send_error:
-                                logger.error(f"❌ Failed to send follow-up message (falling back to channel.send): {send_error}")
+                                logger.error(
+                                    f"❌ Failed to send follow-up message (falling back to channel.send): {send_error}"
+                                )
                                 await interaction.channel.send(
                                     content=f"{interaction.user.mention} 🖼️ Generated Image:",
                                     embeds=[description_embed, details_embed],
                                     file=image_file,
-                                    view=new_view
+                                    view=new_view,
                                 )
                         else:
                             msg = await interaction.channel.send(
                                 content=f"{interaction.user.mention} 🖼️ Generated Image:",
                                 embeds=[description_embed, details_embed],
                                 file=image_file,
-                                view=new_view
+                                view=new_view,
                             )
-                        
+
                         # Archive the image generation activity (do this for both branches)
                         try:
                             archive_sent_message(
@@ -4828,7 +4965,7 @@ async def generate_sd_image(
                                 guild_id=(interaction.guild.id if interaction.guild else None),
                                 channel_id=(interaction.channel.id if interaction.channel else None),
                                 image_filename=filename,
-                                event_type="image_generation"
+                                event_type="image_generation",
                             )
                         except Exception:
                             pass
@@ -4852,8 +4989,8 @@ async def generate_sd_image(
                 await interaction.followup.send(
                     f"❌ The SD server is currently offline or unreachable.\n"
                     f"Server: {SD_SERVER_URL}\n"
-                    f"Error: {error_detail}", 
-                    ephemeral=True
+                    f"Error: {error_detail}",
+                    ephemeral=True,
                 )
             except Exception as send_error:
                 logger.error(f"❌ Failed to send follow-up message: {send_error}")
@@ -4868,6 +5005,7 @@ async def generate_sd_image(
                 logger.error(f"❌ Failed to send follow-up message: {send_error}")
     except Exception as e:
         import traceback
+
         error_details = traceback.format_exc()
         logger.error(f"🖼️ Unexpected error during image generation for {interaction.user}: {e}")
         logger.error(f"🖼️ Full traceback:\n{error_details}")
@@ -4881,31 +5019,28 @@ async def generate_sd_image(
                 logger.error(f"❌ Failed to send follow-up message: {send_error}")
 
 
-
-
-
-
-
 async def process_sd_image(interaction: discord.Interaction, description: str, size: str, seed: Optional[int]):
     """Entry point for slash command /sd tasks to push work into generate_sd_image."""
     try:
         # Default dims for SD
         width, height = SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT
 
-        if size == 'wide':
+        if size == "wide":
             width, height = SD_WIDE_WIDTH, SD_WIDE_HEIGHT
-        elif size == 'tall':
+        elif size == "tall":
             width, height = SD_TALL_WIDTH, SD_TALL_HEIGHT
-        elif size == 'square':
+        elif size == "square":
             width, height = SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT
 
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
 
-        logger.info(f"Processing request: user={interaction.user}, prompt='{description}', size='{size}', dims={width}x{height}, seed={seed}")
-        
+        logger.info(
+            f"Processing request: user={interaction.user}, prompt='{description}', size='{size}', dims={width}x{height}, seed={seed}"
+        )
+
         # Update image generation count with server ID
-        await increment_user_stat(interaction.user.id, 'images_generated', interaction.guild_id)
+        await increment_user_stat(interaction.user.id, "images_generated", interaction.guild_id)
 
         await generate_sd_image(interaction, description, width, height, seed, queue_size=bot.sd_queue.qsize())
     except Exception as e:
@@ -4914,7 +5049,6 @@ async def process_sd_image(interaction: discord.Interaction, description: str, s
         except Exception as send_error:
             logger.error(f"❌ Failed to send follow-up message: {send_error}")
         logger.error(f"Error in process_sd_image: {e}")
-
 
 
 def should_randomly_respond(probability=None) -> bool:
@@ -4932,11 +5066,12 @@ Event Handlers
 ---------------------------------------------------------------------------------
 """
 
+
 # Add this BEFORE your bot.event decorators and command definitions
 async def load_extensions():
     """Load all extension cogs"""
     current_dir = Path(__file__).parent
-    
+
     # Load extensions
     try:
         await bot.load_extension("soupy_search")
@@ -4968,6 +5103,7 @@ async def load_extensions():
     except Exception as e:
         logger.error(f"❌ Failed to load Bluesky extension: {e}")
 
+
 # Then your existing on_ready event can use it
 @bot.event
 async def on_ready():
@@ -4977,11 +5113,11 @@ async def on_ready():
 
     # Load extensions
     await load_extensions()
-    
+
     # Existing on_ready operations
     logger.info(f"Logged in as {bot.user.name}")
     logger.info("Bot is ready for commands!")
-    logger.info(f'🔵 Bot ready: {bot.user} (ID: {bot.user.id})')
+    logger.info(f"🔵 Bot ready: {bot.user} (ID: {bot.user.id})")
 
     # Start background tasks immediately so messages are processed during command sync
     bot.loop.create_task(bot.sd_queue.process_queue())
@@ -4999,7 +5135,7 @@ async def on_ready():
         # List all registered commands for debugging
         registered_commands = [cmd.name for cmd in bot.tree.get_commands()]
         logger.info(f"Registered commands: {registered_commands}")
-        
+
         guild_id_str = os.getenv("GUILD_ID")
         if guild_id_str:
             try:
@@ -5023,7 +5159,6 @@ async def on_ready():
             logger.info(f"✅ Synced {len(synced)} commands globally: {synced_names}")
     except Exception as e:
         logger.error(f"Error syncing commands: {e}")
-    
 
     # Set the bot start time
     bot_start_time = datetime.utcnow()
@@ -5039,6 +5174,7 @@ async def _dashboard_status_writer(bot_instance):
     while not bot_instance.is_closed():
         try:
             from datetime import timezone as _tz
+
             now = datetime.now(_tz.utc)
             uptime_sec = None
             if bot_start_time:
@@ -5176,7 +5312,9 @@ async def rag_reindex_loop(bot):
     while not bot.is_closed():
         await asyncio.sleep(interval_sec)
         timer_state["rag_reindex"]["last_run"] = datetime.now(timezone.utc).isoformat()
-        timer_state["rag_reindex"]["next_run"] = (datetime.now(timezone.utc) + timedelta(seconds=interval_sec)).isoformat()
+        timer_state["rag_reindex"]["next_run"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=interval_sec)
+        ).isoformat()
         for guild in list(bot.guilds):
             gid = guild.id
             if not os.path.exists(get_db_path(gid)):
@@ -5186,12 +5324,12 @@ async def rag_reindex_loop(bot):
                 if result.get("new_messages", 0) > 0 or result.get("consolidated", 0) > 0:
                     logger.info(
                         "RAG incremental index guild=%s (%s): %s",
-                        gid, guild.name, result,
+                        gid,
+                        guild.name,
+                        result,
                     )
             except Exception as exc:
-                logger.warning(
-                    "RAG incremental index failed guild=%s: %s", gid, exc
-                )
+                logger.warning("RAG incremental index failed guild=%s: %s", gid, exc)
 
 
 async def _self_md_reflection_loop(bot_instance):
@@ -5220,12 +5358,19 @@ async def _self_md_reflection_loop(bot_instance):
     timer_state["self_reflect"]["interval"] = f"{interval_hours}h"
     timer_state["self_reflect"]["enabled"] = True
     timer_state["self_reflect"]["next_run"] = (datetime.now(timezone.utc) + timedelta(seconds=first_delay)).isoformat()
-    logger.info("SELF.MD reflection loop started (first check in %.0fs, then every %.1fh, min %d interactions)", first_delay, interval_hours, min_interactions)
+    logger.info(
+        "SELF.MD reflection loop started (first check in %.0fs, then every %.1fh, min %d interactions)",
+        first_delay,
+        interval_hours,
+        min_interactions,
+    )
 
     await asyncio.sleep(first_delay)
 
     while not bot_instance.is_closed():
-        timer_state["self_reflect"]["next_run"] = (datetime.now(timezone.utc) + timedelta(seconds=interval_sec)).isoformat()
+        timer_state["self_reflect"]["next_run"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=interval_sec)
+        ).isoformat()
         for guild in list(bot_instance.guilds):
             gid = guild.id
             count = pending_interaction_count(gid)
@@ -5235,9 +5380,12 @@ async def _self_md_reflection_loop(bot_instance):
                 timer_state["self_reflect"]["last_run"] = datetime.now(timezone.utc).isoformat()
                 logger.info(
                     "SELF.MD reflecting for guild %s (%s) — %d interactions pending",
-                    gid, guild.name, count,
+                    gid,
+                    guild.name,
+                    count,
                 )
                 from soupy_database.rag import embed_texts_lm_studio
+
                 async with aiohttp.ClientSession() as embed_session:
                     await self_md_reflect(
                         guild_id=gid,
@@ -5259,6 +5407,7 @@ async def _self_md_reflection_loop(bot_instance):
 # This prevents matching things like "The time is 3:" while still catching display names
 remove_all_before_colon_pattern = re.compile(r'^["\'"]?[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+){0,2}["\'"]?:\s*', re.IGNORECASE)
 
+
 def remove_all_before_colon(text: str) -> str:
     """
     Removes a bot-like name prefix from the start of the text if present.
@@ -5272,14 +5421,13 @@ def remove_all_before_colon(text: str) -> str:
     return remove_all_before_colon_pattern.sub("", text, count=1)
 
 
-
 def split_message(msg: str, max_len=1500):
     """
     Splits a long string into chunks so each chunk is <= max_len characters.
     """
     parts = []
     while len(msg) > max_len:
-        idx = msg.rfind(' ', 0, max_len)
+        idx = msg.rfind(" ", 0, max_len)
         if idx == -1:
             idx = max_len
         parts.append(msg[:idx])
@@ -5287,19 +5435,20 @@ def split_message(msg: str, max_len=1500):
     parts.append(msg)
     return parts
 
+
 async def process_chat_message(message: discord.Message, image_descriptions: list):
     """
     Process a chat message and generate a response.
     This function is called from the queue processor to handle chat messages.
     """
     logger.info(f"📝 Processing queued chat message from {message.author}: '{message.content}'")
-    
+
     async with message.channel.typing():
         try:
             # Get guild-specific behavior
             guild_id = str(message.guild.id) if message.guild else None
             chatgpt_behaviour = await get_guild_behaviour(guild_id)
-            
+
             # Add technical clarifications about message format
             technical_instructions = (
                 "\n\nIMPORTANT - Message Format:\n"
@@ -5315,11 +5464,11 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             if message.guild and is_rag_enabled():
                 technical_instructions += (
                     "\n\nLONGER-TERM SERVER MEMORY:\n"
-                    "A user message may begin with \"Below are snippets from earlier messages in this server\". "
+                    'A user message may begin with "Below are snippets from earlier messages in this server". '
                     "Those snippets are retrieved history (past messages, links, topics, personal details about users), "
                     "not live chat. Use them as factual context only.\n\n"
                     "How to use the memory block:\n"
-                    "- If the user asks a direct factual question (\"do I own a cat?\", \"where do I live?\", \"what games do I play?\", \"did I say X?\") "
+                    '- If the user asks a direct factual question ("do I own a cat?", "where do I live?", "what games do I play?", "did I say X?") '
                     "and the answer is in the snippets, ANSWER IT directly using that information, in character. A direct question deserves a direct answer.\n"
                     "- For casual chat, the memory block is background. Drop in ONE relevant detail if it fits naturally. Otherwise ignore it.\n"
                     "- If the snippets contradict your own earlier assistant lines about what people said, trust the snippets.\n"
@@ -5328,7 +5477,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                     "- If nothing in the block fits the moment, ignore it entirely and just respond to the live thread.\n\n"
                     "How NOT to use the memory block:\n"
                     "- Never recite, list, or summarize what is in it. You are not a search engine — you are a person who remembers things.\n"
-                    "- Never say \"according to the archives\", \"based on what I found\", \"the records show\", or anything similar.\n"
+                    '- Never say "according to the archives", "based on what I found", "the records show", or anything similar.\n'
                     "- Never output raw metadata: no timestamps, no '---' separators, no 'message_id=', no '#channel-name', no '[Embed Title:', no YYYY-MM-DD dates. If any of this appears in your reply, it is broken.\n"
                     "- Never mention archives, RAG, retrieval, databases, embeddings, or that you were given snippets.\n"
                     "- Never fabricate personal stories or attribute opinions to yourself based on the snippets.\n"
@@ -5343,7 +5492,9 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 self_md_block = get_self_md_for_injection(message.guild.id)
 
             # Create the messages list starting with the appropriate behavior prompt
-            messages_for_llm = [{"role": "system", "content": chatgpt_behaviour + self_md_block + technical_instructions}]
+            messages_for_llm = [
+                {"role": "system", "content": chatgpt_behaviour + self_md_block + technical_instructions}
+            ]
 
             # --- Token budget ---
             # Calculate how many tokens are available for variable content after reserving space for
@@ -5352,19 +5503,17 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             _output_reserve = max_tokens_default
             _safety_buffer = int(os.getenv("CONTEXT_SAFETY_BUFFER_TOKENS", "400"))
             _system_tokens = estimate_tokens(chatgpt_behaviour + self_md_block + technical_instructions) + 4
-            _current_msg_tokens = estimate_tokens(
-                f"{message.author.display_name}: {message.content or ''}"
-            ) + 4
+            _current_msg_tokens = estimate_tokens(f"{message.author.display_name}: {message.content or ''}") + 4
             _available = _n_ctx - _output_reserve - _safety_buffer - _system_tokens - _current_msg_tokens
 
             # Allocate the available budget across history, RAG, and URL content.
             _history_frac = float(os.getenv("CONTEXT_HISTORY_BUDGET_FRAC", "0.45"))
-            _rag_frac     = float(os.getenv("CONTEXT_RAG_BUDGET_FRAC",     "0.35"))
-            _url_frac     = float(os.getenv("CONTEXT_URL_BUDGET_FRAC",     "0.15"))
+            _rag_frac = float(os.getenv("CONTEXT_RAG_BUDGET_FRAC", "0.35"))
+            _url_frac = float(os.getenv("CONTEXT_URL_BUDGET_FRAC", "0.15"))
 
             _history_budget_tokens = max(200, int(_available * _history_frac))
-            _rag_budget_tokens     = max(200, int(_available * _rag_frac))
-            _url_budget_tokens     = max(100, int(_available * _url_frac))
+            _rag_budget_tokens = max(200, int(_available * _rag_frac))
+            _url_budget_tokens = max(100, int(_available * _url_frac))
 
             # Convert token budgets to character budgets for subsystems that work in chars.
             # Use 3.5 chars/token (same ratio as estimate_tokens, just inverted).
@@ -5374,8 +5523,15 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             logger.debug(
                 "📊 Token budget: n_ctx=%d output=%d safety=%d system=%d cur_msg=%d available=%d "
                 "→ history=%d rag=%d url=%d tokens",
-                _n_ctx, _output_reserve, _safety_buffer, _system_tokens, _current_msg_tokens,
-                _available, _history_budget_tokens, _rag_budget_tokens, _url_budget_tokens,
+                _n_ctx,
+                _output_reserve,
+                _safety_buffer,
+                _system_tokens,
+                _current_msg_tokens,
+                _available,
+                _history_budget_tokens,
+                _rag_budget_tokens,
+                _url_budget_tokens,
             )
             # --- end token budget ---
 
@@ -5392,7 +5548,9 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             if len(recent_messages) < _history_before:
                 logger.debug(
                     "📊 History trimmed: %d → %d messages to fit %d-token history budget",
-                    _history_before, len(recent_messages), _history_budget_tokens,
+                    _history_before,
+                    len(recent_messages),
+                    _history_budget_tokens,
                 )
 
             # Fetch RAG here but append later (immediately before the current user turn) so it wins over
@@ -5403,11 +5561,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             _rag_raw = (message.content or "").strip()
             if message.guild and is_rag_enabled() and _rag_raw:
                 _fp_cur = strip_rag_gate_word(message.content or "").strip()
-                _fp_cur = (
-                    strip_rag_query_invocations(_fp_cur).strip()
-                    if _fp_cur
-                    else ""
-                )
+                _fp_cur = strip_rag_query_invocations(_fp_cur).strip() if _fp_cur else ""
                 if not _fp_cur:
                     _fp_cur = _rag_raw
                 rag_query = build_rag_retrieval_query(
@@ -5439,7 +5593,8 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                         }
                         logger.info(
                             "  → injected %d chars into context (budget was %d chars)",
-                            len(rag_block), _rag_budget_chars,
+                            len(rag_block),
+                            _rag_budget_chars,
                         )
                 except Exception as rag_exc:
                     logger.warning("RAG retrieval skipped: %s", format_error_message(rag_exc))
@@ -5488,7 +5643,10 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                                                 logger.debug(f"Using cached content for HISTORY URL: {url}")
                                         else:
                                             logger.debug(f"Cached HISTORY URL {url} had no content")
-                                        if len(history_url_contents) >= max_history_urls or _url_chars_used >= _url_budget_chars:
+                                        if (
+                                            len(history_url_contents) >= max_history_urls
+                                            or _url_chars_used >= _url_budget_chars
+                                        ):
                                             break
                                         continue
 
@@ -5501,11 +5659,16 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                                     chunk = content[:remaining_url_budget]
                                     history_url_contents.append(chunk)
                                     _url_chars_used += len(chunk)
-                                    logger.debug(f"Successfully processed HISTORY URL {url} ({len(chunk)}/{len(content)} chars kept)")
+                                    logger.debug(
+                                        f"Successfully processed HISTORY URL {url} ({len(chunk)}/{len(content)} chars kept)"
+                                    )
                                 else:
                                     logger.warning(f"Failed to extract content from HISTORY URL {url}")
 
-                                if len(history_url_contents) >= max_history_urls or _url_chars_used >= _url_budget_chars:
+                                if (
+                                    len(history_url_contents) >= max_history_urls
+                                    or _url_chars_used >= _url_budget_chars
+                                ):
                                     break
                             except Exception as url_e:
                                 logger.error(f"Error processing HISTORY URL {url}: {format_error_message(url_e)}")
@@ -5515,18 +5678,14 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             # If we gathered history URL contents, add as a user message before current message
             if history_url_contents:
                 joined_history_content = " ".join(history_url_contents)
-                messages_for_llm.append({
-                    "role": "user",
-                    "content": joined_history_content
-                })
-                logger.debug(f"Added {len(history_url_contents)} HISTORY URL contents into context (pre-current message)")
+                messages_for_llm.append({"role": "user", "content": joined_history_content})
+                logger.debug(
+                    f"Added {len(history_url_contents)} HISTORY URL contents into context (pre-current message)"
+                )
 
             # If there are image descriptions, add them to context
             if image_descriptions:
-                messages_for_llm.append({
-                    "role": "user",
-                    "content": "\n".join(image_descriptions)
-                })
+                messages_for_llm.append({"role": "user", "content": "\n".join(image_descriptions)})
                 logger.debug(f"Added {len(image_descriptions)} image description(s) to context")
 
             # Process URLs in the CURRENT message, respecting remaining URL budget
@@ -5535,12 +5694,16 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             url_contents_for_current_message = []
 
             if urls_in_current_message and _url_chars_used < _url_budget_chars:
-                logger.debug(f"Processing {len(urls_in_current_message)} URLs in CURRENT message from {message.author.display_name}: {urls_in_current_message}")
+                logger.debug(
+                    f"Processing {len(urls_in_current_message)} URLs in CURRENT message from {message.author.display_name}: {urls_in_current_message}"
+                )
 
                 async with aiohttp.ClientSession() as session:
                     for url in urls_in_current_message:
                         if _url_chars_used >= _url_budget_chars:
-                            logger.debug(f"URL budget exhausted ({_url_chars_used}/{_url_budget_chars} chars); skipping remaining current-message URLs")
+                            logger.debug(
+                                f"URL budget exhausted ({_url_chars_used}/{_url_budget_chars} chars); skipping remaining current-message URLs"
+                            )
                             break
                         # Check cache first
                         current_time = time.time()
@@ -5566,19 +5729,25 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                             chunk = content[:remaining_url_budget]
                             url_contents_for_current_message.append(chunk)
                             _url_chars_used += len(chunk)
-                            logger.debug(f"Successfully processed URL {url} for CURRENT message ({len(chunk)}/{len(content)} chars kept)")
+                            logger.debug(
+                                f"Successfully processed URL {url} for CURRENT message ({len(chunk)}/{len(content)} chars kept)"
+                            )
                         else:
-                            logger.warning(f"Failed to extract content from URL {url} in CURRENT message from {message.author.display_name}")
+                            logger.warning(
+                                f"Failed to extract content from URL {url} in CURRENT message from {message.author.display_name}"
+                            )
 
             # Add URL contents to current message
             if url_contents_for_current_message:
                 original_length = len(current_message_content)
                 current_message_content = f"{current_message_content}\n{' '.join(url_contents_for_current_message)}"
-                logger.debug(f"Added {len(url_contents_for_current_message)} URL contents to CURRENT message, length increased from {original_length} to {len(current_message_content)} chars")
+                logger.debug(
+                    f"Added {len(url_contents_for_current_message)} URL contents to CURRENT message, length increased from {original_length} to {len(current_message_content)} chars"
+                )
 
             if _url_chars_used > 0:
                 logger.info("📊 URL content total: %d chars used of %d-char budget", _url_chars_used, _url_budget_chars)
-            
+
             # Add the current user message with URL content (using display name/nickname).
             # The marker block before the message keeps the trigger findable after the
             # consecutive-same-role merge step below glues this onto any preceding
@@ -5592,7 +5761,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                     "background context only — do not respond to it directly.\n"
                     "---\n"
                     f"{message.author.display_name}: {current_message_content}"
-                )
+                ),
             }
             if rag_context_message:
                 messages_for_llm.append(rag_context_message)
@@ -5622,8 +5791,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 merged.pop(1)
 
             if len(merged) < len(messages_for_llm):
-                logger.debug("📜 Merged %d → %d messages (consecutive same-role)",
-                             len(messages_for_llm), len(merged))
+                logger.debug("📜 Merged %d → %d messages (consecutive same-role)", len(messages_for_llm), len(merged))
             messages_for_llm = merged
 
             # Log what we send to the LLM (summary by default; full dump only when debugging)
@@ -5641,7 +5809,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 model_name = os.getenv("LOCAL_CHAT")
                 temperature = float(os.getenv("CHAT_TEMPERATURE", 0.8))
                 num_candidates = int(os.getenv("CHAT_NUM_CANDIDATES", 4))
-                
+
                 # Log temperature variations that will be used (capped at 1.0 to avoid hallucinations)
                 # Generate temperature variations based on number of candidates
                 temp_variations = []
@@ -5665,15 +5833,17 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                             mirrored_temp = base_temps[i % 4]
                             base_temps.append(mirrored_temp)
                     temp_variations = base_temps[:num_candidates]
-                
-                logger.debug(f"🌡️ Generating {num_candidates} candidates with temperatures: {[f'{t:.2f}' for t in temp_variations]}")
-                
+
+                logger.debug(
+                    f"🌡️ Generating {num_candidates} candidates with temperatures: {[f'{t:.2f}' for t in temp_variations]}"
+                )
+
                 candidates = await generate_parallel_candidates(
                     messages=messages_for_llm,
                     model=model_name,
                     temperature=temperature,
                     max_tokens=max_tokens_default,
-                    num_candidates=num_candidates
+                    num_candidates=num_candidates,
                 )
 
                 if not candidates:
@@ -5686,7 +5856,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 terminal_log_lines.append(f"Base Temperature: {temperature:.2f}")
                 terminal_log_lines.append(f"Temperature Variations: {[f'{t:.2f}' for t in temp_variations]}")
                 terminal_log_lines.append("")
-                
+
                 # Add last 5 messages from chat history
                 terminal_log_lines.append("Last 5 messages from context:")
                 terminal_log_lines.append("-" * 50)
@@ -5700,14 +5870,14 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                     terminal_log_lines.append(f"{idx}. [{role}] {content}")
                 terminal_log_lines.append("-" * 50)
                 terminal_log_lines.append("")
-                
+
                 # Log all generated candidates clearly for visibility with their temperatures
                 # Generate labels dynamically based on number of candidates
                 labels_for_logging = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"]
                 if num_candidates > len(labels_for_logging):
                     # If we have more candidates than letters, use numbers
                     labels_for_logging.extend([str(i) for i in range(len(labels_for_logging) + 1, num_candidates + 1)])
-                
+
                 for idx, cand in enumerate(candidates):
                     label = labels_for_logging[idx] if idx < len(labels_for_logging) else str(idx)
                     temp_used = temp_variations[idx % len(temp_variations)]
@@ -5725,10 +5895,18 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                     terminal_log_lines.append("Judging candidates for relevance and appropriateness...")
                     selected_index = await judge_best_of_candidates(messages_for_llm, candidates, model=model_name)
                     reply = candidates[selected_index]
-                    label = labels_for_logging[selected_index] if selected_index < len(labels_for_logging) else str(selected_index)
+                    label = (
+                        labels_for_logging[selected_index]
+                        if selected_index < len(labels_for_logging)
+                        else str(selected_index)
+                    )
                     temp_used = temp_variations[selected_index % len(temp_variations)]
-                    logger.debug(f"🏁 Judge selected candidate {label} (temp={temp_used:.2f}) as most relevant response.")
-                    terminal_log_lines.append(f"Judge selected candidate {label} (temp={temp_used:.2f}) as most relevant response.")
+                    logger.debug(
+                        f"🏁 Judge selected candidate {label} (temp={temp_used:.2f}) as most relevant response."
+                    )
+                    terminal_log_lines.append(
+                        f"Judge selected candidate {label} (temp={temp_used:.2f}) as most relevant response."
+                    )
 
             # Collapse all newlines and excess whitespace into a single line.
             reply = " ".join(reply.split())
@@ -5736,13 +5914,13 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             logger.info(f"🤖 Generated reply for {message.author}: '{reply}'")
 
             # Update chat response count with server ID
-            await increment_user_stat(message.author.id, 'chat_responses', message.guild.id)
+            await increment_user_stat(message.author.id, "chat_responses", message.guild.id)
 
             # Split the bot's entire reply into smaller chunks
             chunks = split_message(reply, max_len=1500)
 
             terminal_output_text = "\n".join(terminal_log_lines)
-            
+
             for chunk_idx, chunk in enumerate(chunks):
                 # Remove everything before the first colon
                 cleaned_chunk = remove_all_before_colon(chunk)
@@ -5792,6 +5970,7 @@ async def _index_message_realtime(message: discord.Message) -> None:
     """Store and embed a plain-text message immediately into the guild RAG index."""
     try:
         from soupy_database.rag import index_message_immediate
+
         msg_dt = message.created_at  # discord.py 2.x: always UTC-aware
         await index_message_immediate(
             guild_id=message.guild.id,
@@ -5833,7 +6012,7 @@ async def on_message(message):
                 # Format the description to include context
                 formatted_desc = f"[Image shared by {message.author.display_name}: {description}]"
                 image_descriptions.append(formatted_desc)
-                
+
                 # Store persistently for this message
                 if message.id not in message_image_descriptions:
                     message_image_descriptions[message.id] = []
@@ -5842,8 +6021,7 @@ async def on_message(message):
     # Real-time RAG indexing for plain text messages (no attachments, no URLs).
     # Image/URL messages are left for the scheduled scan which handles LLM enrichment.
     _excluded_scan_ids = [
-        int(c.strip()) for c in os.getenv("SCAN_EXCLUDE_CHANNEL_IDS", "").split(",")
-        if c.strip().isdigit()
+        int(c.strip()) for c in os.getenv("SCAN_EXCLUDE_CHANNEL_IDS", "").split(",") if c.strip().isdigit()
     ]
     if (
         message.guild
@@ -5858,21 +6036,22 @@ async def on_message(message):
     should_respond = should_bot_respond_to_message(message) or should_randomly_respond()
     if should_respond:
         logger.info(f"📝 Queuing chat message from {message.author}: '{message.content}'")
-        
+
         # Queue the chat message for processing
         # Note: image_descriptions are captured synchronously above and passed to the queue
-        await bot.sd_queue.put({
-            'type': 'chat',
-            'message': message,
-            'image_descriptions': image_descriptions.copy()  # Copy the list to avoid issues
-        })
-        logger.info(f"📝 Queued chat message for {message.author}: description='{message.content}', queue_size={bot.sd_queue.qsize()}")
+        await bot.sd_queue.put(
+            {
+                "type": "chat",
+                "message": message,
+                "image_descriptions": image_descriptions.copy(),  # Copy the list to avoid issues
+            }
+        )
+        logger.info(
+            f"📝 Queued chat message for {message.author}: description='{message.content}', queue_size={bot.sd_queue.qsize()}"
+        )
 
     # Process commands again if needed
     await bot.process_commands(message)
-
-
-
 
 
 # Shutdown is handled by the signal handler
@@ -5887,5 +6066,3 @@ Final: run the bot
 
 if __name__ == "__main__":
     bot.run(DISCORD_BOT_TOKEN)
-
-

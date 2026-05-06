@@ -33,12 +33,8 @@ def _verify_lm_studio(state: Dict, ui) -> List[Tuple[str, bool, str]]:
     loaded = set(result.data or [])
     chat = state.get("LOCAL_CHAT", "")
     embed = state.get("RAG_EMBEDDING_MODEL", "")
-    out.append(
-        ("chat model loaded", chat in loaded, chat or "(unset)")
-    )
-    out.append(
-        ("embedding model loaded", embed in loaded, embed or "(unset)")
-    )
+    out.append(("chat model loaded", chat in loaded, chat or "(unset)"))
+    out.append(("embedding model loaded", embed in loaded, embed or "(unset)"))
     if state.get("ENABLE_VISION") == "true":
         vision = state.get("VISION_MODEL", "")
         out.append(("vision model loaded", vision in loaded, vision or "(unset)"))

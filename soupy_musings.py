@@ -79,9 +79,7 @@ client = OpenAI(
 )
 
 
-async def _llm_call(
-    system: str, user: str, temperature: float = 0.7, max_tokens: int = 200
-) -> str:
+async def _llm_call(system: str, user: str, temperature: float = 0.7, max_tokens: int = 200) -> str:
     def _sync():
         return client.chat.completions.create(
             model=os.getenv("LOCAL_CHAT", "local-model"),
@@ -207,6 +205,7 @@ class MusingsCog(commands.Cog):
             if thought and len(thought) > 10:
                 # Strip any accidentally included metadata
                 import re
+
                 thought = re.sub(r"\[?\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]?", "", thought)
                 thought = re.sub(r"^---\s*[^\n]*$", "", thought, flags=re.MULTILINE)
                 thought = re.sub(r"#\S+", "", thought)  # channel references
@@ -222,7 +221,7 @@ class MusingsCog(commands.Cog):
                     for end in [". ", "! ", "? "]:
                         last = truncated.rfind(end)
                         if last > len(truncated) // 2:
-                            truncated = truncated[:last + 1]
+                            truncated = truncated[: last + 1]
                             break
                     thought = truncated.strip()
                     logger.info("💭 Truncated musing from %d to %d words", len(words), len(thought.split()))
@@ -349,6 +348,7 @@ class MusingsCog(commands.Cog):
         days_ago = ""
         try:
             from datetime import date
+
             msg_date = date.fromisoformat(str(msg["date"]).strip()[:10])
             age = (date.today() - msg_date).days
             if age == 0:
@@ -364,6 +364,7 @@ class MusingsCog(commands.Cog):
         self_context = ""
         try:
             from soupy_database.self_context import load_self_core, is_self_md_enabled
+
             if is_self_md_enabled():
                 core = load_self_core(guild_id)
                 if core:
@@ -451,6 +452,7 @@ class MusingsCog(commands.Cog):
 
         # Step 3: Search
         try:
+
             def _search():
                 with DDGS() as ddg:
                     return list(ddg.text(query, max_results=8))
@@ -464,7 +466,8 @@ class MusingsCog(commands.Cog):
 
         # Filter junk
         filtered = [
-            r for r in results
+            r
+            for r in results
             if r.get("href", "")
             and "wikipedia.org" not in r.get("href", "")
             and "wikihow" not in r.get("href", "")
@@ -487,6 +490,7 @@ class MusingsCog(commands.Cog):
         self_context = ""
         try:
             from soupy_database.self_context import load_self_core, is_self_md_enabled
+
             if is_self_md_enabled():
                 core = load_self_core(guild_id)
                 if core:
@@ -511,6 +515,7 @@ class MusingsCog(commands.Cog):
         self_context = ""
         try:
             from soupy_database.self_context import load_self_md, is_self_md_enabled
+
             if is_self_md_enabled():
                 full_doc = load_self_md(guild_id)
                 if full_doc:
@@ -533,7 +538,6 @@ class MusingsCog(commands.Cog):
 
         logger.debug("💭 Random thought with seed: %s", (self_context or "(none)")[:80])
         return await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.85, max_tokens=400)
-
 
     # ------------------------------------------------------------------
     # Slash command
@@ -581,6 +585,7 @@ class MusingsCog(commands.Cog):
 
         if thought and len(thought) > 10:
             import re
+
             thought = re.sub(r"\[?\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]?", "", thought)
             thought = re.sub(r"^---\s*[^\n]*$", "", thought, flags=re.MULTILINE)
             thought = re.sub(r"#\S+", "", thought)
@@ -597,6 +602,7 @@ class MusingsCog(commands.Cog):
 # ---------------------------------------------------------------------------
 # Extension setup
 # ---------------------------------------------------------------------------
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(MusingsCog(bot))

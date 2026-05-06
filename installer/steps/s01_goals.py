@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Dict
 
-
 IMAGE_GEN_OPTIONS = [
     ("none", "no image generation"),
     ("local_cuda", "image gen on this machine, NVIDIA CUDA"),
@@ -22,9 +21,7 @@ IMAGE_GEN_OPTIONS = [
 
 def run(state: Dict, ui) -> Dict:
     ui.header("Step 1 — Goals")
-    ui.info(
-        "Pick what you want Soupy to do. The wizard skips prompts you don't need."
-    )
+    ui.info("Pick what you want Soupy to do. The wizard skips prompts you don't need.")
     ui.hr()
 
     image_gen_mode = ui.prompt_choice(
