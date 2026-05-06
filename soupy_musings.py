@@ -239,7 +239,7 @@ class MusingsCog(commands.Cog):
         lines = [r.get("text", "") for r in recent if r.get("text")]
         if not lines:
             return ""
-        block = "\n".join(f"- {l}" for l in lines)
+        block = "\n".join(f"- {ln}" for ln in lines)
         return (
             f"\n\nThings you have thought about recently (do not repeat these — "
             f"build on them, go deeper, or think about something new):\n{block}"
@@ -505,7 +505,7 @@ class MusingsCog(commands.Cog):
                 full_doc = load_self_md(guild_id)
                 if full_doc:
                     # Pick a random section to think about
-                    lines = [l.strip() for l in full_doc.split("\n") if l.strip() and not l.startswith("##")]
+                    lines = [ln.strip() for ln in full_doc.split("\n") if ln.strip() and not ln.startswith("##")]
                     if lines:
                         seed = random.choice(lines)
                         self_context = f"\nSomething from your memory: {seed}"

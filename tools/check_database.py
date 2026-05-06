@@ -51,9 +51,9 @@ try:
     # Channels
     print("📁 Channels Found:")
     cursor.execute("""
-        SELECT channel_name, COUNT(*) as count 
-        FROM messages 
-        GROUP BY channel_name 
+        SELECT channel_name, COUNT(*) as count
+        FROM messages
+        GROUP BY channel_name
         ORDER BY count DESC
     """)
     for row in cursor.fetchall():
@@ -63,10 +63,10 @@ try:
     # Users
     print("👥 Top 10 Users:")
     cursor.execute("""
-        SELECT username, COUNT(*) as count 
-        FROM messages 
-        GROUP BY username 
-        ORDER BY count DESC 
+        SELECT username, COUNT(*) as count
+        FROM messages
+        GROUP BY username
+        ORDER BY count DESC
         LIMIT 10
     """)
     for row in cursor.fetchall():
@@ -77,15 +77,15 @@ try:
     print("📝 Sample Messages (Last 5):")
     print("-" * 70)
     cursor.execute("""
-        SELECT 
+        SELECT
             date || ' ' || time as timestamp,
             username,
             channel_name,
             message_content,
             image_description,
             url_summary
-        FROM messages 
-        ORDER BY created_at DESC 
+        FROM messages
+        ORDER BY created_at DESC
         LIMIT 5
     """)
 
@@ -129,8 +129,8 @@ try:
     # Last scan
     cursor.execute("""
         SELECT scan_type, messages_scanned, last_scan_time, created_at
-        FROM scan_metadata 
-        ORDER BY created_at DESC 
+        FROM scan_metadata
+        ORDER BY created_at DESC
         LIMIT 1
     """)
     scan = cursor.fetchone()

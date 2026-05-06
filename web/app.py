@@ -272,11 +272,11 @@ def create_app() -> FastAPI:
     # Get timezone from environment (default to America/Los_Angeles for California)
     display_timezone_str = settings.timezone
     try:
-        display_timezone = ZoneInfo(display_timezone_str)
+        ZoneInfo(display_timezone_str)
     except Exception:
         # Fallback to UTC if timezone is invalid
         logging.warning(f"Invalid timezone '{display_timezone_str}', falling back to UTC")
-        display_timezone = ZoneInfo("UTC")
+        _display_timezone = ZoneInfo("UTC")
         display_timezone_str = "UTC"
 
     # Get color scheme from environment
@@ -973,7 +973,7 @@ def create_app() -> FastAPI:
                 model_type = m.get("type", "llm")
                 quant = m.get("quantization") or {}
                 quant_name = quant.get("name", "")
-                display = m.get("display_name", "")
+                _display = m.get("display_name", "")
                 size_mb = round(m.get("size_bytes", 0) / (1024 * 1024))
                 loaded = len(m.get("loaded_instances", [])) > 0
 
@@ -1196,11 +1196,11 @@ def create_app() -> FastAPI:
         try:
             acc_path = os.path.join("data", "self_md", "accumulator.jsonl")
             if os.path.exists(acc_path):
-                lines = [l for l in open(acc_path).read().splitlines() if l.strip()]
+                lines = [ln for ln in open(acc_path).read().splitlines() if ln.strip()]
                 data["self_md_pending"] = len(lines)
             from soupy_database.runtime_flags import read_runtime_flags
 
-            flags = read_runtime_flags()
+            _flags = read_runtime_flags()
             data["self_md_enabled"] = bool(settings.self_md_enabled)
         except Exception:
             pass
@@ -1218,7 +1218,7 @@ def create_app() -> FastAPI:
         import json as _json
         from datetime import date
 
-        req = app.state._request if hasattr(app.state, "_request") else None
+        _req = app.state._request if hasattr(app.state, "_request") else None
         # Parse from starlette request
 
         # We'll just return everything and let the frontend filter

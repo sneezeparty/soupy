@@ -169,7 +169,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         actions.append((env_key, stem, f"-> prompts/{stem}.txt ({len(value)} chars), comment out env var"))
 
     print(f"plan ({args.env}):")
-    for env_key, stem, status in actions:
+    for env_key, _stem, status in actions:
         print(f"  {env_key:<22} {status}")
 
     if args.dry_run:

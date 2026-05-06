@@ -1469,7 +1469,7 @@ class DailyPostCog(commands.Cog):
             sim_threshold = 0.65
 
         cur = conn.cursor()
-        for sim, chunk_text, (mid_lo, mid_hi, ch_name) in hits:
+        for sim, chunk_text, (mid_lo, _mid_hi, ch_name) in hits:
             if sim < sim_threshold:
                 continue
             # Check message date

@@ -235,8 +235,8 @@ def get_last_scan_time(guild_id: int) -> Optional[datetime]:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT last_scan_time FROM scan_metadata 
-        ORDER BY last_scan_time DESC 
+        SELECT last_scan_time FROM scan_metadata
+        ORDER BY last_scan_time DESC
         LIMIT 1
     """)
 

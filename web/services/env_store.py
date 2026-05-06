@@ -62,12 +62,10 @@ def parse_env(path: Path) -> Tuple[List[EnvLine], Dict[str, str]]:
             # Accumulate subsequent lines until closing quote encountered
             i += 1
             acc = [content]
-            closed = False
             while i < n:
                 seg = raw_lines[i]
                 if seg.endswith(quote):
                     acc.append(seg[:-1])
-                    closed = True
                     i += 1
                     break
                 else:

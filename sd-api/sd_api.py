@@ -66,8 +66,10 @@ from threading import Lock
 # Initialize Colorama
 init(autoreset=True)
 
+
 class ColoredFormatter(logging.Formatter):
     """Custom logging formatter with colors."""
+
     LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 
     COLOR_MAP = {
@@ -82,6 +84,7 @@ class ColoredFormatter(logging.Formatter):
         log_fmt = self.COLOR_MAP.get(record.levelno, self.LOG_FORMAT)
         formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
+
 
 def setup_logging():
     """Configure logging with colored output."""
@@ -103,7 +106,9 @@ def setup_logging():
     logging.getLogger("gradio").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
 
+
 setup_logging()
+
 
 class StableDiffusionConfig:
     """Configuration for Stable Diffusion model."""
@@ -123,31 +128,31 @@ class StableDiffusionConfig:
     REVISION = None
     USE_SDXL = True  # Set to True for SDXL models (SD 3.5 Medium)
 
+
 def load_scheduler(repo, revision, use_sdxl=False):
     """Load the appropriate scheduler."""
     logging.info("Loading scheduler...")
     try:
         if use_sdxl:
-            scheduler = EulerDiscreteScheduler.from_pretrained(
-                repo, subfolder="scheduler", revision=revision
-            )
+            scheduler = EulerDiscreteScheduler.from_pretrained(repo, subfolder="scheduler", revision=revision)
         else:
-            scheduler = DPMSolverMultistepScheduler.from_pretrained(
-                repo, subfolder="scheduler", revision=revision
-            )
+            scheduler = DPMSolverMultistepScheduler.from_pretrained(repo, subfolder="scheduler", revision=revision)
         logging.info("Scheduler loaded successfully.")
         return scheduler
     except Exception as e:
         logging.error(f"Failed to load scheduler from {repo}: {e}")
         # Fallback to default scheduler
-        scheduler = DPMSolverMultistepScheduler.from_config({
-            "beta_start": 0.00085,
-            "beta_end": 0.012,
-            "beta_schedule": "scaled_linear",
-            "num_train_timesteps": 1000,
-        })
+        scheduler = DPMSolverMultistepScheduler.from_config(
+            {
+                "beta_start": 0.00085,
+                "beta_end": 0.012,
+                "beta_schedule": "scaled_linear",
+                "num_train_timesteps": 1000,
+            }
+        )
         logging.info("Using fallback scheduler.")
         return scheduler
+
 
 def quantize_and_freeze_model(model, model_name):
     """Apply quantization and freeze model."""
@@ -163,6 +168,7 @@ def quantize_and_freeze_model(model, model_name):
         logging.warning(f"Quantization failed for {model_name}: {e}")
         logging.info(f"Continuing without quantization for {model_name}.")
 
+
 def initialize_sd_pipeline(scheduler, use_sdxl=False):
     """Initialize the Stable Diffusion pipeline."""
     logging.info("Initializing Stable Diffusion pipeline...")
@@ -177,34 +183,21 @@ def initialize_sd_pipeline(scheduler, use_sdxl=False):
                 # SD 3.5 Medium requires specific handling - try with trust_remote_code
                 try:
                     pipeline = StableDiffusion3Pipeline.from_pretrained(
-                        repo,
-                        torch_dtype=torch.bfloat16,
-                        revision=revision,
-                        trust_remote_code=True,
-                        force_download=True
+                        repo, torch_dtype=torch.bfloat16, revision=revision, trust_remote_code=True, force_download=True
                     )
                 except Exception as e:
                     logging.warning(f"Failed with force_download=True, trying without: {e}")
                     # Fallback without force download
                     pipeline = StableDiffusion3Pipeline.from_pretrained(
-                        repo,
-                        torch_dtype=torch.bfloat16,
-                        revision=revision,
-                        trust_remote_code=True
+                        repo, torch_dtype=torch.bfloat16, revision=revision, trust_remote_code=True
                     )
             else:
                 pipeline = StableDiffusionXLPipeline.from_pretrained(
-                    repo,
-                    scheduler=scheduler,
-                    torch_dtype=torch.bfloat16,
-                    revision=revision
+                    repo, scheduler=scheduler, torch_dtype=torch.bfloat16, revision=revision
                 )
         else:
             pipeline = StableDiffusionPipeline.from_pretrained(
-                repo,
-                scheduler=scheduler,
-                torch_dtype=torch.bfloat16,
-                revision=revision
+                repo, scheduler=scheduler, torch_dtype=torch.bfloat16, revision=revision
             )
 
         logging.info("Pipeline loaded successfully.")
@@ -218,6 +211,7 @@ def initialize_sd_pipeline(scheduler, use_sdxl=False):
     except Exception as e:
         logging.error(f"Failed to load pipeline: {e}")
         raise e
+
 
 def load_lora_weights(pipeline, lora_path, weight=1.0):
     """Load LoRA weights into the pipeline."""
@@ -234,6 +228,7 @@ def load_lora_weights(pipeline, lora_path, weight=1.0):
     except Exception as e:
         logging.error(f"Failed to load LoRA weights: {e}")
         return pipeline
+
 
 def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height, seed, pipeline):
     """Generate an image using Stable Diffusion."""
@@ -266,7 +261,7 @@ def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height
             logging.info(f"Generating with {steps} steps, guidance {guidance_scale}, size {width}x{height}")
 
             # Generate image
-            pipeline_start = time.perf_counter()
+            _pipeline_start = time.perf_counter()
             output = pipeline(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
@@ -276,7 +271,7 @@ def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height
                 guidance_scale=guidance_scale,
                 generator=generator,
             )
-            pipeline_end = time.perf_counter()
+            _pipeline_end = time.perf_counter()
 
             image = output.images[0]
             total_time = time.perf_counter() - generation_start
@@ -287,6 +282,7 @@ def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height
         except Exception as e:
             logging.error(f"Error during image generation: {e}")
             raise HTTPException(status_code=500, detail="Image generation failed.")
+
 
 def remove_background_image(image: Image.Image) -> Image.Image:
     """Remove background from image."""
@@ -312,11 +308,12 @@ def remove_background_image(image: Image.Image) -> Image.Image:
         logging.error(f"Error during background removal: {e}")
         raise HTTPException(status_code=500, detail="Background removal failed.")
 
+
 # FastAPI Setup
 app = FastAPI(
     title="Stable Diffusion Image Generation API",
     description="API for generating images using Stable Diffusion with LoRA support.",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Global variables
@@ -330,6 +327,7 @@ pipeline_img2img = None
 controlnet_canny_sdxl = None
 controlnet_depth_sdxl = None
 
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the pipeline on startup."""
@@ -339,9 +337,7 @@ async def startup_event():
     try:
         # Load scheduler
         scheduler = load_scheduler(
-            StableDiffusionConfig.REPO_NAME,
-            StableDiffusionConfig.REVISION,
-            StableDiffusionConfig.USE_SDXL
+            StableDiffusionConfig.REPO_NAME, StableDiffusionConfig.REVISION, StableDiffusionConfig.USE_SDXL
         )
 
         # Initialize pipeline
@@ -359,6 +355,7 @@ async def startup_event():
         logging.error(f"Startup failed: {e}")
         raise e
 
+
 def _adjust_dimensions(orig_w: int, orig_h: int) -> (int, int):
     """Ensure dimensions are valid (multiples of 16 and >=64)."""
     try:
@@ -368,6 +365,7 @@ def _adjust_dimensions(orig_w: int, orig_h: int) -> (int, int):
         return width, height
     except Exception:
         return orig_w, orig_h
+
 
 def _init_img2img_pipeline():
     """Initialize and cache an img2img pipeline matching the configured model."""
@@ -408,6 +406,7 @@ def _init_img2img_pipeline():
         logging.error(f"Failed to initialize img2img pipeline: {e}")
         raise HTTPException(status_code=500, detail="Img2Img pipeline initialization failed.")
 
+
 def _load_controlnet_sdxl(canny: bool, depth: bool):
     """Lazy-load SDXL ControlNet models as requested."""
     global controlnet_canny_sdxl, controlnet_depth_sdxl
@@ -443,6 +442,7 @@ def _load_controlnet_sdxl(canny: bool, depth: bool):
             cn_list.append(controlnet_depth_sdxl)
     return cn_list
 
+
 def _build_canny_map(pil_image: Image.Image, zero_in_mask: Image.Image = None) -> Image.Image:
     """Generate a canny edge map image suitable for SDXL ControlNet Canny.
     If zero_in_mask is provided (L mode), set edges to 0 where mask==255 so we don't
@@ -453,7 +453,7 @@ def _build_canny_map(pil_image: Image.Image, zero_in_mask: Image.Image = None) -
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         edges = cv2.Canny(gray, 100, 200)
         if zero_in_mask is not None:
-            m = np.array(zero_in_mask.convert('L'))
+            m = np.array(zero_in_mask.convert("L"))
             edges[m > 0] = 0
         edges_rgb = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
         return Image.fromarray(edges_rgb)
@@ -461,6 +461,7 @@ def _build_canny_map(pil_image: Image.Image, zero_in_mask: Image.Image = None) -
         logging.warning(f"Canny preprocessing failed: {e}")
         # Return a blank control image to avoid crash
         return Image.new("RGB", pil_image.size, color=(0, 0, 0))
+
 
 def _apply_histogram_match(source_band: Image.Image, reference_ring: Image.Image) -> Image.Image:
     if match_histograms is None:
@@ -479,17 +480,18 @@ def _apply_histogram_match(source_band: Image.Image, reference_ring: Image.Image
         logging.warning(f"Histogram matching failed: {e}")
         return source_band
 
+
 def _match_lightness_lab(source_seam: Image.Image, reference_ring: Image.Image) -> Image.Image:
     """Match average lightness (L channel) of seam to reference using LAB space.
     Applies a conservative gain on L to avoid extreme brightness changes.
     """
     try:
-        src = np.array(source_seam.convert('RGB'))
-        ref = np.array(reference_ring.convert('RGB'))
+        src = np.array(source_seam.convert("RGB"))
+        ref = np.array(reference_ring.convert("RGB"))
         src_lab = cv2.cvtColor(src, cv2.COLOR_RGB2LAB)
         ref_lab = cv2.cvtColor(ref, cv2.COLOR_RGB2LAB)
-        src_L = src_lab[:,:,0].astype(np.float32)
-        ref_L = ref_lab[:,:,0].astype(np.float32)
+        src_L = src_lab[:, :, 0].astype(np.float32)
+        ref_L = ref_lab[:, :, 0].astype(np.float32)
 
         # More robust mean calculation - exclude very dark and very bright pixels
         src_valid = src_L[(src_L > 10) & (src_L < 245)]
@@ -515,21 +517,24 @@ def _match_lightness_lab(source_seam: Image.Image, reference_ring: Image.Image) 
         src_L_adjusted[mask] = np.clip(src_L[mask] * gain, 0, 255)
         src_L_adjusted = src_L_adjusted.astype(np.uint8)
 
-        src_lab[:,:,0] = src_L_adjusted
+        src_lab[:, :, 0] = src_L_adjusted
         out_rgb = cv2.cvtColor(src_lab, cv2.COLOR_LAB2RGB)
         return Image.fromarray(out_rgb)
     except Exception as e:
         logging.warning(f"Lightness match failed: {e}")
         return source_seam
 
-def _poisson_seam_blend(src_img: Image.Image, dst_img: Image.Image, seam_mask: Image.Image, mode: int = cv2.NORMAL_CLONE) -> Image.Image:
+
+def _poisson_seam_blend(
+    src_img: Image.Image, dst_img: Image.Image, seam_mask: Image.Image, mode: int = cv2.NORMAL_CLONE
+) -> Image.Image:
     """Use OpenCV seamlessClone to blend src onto dst within seam_mask.
     mode: cv2.NORMAL_CLONE or cv2.MIXED_CLONE
     """
     try:
-        src = cv2.cvtColor(np.array(src_img.convert('RGB')), cv2.COLOR_RGB2BGR)
-        dst = cv2.cvtColor(np.array(dst_img.convert('RGB')), cv2.COLOR_RGB2BGR)
-        mask = np.array(seam_mask.convert('L'))
+        src = cv2.cvtColor(np.array(src_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+        dst = cv2.cvtColor(np.array(dst_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+        mask = np.array(seam_mask.convert("L"))
         # Use a higher threshold to avoid black lines - threshold of 50 instead of 10
         # This ensures we only blend where there's significant mask coverage
         _, mask_bin = cv2.threshold(mask, 50, 255, cv2.THRESH_BINARY)
@@ -540,6 +545,7 @@ def _poisson_seam_blend(src_img: Image.Image, dst_img: Image.Image, seam_mask: I
         logging.warning(f"Poisson blending failed, returning dst: {e}")
         return dst_img
 
+
 def _seed_generator(seed: int):
     if seed == -1:
         seed = torch.randint(0, 2**32 - 1, (1,)).item()
@@ -549,6 +555,7 @@ def _seed_generator(seed: int):
         logging.info(f"Using seed: {seed}")
     return seed, torch.Generator().manual_seed(seed)
 
+
 @app.post("/sd")
 async def sd_endpoint(
     prompt: str = Form(...),
@@ -557,19 +564,16 @@ async def sd_endpoint(
     guidance_scale: float = Form(7.5, gt=0.0, le=20.0),
     width: int = Form(512, ge=64, le=2048),
     height: int = Form(512, ge=64, le=2048),
-    seed: int = Form(-1)
+    seed: int = Form(-1),
 ):
     """Generate an image using Stable Diffusion."""
-    endpoint_start = time.perf_counter()
+    _endpoint_start = time.perf_counter()
 
     if pipeline is None:
         raise HTTPException(status_code=500, detail="Pipeline not initialized.")
 
     try:
-        image = generate_image(
-            prompt, negative_prompt, steps, guidance_scale,
-            width, height, seed, pipeline
-        )
+        image = generate_image(prompt, negative_prompt, steps, guidance_scale, width, height, seed, pipeline)
 
         buffer = BytesIO()
         image.save(buffer, format="JPEG", quality=85, optimize=False)
@@ -578,15 +582,13 @@ async def sd_endpoint(
         return StreamingResponse(
             buffer,
             media_type="image/jpeg",
-            headers={
-                "Cache-Control": "public, max-age=3600",
-                "Content-Disposition": "inline"
-            }
+            headers={"Cache-Control": "public, max-age=3600", "Content-Disposition": "inline"},
         )
 
     except Exception as e:
         logging.error(f"Error in SD endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/remove_background")
 async def remove_background_endpoint(file: UploadFile = File(...)):
@@ -612,16 +614,19 @@ async def remove_background_endpoint(file: UploadFile = File(...)):
 
     return StreamingResponse(buffer, media_type="image/png")
 
+
 @app.get("/")
 def read_root():
     return {
         "message": "Stable Diffusion Image Generation API with LoRA support",
-        "endpoints": ["/sd", "/remove_background", "/upscale", "/sd_img2img", "/sd_inpaint"]
+        "endpoints": ["/sd", "/remove_background", "/upscale", "/sd_img2img", "/sd_inpaint"],
     }
+
 
 @app.get("/health")
 def health_check():
     return {"status": "ok", "model": StableDiffusionConfig.REPO_NAME}
+
 
 def upscale_image_with_opencv(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
     """Upscale image using OpenCV's high-quality interpolation methods."""
@@ -656,6 +661,7 @@ def upscale_image_with_opencv(image: Image.Image, target_width: int, target_heig
         # Fallback to PIL's LANCZOS resampling
         return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
+
 def upscale_image_with_ai(image: Image.Image, target_width: int, target_height: int) -> Image.Image:
     """Upscale image using AI super-resolution (Real-ESRGAN style)."""
     try:
@@ -680,6 +686,7 @@ def upscale_image_with_ai(image: Image.Image, target_width: int, target_height: 
         # Fallback to PIL's LANCZOS resampling
         return image.resize((target_width, target_height), Image.Resampling.LANCZOS)
 
+
 def preprocess_img2img_image(image: Image.Image) -> Image.Image:
     """Preprocess image for better img2img results."""
     try:
@@ -687,9 +694,7 @@ def preprocess_img2img_image(image: Image.Image) -> Image.Image:
         img_array = np.array(image)
 
         # Apply slight sharpening to improve detail preservation
-        kernel = np.array([[-1,-1,-1],
-                          [-1, 9,-1],
-                          [-1,-1,-1]])
+        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
 
         # Apply sharpening filter
         sharpened = cv2.filter2D(img_array, -1, kernel)
@@ -707,13 +712,14 @@ def preprocess_img2img_image(image: Image.Image) -> Image.Image:
         logging.warning(f"Image preprocessing failed, using original: {e}")
         return image
 
+
 @app.post("/upscale")
 async def upscale_endpoint(
     image: UploadFile = File(...),
     scale_factor: float = Form(2.0, ge=1.0, le=4.0),
     target_width: int = Form(None),
     target_height: int = Form(None),
-    method: str = Form("opencv", description="Upscaling method: 'opencv' or 'ai'")
+    method: str = Form("opencv", description="Upscaling method: 'opencv' or 'ai'"),
 ):
     """Upscale an image using OpenCV's high-quality interpolation."""
     try:
@@ -752,17 +758,18 @@ async def upscale_endpoint(
         logging.error(f"Error in upscale endpoint: {e}")
         raise HTTPException(status_code=500, detail="Upscaling failed.")
 
+
 @app.post("/sd_img2img")
 async def sd_img2img_endpoint(
     image: UploadFile = File(...),
     prompt: str = Form(...),
     negative_prompt: str = Form(""),
-    steps: int = Form(20, ge=1, le=50),           # Better default for SD 3.5
+    steps: int = Form(20, ge=1, le=50),  # Better default for SD 3.5
     guidance_scale: float = Form(7.5, gt=0.0, le=20.0),  # Better for SD 3.5 Medium
     width: int = Form(None),
     height: int = Form(None),
     seed: int = Form(-1),
-    strength: float = Form(0.3),                 # More subtle default
+    strength: float = Form(0.3),  # More subtle default
 ):
     if pipeline is None:
         raise HTTPException(status_code=500, detail="Pipeline not initialized.")
@@ -804,18 +811,19 @@ async def sd_img2img_endpoint(
         logging.error(f"Error in sd_img2img endpoint: {e}")
         raise HTTPException(status_code=500, detail="Img2Img failed.")
 
+
 @app.post("/sd_inpaint")
 async def sd_inpaint_endpoint(
     image: UploadFile = File(...),
     mask: UploadFile = File(...),
     prompt: str = Form(...),
     negative_prompt: str = Form(""),
-    steps: int = Form(20, ge=1, le=50),           # Better default for SD 3.5
+    steps: int = Form(20, ge=1, le=50),  # Better default for SD 3.5
     guidance_scale: float = Form(7.5, gt=0.0, le=20.0),  # Better for SD 3.5 Medium
     width: int = Form(None),
     height: int = Form(None),
     seed: int = Form(-1),
-    strength: float = Form(0.8),                 # Good for inpaint
+    strength: float = Form(0.8),  # Good for inpaint
 ):
     if pipeline is None:
         raise HTTPException(status_code=500, detail="Pipeline not initialized.")
@@ -839,15 +847,11 @@ async def sd_inpaint_endpoint(
             # SD3.5 inpaint pipeline may be unavailable; fallback to img2img with mask unsupported
             _p = _init_img2img_pipeline()
         elif use_sdxl and StableDiffusionXLInpaintPipeline is not None:
-            _p = StableDiffusionXLInpaintPipeline.from_pretrained(
-                repo, torch_dtype=torch.bfloat16, revision=revision
-            )
+            _p = StableDiffusionXLInpaintPipeline.from_pretrained(repo, torch_dtype=torch.bfloat16, revision=revision)
             _p.enable_model_cpu_offload()
             _p.enable_attention_slicing()
         elif StableDiffusionInpaintPipeline is not None:
-            _p = StableDiffusionInpaintPipeline.from_pretrained(
-                repo, torch_dtype=torch.bfloat16, revision=revision
-            )
+            _p = StableDiffusionInpaintPipeline.from_pretrained(repo, torch_dtype=torch.bfloat16, revision=revision)
             _p.enable_model_cpu_offload()
             _p.enable_attention_slicing()
         else:
@@ -880,6 +884,7 @@ async def sd_inpaint_endpoint(
     except Exception as e:
         logging.error(f"Error in sd_inpaint endpoint: {e}")
         raise HTTPException(status_code=500, detail="Inpaint failed.")
+
 
 @app.post("/outpaint_hybrid")
 async def outpaint_hybrid_endpoint(
@@ -957,7 +962,9 @@ async def outpaint_hybrid_endpoint(
                     guidance_scale=float(guidance_scale),
                     width=int(tgt_w),
                     height=int(tgt_h),
-                    controlnet_conditioning_scale=control_weight if len(controlnets) == 1 else [control_weight]*len(controlnets),
+                    controlnet_conditioning_scale=(
+                        control_weight if len(controlnets) == 1 else [control_weight] * len(controlnets)
+                    ),
                     generator=generator,
                     strength=float(strength),
                     control_image=control_image_arg,
@@ -994,9 +1001,9 @@ async def outpaint_hybrid_endpoint(
 
         # 2) Composite: use generated content only in seam, keep original interior
         try:
-            inv_mask = Image.eval(seam_mask, lambda v: 255 - v).convert('L')
-            base_rgb = padded_img.convert('RGB')
-            result_rgb = result_img.convert('RGB')
+            _inv_mask = Image.eval(seam_mask, lambda v: 255 - v).convert("L")
+            base_rgb = padded_img.convert("RGB")
+            result_rgb = result_img.convert("RGB")
             # Want result in seam, base in interior:
             # composite(im1, im2, mask) takes from im1 where mask > 0 else from im2
             comp = Image.composite(result_rgb, base_rgb, seam_mask)
@@ -1021,18 +1028,18 @@ async def outpaint_hybrid_endpoint(
                 # Build a thin interior ring mask (just inside the original image border)
                 inv_mask_np = 255 - np.array(seam_mask)
                 # Erode to get interior, then subtract to get a thin ring
-                ring = cv2.erode(inv_mask_np, np.ones((7,7), np.uint8), iterations=1)
+                ring = cv2.erode(inv_mask_np, np.ones((7, 7), np.uint8), iterations=1)
                 ring = inv_mask_np - ring
-                ring_img = Image.fromarray(ring).convert('L')
+                ring_img = Image.fromarray(ring).convert("L")
 
                 # Create a mask for the seam region (where we want to adjust colors)
                 # Use a slightly dilated version of the seam mask to include the border area
-                seam_dilated = cv2.dilate(np.array(seam_mask), np.ones((5,5), np.uint8), iterations=1)
-                seam_mask_dilated = Image.fromarray(seam_dilated).convert('L')
+                seam_dilated = cv2.dilate(np.array(seam_mask), np.ones((5, 5), np.uint8), iterations=1)
+                seam_mask_dilated = Image.fromarray(seam_dilated).convert("L")
 
                 # Extract the seam region and the reference ring
-                seam_rgb = Image.composite(blended, Image.new('RGB', blended.size, (0,0,0)), seam_mask_dilated)
-                ref = Image.composite(base_rgb, Image.new('RGB', base_rgb.size, (0,0,0)), ring_img)
+                seam_rgb = Image.composite(blended, Image.new("RGB", blended.size, (0, 0, 0)), seam_mask_dilated)
+                ref = Image.composite(base_rgb, Image.new("RGB", base_rgb.size, (0, 0, 0)), ring_img)
 
                 # Apply conservative lightness matching (max 5% adjustment)
                 matched_seam = _match_lightness_lab(seam_rgb, ref)
@@ -1053,7 +1060,7 @@ async def outpaint_hybrid_endpoint(
                 out2 = _p(
                     prompt=f"{prompt}",
                     negative_prompt=negative_prompt,
-                    image=blended.convert('RGB'),
+                    image=blended.convert("RGB"),
                     strength=float(harmonize_strength),
                     num_inference_steps=int(max(10, min(28, steps))),
                     guidance_scale=float(max(4.5, min(8.0, guidance_scale))),
@@ -1079,15 +1086,10 @@ async def outpaint_hybrid_endpoint(
         logging.error(f"Error in outpaint_hybrid endpoint: {e}")
         raise HTTPException(status_code=500, detail="Outpaint hybrid failed.")
 
+
 if __name__ == "__main__":
     import os
 
     import uvicorn
 
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        log_level="debug"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False, log_level="debug")

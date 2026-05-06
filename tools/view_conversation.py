@@ -39,7 +39,7 @@ try:
 
     # Get all messages ordered by time
     cursor.execute("""
-        SELECT 
+        SELECT
             message_id,
             date || ' ' || time as timestamp,
             username,
@@ -48,7 +48,7 @@ try:
             image_description,
             url_summary,
             channel_name
-        FROM messages 
+        FROM messages
         ORDER BY date, time
     """)
 

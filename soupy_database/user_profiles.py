@@ -1546,12 +1546,15 @@ async def _run_profile_batch_inner(guild_id: int) -> None:
             profile_job_log_append(guild_id, "No user ids in job; exiting.")
             break
         if i >= len(uids):
-
+            # The closure over `uids` is safe — `run_in_executor` is awaited
+            # before the next loop iteration, so the variable can't change
+            # underneath it. Same reasoning for the other B023 noqas in
+            # this file.
             def _done() -> None:
                 cx = sqlite3.connect(db_path, check_same_thread=False)
                 try:
                     ensure_profile_job_schema(cx)
-                    upsert_job(cx, guild_id, status="completed", next_index=len(uids))
+                    upsert_job(cx, guild_id, status="completed", next_index=len(uids))  # noqa: B023
                 finally:
                     cx.close()
 
@@ -1583,7 +1586,7 @@ async def _run_profile_batch_inner(guild_id: int) -> None:
                     FROM messages WHERE user_id = ?
                     ORDER BY message_id DESC LIMIT 1
                     """,
-                    (uid,),
+                    (uid,),  # noqa: B023 — closure awaited in same loop iteration
                 )
                 r = c.fetchone()
                 return (r["nick"] or "").strip() if r else ""
@@ -1646,7 +1649,7 @@ async def _run_profile_batch_inner(guild_id: int) -> None:
             cx = sqlite3.connect(db_path, check_same_thread=False)
             try:
                 ensure_profile_job_schema(cx)
-                upsert_job(cx, guild_id, next_index=nxt, stats_json=stats_json)
+                upsert_job(cx, guild_id, next_index=nxt, stats_json=stats_json)  # noqa: B023
             finally:
                 cx.close()
 

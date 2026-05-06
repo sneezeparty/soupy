@@ -44,7 +44,7 @@ try:
 
     cursor.execute(
         """
-        SELECT 
+        SELECT
             message_id,
             date,
             time,
@@ -57,7 +57,7 @@ try:
             image_description,
             url_summary,
             created_at
-        FROM messages 
+        FROM messages
         WHERE username = ?
         ORDER BY created_at ASC
     """,
@@ -135,8 +135,8 @@ try:
     print()
 
     cursor.execute("""
-        SELECT * FROM messages 
-        ORDER BY created_at DESC 
+        SELECT * FROM messages
+        ORDER BY created_at DESC
         LIMIT 1
     """)
 

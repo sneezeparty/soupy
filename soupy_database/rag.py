@@ -72,7 +72,7 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     dot = 0.0
     na = 0.0
     nb = 0.0
-    for x, y in zip(a, b):
+    for x, y in zip(a, b, strict=False):
         dot += x * y
         na += x * x
         nb += y * y
@@ -108,14 +108,12 @@ def _iter_conversation_chunks(
     gap_minutes: int = 30,
 ) -> List[Dict[str, Any]]:
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT message_id, date, time, username, nickname, user_id, message_content,
                channel_id, channel_name, image_description, url_summary
         FROM messages
         ORDER BY date ASC, time ASC, message_id ASC
-        """
-    )
+        """)
     rows = cur.fetchall()
     if not rows:
         return []
@@ -268,7 +266,7 @@ def _reindex_sync_write_chunks(
         ensure_rag_schema(conn)
         cur = conn.cursor()
         dim = len(vectors[0])
-        for c, vec in zip(chunk_dicts, vectors):
+        for c, vec in zip(chunk_dicts, vectors, strict=False):
             if len(vec) != dim:
                 raise RuntimeError("inconsistent embedding dimensions")
             cur.execute(
@@ -299,9 +297,7 @@ async def reindex_guild_rag(guild_id: int) -> Dict[str, Any]:
     """Replace all rag_chunks for a guild using current messages table."""
     async with _reindex_lock(guild_id):
         loop = asyncio.get_running_loop()
-        chunk_dicts = await loop.run_in_executor(
-            None, _reindex_sync_clear_and_build_chunks, guild_id
-        )
+        chunk_dicts = await loop.run_in_executor(None, _reindex_sync_clear_and_build_chunks, guild_id)
         if not chunk_dicts:
             return {"ok": True, "chunks": 0, "message": "No messages to index."}
 
@@ -311,9 +307,7 @@ async def reindex_guild_rag(guild_id: int) -> Dict[str, Any]:
         if len(vectors) != len(chunk_dicts):
             raise RuntimeError("embedding count mismatch")
 
-        return await loop.run_in_executor(
-            None, _reindex_sync_write_chunks, guild_id, chunk_dicts, vectors
-        )
+        return await loop.run_in_executor(None, _reindex_sync_write_chunks, guild_id, chunk_dicts, vectors)
 
 
 async def index_message_immediate(
@@ -343,9 +337,16 @@ async def index_message_immediate(
             if message_exists(conn, message_id):
                 return False
             insert_message(
-                conn, message_id, msg_date, msg_time,
-                username, nickname, user_id,
-                message_content, channel_id, channel_name,
+                conn,
+                message_id,
+                msg_date,
+                msg_time,
+                username,
+                nickname,
+                user_id,
+                message_content,
+                channel_id,
+                channel_name,
             )
             return True
         finally:
@@ -383,8 +384,7 @@ async def index_message_immediate(
                      chunk_text, embedding_dim, embedding)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (message_id, message_id, channel_id, channel_name,
-                 chunk_text, dim, pack_embedding(vec)),
+                (message_id, message_id, channel_id, channel_name, chunk_text, dim, pack_embedding(vec)),
             )
             conn.commit()
         finally:
@@ -421,14 +421,11 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
             cur = conn.cursor()
 
             # Per-channel watermark: highest message_id already in a chunk
-            cur.execute(
-                "SELECT channel_id, MAX(last_message_id) AS watermark FROM rag_chunks GROUP BY channel_id"
-            )
-            watermarks: Dict[int, int] = {r["channel_id"]: r["watermark"] for r in cur.fetchall()}
+            cur.execute("SELECT channel_id, MAX(last_message_id) AS watermark FROM rag_chunks GROUP BY channel_id")
+            _watermarks: Dict[int, int] = {r["channel_id"]: r["watermark"] for r in cur.fetchall()}
 
             # Messages not yet covered (newer than watermark, or channel has no chunks)
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT m.message_id, m.channel_id, m.channel_name, m.date, m.time
                 FROM messages m
                 LEFT JOIN (
@@ -437,21 +434,18 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
                 ) w ON m.channel_id = w.channel_id
                 WHERE w.watermark IS NULL OR m.message_id > w.watermark
                 ORDER BY m.channel_id, m.date ASC, m.time ASC, m.message_id ASC
-                """
-            )
+                """)
             uncovered: Dict[int, List[Dict]] = {}
             for r in cur.fetchall():
                 uncovered.setdefault(r["channel_id"], []).append(dict(r))
 
             # Single-message chunks that need consolidation
-            cur.execute(
-                """
+            cur.execute("""
                 SELECT rc.first_message_id, rc.channel_id, rc.channel_name, m.date, m.time
                 FROM rag_chunks rc
                 JOIN messages m ON m.message_id = rc.first_message_id
                 WHERE rc.first_message_id = rc.last_message_id
-                """
-            )
+                """)
             singles: Dict[int, List[Dict]] = {}
             for r in cur.fetchall():
                 singles.setdefault(r["channel_id"], []).append(dict(r))
@@ -476,8 +470,9 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
     total_new = sum(len(v["uncovered"]) for v in work.values())
     total_singles = sum(len(v["singles"]) for v in work.values())
 
-    def _process_channel(channel_id: int, channel_name: str,
-                         uncovered: List[Dict], singles: List[Dict]) -> List[Dict[str, Any]]:
+    def _process_channel(
+        channel_id: int, channel_name: str, uncovered: List[Dict], singles: List[Dict]
+    ) -> List[Dict[str, Any]]:
         conn = init_database(guild_id)
         try:
             all_rows = uncovered + singles
@@ -498,8 +493,7 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
                 """,
                 (channel_id, min_dt.strftime("%Y-%m-%d"), max_dt.strftime("%Y-%m-%d")),
             )
-            in_window = [r for r in cur.fetchall()
-                         if min_dt <= _parse_msg_dt(r["date"], r["time"]) <= max_dt]
+            in_window = [r for r in cur.fetchall() if min_dt <= _parse_msg_dt(r["date"], r["time"]) <= max_dt]
             if not in_window:
                 return []
 
@@ -529,13 +523,15 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
                 for i in range(0, len(group), 6):
                     sub = group[i : i + 6]
                     lines = [_line_for_row(r) for r in sub]
-                    new_chunks.append({
-                        "first_message_id": sub[0]["message_id"],
-                        "last_message_id": sub[-1]["message_id"],
-                        "channel_id": channel_id,
-                        "channel_name": ch_name,
-                        "chunk_text": f"[#{ch_name} channel_id={channel_id}]\n" + "\n".join(lines),
-                    })
+                    new_chunks.append(
+                        {
+                            "first_message_id": sub[0]["message_id"],
+                            "last_message_id": sub[-1]["message_id"],
+                            "channel_id": channel_id,
+                            "channel_name": ch_name,
+                            "chunk_text": f"[#{ch_name} channel_id={channel_id}]\n" + "\n".join(lines),
+                        }
+                    )
                 group = []
 
             for row in in_window:
@@ -552,9 +548,12 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
     all_new_chunks: List[Dict[str, Any]] = []
     for channel_id, channel_work in work.items():
         chunks = await loop.run_in_executor(
-            None, _process_channel,
-            channel_id, channel_work["channel_name"],
-            channel_work["uncovered"], channel_work["singles"],
+            None,
+            _process_channel,
+            channel_id,
+            channel_work["channel_name"],
+            channel_work["uncovered"],
+            channel_work["singles"],
         )
         all_new_chunks.extend(chunks)
 
@@ -569,7 +568,7 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
         conn = init_database(guild_id)
         try:
             ensure_rag_schema(conn)
-            for c, vec in zip(all_new_chunks, vectors):
+            for c, vec in zip(all_new_chunks, vectors, strict=False):
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO rag_chunks
@@ -577,9 +576,15 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
                          chunk_text, embedding_dim, embedding)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (c["first_message_id"], c["last_message_id"],
-                     c["channel_id"], c["channel_name"],
-                     c["chunk_text"], len(vec), pack_embedding(vec)),
+                    (
+                        c["first_message_id"],
+                        c["last_message_id"],
+                        c["channel_id"],
+                        c["channel_name"],
+                        c["chunk_text"],
+                        len(vec),
+                        pack_embedding(vec),
+                    ),
                 )
             conn.commit()
         finally:
@@ -588,7 +593,10 @@ async def index_new_messages(guild_id: int) -> Dict[str, Any]:
     await loop.run_in_executor(None, _write)
     logger.info(
         "index_new_messages guild=%s: +%d new msg(s), %d single(s) consolidated → %d chunk(s)",
-        guild_id, total_new, total_singles, len(all_new_chunks),
+        guild_id,
+        total_new,
+        total_singles,
+        len(all_new_chunks),
     )
     return {"ok": True, "new_messages": total_new, "consolidated": total_singles, "new_chunks": len(all_new_chunks)}
 
@@ -601,12 +609,10 @@ def search_rag_chunks(
     user_boost_multiplier: float = 1.0,
 ) -> List[Tuple[float, str, Tuple[int, int, str]]]:
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         SELECT chunk_text, first_message_id, last_message_id, channel_name, embedding, embedding_dim
         FROM rag_chunks
-        """
-    )
+        """)
     rows = cur.fetchall()
     qdim = len(query_embedding)
     scored: List[Tuple[float, str, Tuple[int, int, str]]] = []
@@ -629,12 +635,20 @@ def search_rag_chunks(
     return scored[:top_k]
 
 
-def _log_rag_bundle(prof_out: int, kw_out: int, vec_n: int, total: int, cap: int, truncated: bool, note: str = "") -> None:
+def _log_rag_bundle(
+    prof_out: int, kw_out: int, vec_n: int, total: int, cap: int, truncated: bool, note: str = ""
+) -> None:
     trunc_tag = " ✗ TRUNCATED" if truncated else " ✓"
     note_tag = f" ({note})" if note else ""
     logger.info(
         "  bundle   : profile=%d + keyword=%d + %d vector(s) → %d / %d chars%s%s",
-        prof_out, kw_out, vec_n, total, cap, trunc_tag, note_tag,
+        prof_out,
+        kw_out,
+        vec_n,
+        total,
+        cap,
+        trunc_tag,
+        note_tag,
     )
 
 
@@ -672,7 +686,7 @@ def _assemble_rag_bundle(
             self_max = 1500
         self_pieces: List[str] = []
         self_total = 0
-        for score, text, section in self_hits:
+        for _score, text, _section in self_hits:
             if self_total + len(text) > self_max:
                 break
             self_pieces.append(text)
@@ -1056,9 +1070,7 @@ def _token_is_name_match(token: str, name: str) -> bool:
     return False
 
 
-def _resolve_subject_user_id(
-    conn: sqlite3.Connection, tokens: Sequence[str]
-) -> Tuple[Optional[int], Optional[str]]:
+def _resolve_subject_user_id(conn: sqlite3.Connection, tokens: Sequence[str]) -> Tuple[Optional[int], Optional[str]]:
     """
     If a token strongly matches one Discord user's username/nickname, return that user_id.
 
@@ -1139,7 +1151,9 @@ def _resolve_subject_user_id(
                 continue  # ambiguous — multiple users match
             logger.debug(
                 "RAG keyword: resolved subject token %r -> user_id %s (%s msgs)",
-                matched_tok, matched_uid, matched_cnt,
+                matched_tok,
+                matched_uid,
+                matched_cnt,
             )
             return matched_uid, matched_tok
     return None, None
@@ -1162,9 +1176,7 @@ def _fetch_rows_author_and_topics(
             (user_id, limit),
         )
         return cur.fetchall()
-    or_clause = " OR ".join(
-        ["lower(coalesce(message_content, '')) LIKE '%' || ? || '%'"] * len(topic_tokens)
-    )
+    or_clause = " OR ".join(["lower(coalesce(message_content, '')) LIKE '%' || ? || '%'"] * len(topic_tokens))
     sql = f"""
         SELECT message_id, date, time, username, nickname, user_id, message_content,
                channel_id, channel_name, image_description, url_summary
@@ -1259,7 +1271,9 @@ def _keyword_supplement_block(
         topic_tokens = topic_sql if topic_sql else tokens
         rows = _fetch_rows_author_and_topics(conn, author_uid, topic_tokens, lim)
         if not rows and topic_tokens:
-            logger.debug("  keyword  : no topic match for %s (first-person), falling back to recent lines", topic_tokens)
+            logger.debug(
+                "  keyword  : no topic match for %s (first-person), falling back to recent lines", topic_tokens
+            )
             rows = _fetch_rows_author_and_topics(conn, author_uid, [], fallback_recent)
     else:
         author_uid, author_tok = _resolve_subject_user_id(conn, tokens)
@@ -1269,7 +1283,11 @@ def _keyword_supplement_block(
     if not first_person and author_uid is not None:
         rows = _fetch_rows_author_and_topics(conn, author_uid, topic_tokens, lim)
         if not rows and topic_tokens:
-            logger.debug("  keyword  : no topic match for subject %r (user %s), falling back to recent lines", author_tok, author_uid)
+            logger.debug(
+                "  keyword  : no topic match for subject %r (user %s), falling back to recent lines",
+                author_tok,
+                author_uid,
+            )
             rows = _fetch_rows_author_and_topics(conn, author_uid, [], fallback_recent)
     elif not first_person and len(tokens) >= 2:
         partner = max(tokens[1:], key=len)
@@ -1295,12 +1313,8 @@ def _keyword_supplement_block(
     lines: List[str] = []
     for r in rows:
         base = _line_for_row(r)
-        lines.append(
-            f"{base} [message_id={r['message_id']}, #{r['channel_name']}, {r['date']} {r['time']}]"
-        )
-    header = (
-        "--- Earlier messages (matched by topic or who posted; use for questions about a person or subject) ---\n"
-    )
+        lines.append(f"{base} [message_id={r['message_id']}, #{r['channel_name']}, {r['date']} {r['time']}]")
+    header = "--- Earlier messages (matched by topic or who posted; use for questions about a person or subject) ---\n"
     block = header + "\n".join(lines)
     if _rag_log_verbose() and lines:
         _kw_first = re.sub(r" \(user_id=\d+\)", "", lines[0])
@@ -1309,7 +1323,10 @@ def _keyword_supplement_block(
         _kw_preview = ""
     logger.info(
         "  keyword  : mode=%-12s | %d msg(s) → %d chars%s",
-        mode, len(rows), len(block), _kw_preview,
+        mode,
+        len(rows),
+        len(block),
+        _kw_preview,
     )
     # Full content dump — enable with RAG_LOG_FULL_CONTENT=1 for deep debugging
     if os.getenv("RAG_LOG_FULL_CONTENT", "0").strip() in ("1", "true", "yes"):
@@ -1369,7 +1386,9 @@ async def fetch_rag_context_for_query(
         _cur_for_subject = query_text or ""
         if "Current message:\n" in _cur_for_subject:
             _cur_for_subject = _cur_for_subject.split("Current message:\n")[-1].strip()
-        _cur_for_subject = re.sub(r"^(?:user|assistant)\s*\([^)]*\)\s*:\s*", "", _cur_for_subject, flags=re.IGNORECASE).strip()
+        _cur_for_subject = re.sub(
+            r"^(?:user|assistant)\s*\([^)]*\)\s*:\s*", "", _cur_for_subject, flags=re.IGNORECASE
+        ).strip()
         _fp_early = is_first_person_archive_query(first_person_hint or _cur_for_subject)
         _subject_uid: Optional[int] = None
         _subject_tok: Optional[str] = None
@@ -1380,16 +1399,15 @@ async def fetch_rag_context_for_query(
 
             # Pronoun fallback: if current message uses "him/her/them/he/she/they" but no
             # subject was resolved, try the previous user message from conversation history.
-            if _subject_uid is None and re.search(
-                r"\b(him|her|them|they|he|she)\b", _cur_for_subject, re.IGNORECASE
-            ):
+            if _subject_uid is None and re.search(r"\b(him|her|them|they|he|she)\b", _cur_for_subject, re.IGNORECASE):
                 _prev_user_msg = ""
                 if "Current message:\n" in (query_text or ""):
                     _history_part = (query_text or "").split("Current message:\n")[0]
                     # Find the last "user (...): ..." line in conversation history
                     _prev_lines = re.findall(
                         r"^(?:user)\s*\([^)]*\)\s*:\s*(.+)$",
-                        _history_part, re.MULTILINE | re.IGNORECASE,
+                        _history_part,
+                        re.MULTILINE | re.IGNORECASE,
                     )
                     if _prev_lines:
                         _prev_user_msg = _prev_lines[-1].strip()
@@ -1399,14 +1417,21 @@ async def fetch_rag_context_for_query(
                     if _subject_uid:
                         logger.debug(
                             "RAG pronoun fallback: resolved '%s' from previous message → user_id %s",
-                            _subject_tok, _subject_uid,
+                            _subject_tok,
+                            _subject_uid,
                         )
 
         # Log the resolution decisions at DEBUG so problems are visible
-        _mode_label = "first-person" if _fp_early else ("subject=%s (%s)" % (_subject_tok, _subject_uid) if _subject_uid else "third-person (no subject)")
+        _mode_label = (
+            "first-person"
+            if _fp_early
+            else ("subject=%s (%s)" % (_subject_tok, _subject_uid) if _subject_uid else "third-person (no subject)")
+        )
         logger.debug(
             "RAG resolve: stripped_msg=%r | tokens=%s | mode=%s",
-            _cur_for_subject[:120], _subject_tokens or _extract_query_tokens(normalize_rag_query_text(_cur_for_subject)), _mode_label,
+            _cur_for_subject[:120],
+            _subject_tokens or _extract_query_tokens(normalize_rag_query_text(_cur_for_subject)),
+            _mode_label,
         )
 
         # Build a name-mapping note when the subject's display names don't obviously
@@ -1433,7 +1458,7 @@ async def fetch_rag_context_for_query(
                 if _aliases:
                     _name_map_note = (
                         f'Note: "{_subject_tok}" refers to the member with {", ".join(_aliases)}.'
-                        f' All messages below from this member use their display name.'
+                        f" All messages below from this member use their display name."
                         f' Refer to this member as "{_subject_tok}" in your response.\n\n'
                     )
                 else:
@@ -1448,7 +1473,10 @@ async def fetch_rag_context_for_query(
         # Load profile for the subject (if third-person query) AND the asker.
         # subject_user_id tells the profile function who else to include beyond the asker.
         profile_pfx = _user_profiles.format_profile_prefix_for_rag(
-            conn, author_user_id, query_text, first_person_hint,
+            conn,
+            author_user_id,
+            query_text,
+            first_person_hint,
             subject_user_id=_subject_uid,
         )
         # Prepend the name-mapping note so the LLM knows the connection
@@ -1463,11 +1491,7 @@ async def fetch_rag_context_for_query(
         if "Current message:\n" in _display_query:
             _display_query = _display_query.split("Current message:\n")[-1].strip()
         _prof_names = re.findall(r"^— (.+?) \(id \d+\):", profile_pfx or "", re.MULTILINE)
-        _prof_summary = (
-            f"{', '.join(_prof_names)} → {len(profile_pfx)} chars"
-            if _prof_names
-            else "none"
-        )
+        _prof_summary = f"{', '.join(_prof_names)} → {len(profile_pfx)} chars" if _prof_names else "none"
         logger.info(
             "[RAG] user=%s | query: %s\n  profile  : %s",
             author_user_id,
@@ -1477,15 +1501,15 @@ async def fetch_rag_context_for_query(
         if os.getenv("RAG_LOG_FULL_CONTENT", "0").strip() in ("1", "true", "yes") and profile_pfx:
             logger.debug("  profile full:\n%s", profile_pfx)
 
-        supplement = _keyword_supplement_block(
-            conn, query_text, author_user_id, first_person_hint
-        )
+        supplement = _keyword_supplement_block(conn, query_text, author_user_id, first_person_hint)
 
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) AS c FROM rag_chunks")
         chunk_count = int(cur.fetchone()[0])
         if chunk_count == 0:
-            logger.warning("RAG: vector index empty for guild %s; run Rebuild RAG index for semantic excerpts.", guild_id)
+            logger.warning(
+                "RAG: vector index empty for guild %s; run Rebuild RAG index for semantic excerpts.", guild_id
+            )
             if supplement or profile_pfx:
                 out, prof_out, kw_out, vec_n, truncated, raw_len = _assemble_rag_bundle(
                     profile_pfx, supplement, [], max_chars, keyword_max
@@ -1528,7 +1552,10 @@ async def fetch_rag_context_for_query(
         _mode_tag = "first-person" if fp else ("subject" if _subject_uid else "third-person")
         logger.info(
             "  vectors  : %d hits | boost=%.1fx | mode=%s | tokens=%s",
-            len(hits), ubm, _mode_tag, toks[:6],
+            len(hits),
+            ubm,
+            _mode_tag,
+            toks[:6],
         )
         if _rag_log_verbose() and hits:
             _detail_limit = int(os.getenv("RAG_LOG_HIT_DETAIL_COUNT", "4"))
@@ -1542,13 +1569,20 @@ async def fetch_rag_context_for_query(
                 if _full_content:
                     logger.debug(
                         "  vec #%-2d  sim=%.3f  #%s  ids=%s-%s\n%s",
-                        i, score, ch, mid_lo, mid_hi,
+                        i,
+                        score,
+                        ch,
+                        mid_lo,
+                        mid_hi,
                         re.sub(r" \(user_id=\d+\)", "", _chunk_body),
                     )
                 else:
                     logger.info(
                         "             #%-2d  sim=%.3f  #%-14s  ids=%-12s  %s",
-                        i, score, (ch or "")[:14], f"{mid_lo}-{mid_hi}",
+                        i,
+                        score,
+                        (ch or "")[:14],
+                        f"{mid_lo}-{mid_hi}",
                         _preview_for_log(_chunk_body, 95),
                     )
 
@@ -1557,6 +1591,7 @@ async def fetch_rag_context_for_query(
         if qv is not None:
             try:
                 from .self_context import is_self_md_enabled, search_self_chunks
+
                 if is_self_md_enabled():
                     _self_top_k = int(os.getenv("RAG_SELF_KNOWLEDGE_TOP_K", "5"))
                     _self_min_sim = float(os.getenv("RAG_SELF_KNOWLEDGE_MIN_SIM", "0.3"))
@@ -1565,11 +1600,11 @@ async def fetch_rag_context_for_query(
                     if _self_hits:
                         logger.info(
                             "  self-knowledge: %d chunk(s) (top sim=%.3f)",
-                            len(_self_hits), _self_hits[0][0],
+                            len(_self_hits),
+                            _self_hits[0][0],
                         )
                         for i, (sc, txt, sec) in enumerate(_self_hits, 1):
-                            logger.debug("  self #%-2d sim=%.3f  [%s]  %s", i, sc, sec,
-                                         _preview_for_log(txt, 80))
+                            logger.debug("  self #%-2d sim=%.3f  [%s]  %s", i, sc, sec, _preview_for_log(txt, 80))
             except Exception as exc:
                 logger.debug("self-knowledge retrieval skipped: %s", exc)
     finally:
@@ -1578,7 +1613,11 @@ async def fetch_rag_context_for_query(
     if not supplement and not hits and not profile_pfx and not _self_hits:
         return None
     out, prof_out, kw_out, vec_n, truncated, raw_len = _assemble_rag_bundle(
-        profile_pfx, supplement, hits, max_chars, keyword_max,
+        profile_pfx,
+        supplement,
+        hits,
+        max_chars,
+        keyword_max,
         self_hits=_self_hits,
     )
     _log_rag_bundle(prof_out, kw_out, vec_n, len(out), max_chars, truncated)

@@ -16,9 +16,6 @@ guard doesn't fire on a clean test run.
 from __future__ import annotations
 
 import os
-import sys
-
-import pytest
 
 # Pre-populate env so module-level guards in the bot don't abort import.
 os.environ.setdefault("REMOVE_BG_API_URL", "http://localhost:8000/remove_background")

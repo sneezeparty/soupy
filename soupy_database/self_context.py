@@ -75,6 +75,7 @@ def self_anchor_path(guild_id: int) -> Path:
 # Feature toggle
 # ---------------------------------------------------------------------------
 
+
 def is_self_md_enabled() -> bool:
     return os.getenv("SELF_MD_ENABLED", "false").strip().lower() in ("1", "true", "yes")
 
@@ -82,6 +83,7 @@ def is_self_md_enabled() -> bool:
 # ---------------------------------------------------------------------------
 # Read / write helpers
 # ---------------------------------------------------------------------------
+
 
 def _read_file(p: Path) -> str:
     if p.exists():
@@ -183,8 +185,9 @@ def _load_accumulator_from_disk() -> None:
         for gid in list(_accumulator):
             if len(_accumulator[gid]) > _MAX_ACCUMULATED:
                 _accumulator[gid] = _accumulator[gid][-_MAX_ACCUMULATED:]
-        logger.info("self_context: loaded %d pending interactions from disk",
-                     sum(len(v) for v in _accumulator.values()))
+        logger.info(
+            "self_context: loaded %d pending interactions from disk", sum(len(v) for v in _accumulator.values())
+        )
     except Exception as exc:
         logger.warning("self_context: failed to load accumulator from disk: %s", exc)
 
@@ -245,6 +248,7 @@ def pending_interaction_count(guild_id: int) -> int:
 # Self-knowledge DB schema (per-guild SQLite)
 # ---------------------------------------------------------------------------
 
+
 def ensure_self_chunks_schema(conn: sqlite3.Connection) -> None:
     """Create the self_chunks table for embedded self-knowledge."""
     cur = conn.cursor()
@@ -279,7 +283,7 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     if len(a) != len(b) or not a:
         return 0.0
     dot = na = nb = 0.0
-    for x, y in zip(a, b):
+    for x, y in zip(a, b, strict=False):
         dot += x * y
         na += x * x
         nb += y * y
@@ -291,6 +295,7 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
 # ---------------------------------------------------------------------------
 # Chunking
 # ---------------------------------------------------------------------------
+
 
 def _chunk_self_document(text: str, source: str, max_chunk_chars: int = 800) -> List[Dict[str, str]]:
     """Split a self-document into section-aware chunks for embedding.
@@ -323,31 +328,37 @@ def _chunk_self_document(text: str, source: str, max_chunk_chars: int = 800) -> 
         if not body:
             continue
         if len(body) <= max_chunk_chars:
-            chunks.append({
-                "source": source,
-                "section": header,
-                "chunk_text": f"[self-knowledge: {header}]\n{body}",
-            })
+            chunks.append(
+                {
+                    "source": source,
+                    "section": header,
+                    "chunk_text": f"[self-knowledge: {header}]\n{body}",
+                }
+            )
         else:
             # Split at paragraph boundaries (double newline)
             paragraphs = re.split(r"\n\s*\n", body)
             current_chunk = ""
             for para in paragraphs:
                 if current_chunk and len(current_chunk) + len(para) + 2 > max_chunk_chars:
-                    chunks.append({
-                        "source": source,
-                        "section": header,
-                        "chunk_text": f"[self-knowledge: {header}]\n{current_chunk.strip()}",
-                    })
+                    chunks.append(
+                        {
+                            "source": source,
+                            "section": header,
+                            "chunk_text": f"[self-knowledge: {header}]\n{current_chunk.strip()}",
+                        }
+                    )
                     current_chunk = para
                 else:
                     current_chunk = (current_chunk + "\n\n" + para).strip()
             if current_chunk:
-                chunks.append({
-                    "source": source,
-                    "section": header,
-                    "chunk_text": f"[self-knowledge: {header}]\n{current_chunk.strip()}",
-                })
+                chunks.append(
+                    {
+                        "source": source,
+                        "section": header,
+                        "chunk_text": f"[self-knowledge: {header}]\n{current_chunk.strip()}",
+                    }
+                )
 
     return chunks
 
@@ -355,6 +366,7 @@ def _chunk_self_document(text: str, source: str, max_chunk_chars: int = 800) -> 
 # ---------------------------------------------------------------------------
 # Embedding + indexing into guild DB
 # ---------------------------------------------------------------------------
+
 
 async def index_self_knowledge(
     guild_id: int,
@@ -390,15 +402,16 @@ async def index_self_knowledge(
         texts = [c["chunk_text"] for c in all_chunks]
         vectors = await embed_func(session, texts)
         if not vectors or len(vectors) != len(texts):
-            logger.warning("self_context: embedding returned %s vectors for %d chunks",
-                           len(vectors) if vectors else 0, len(texts))
+            logger.warning(
+                "self_context: embedding returned %s vectors for %d chunks", len(vectors) if vectors else 0, len(texts)
+            )
             return 0
 
         # Clear old chunks and insert new
         cur = conn.cursor()
         cur.execute("DELETE FROM self_chunks")
         dim = len(vectors[0])
-        for chunk, vec in zip(all_chunks, vectors):
+        for chunk, vec in zip(all_chunks, vectors, strict=False):
             cur.execute(
                 """INSERT INTO self_chunks (source, section, chunk_text, embedding_dim, embedding)
                    VALUES (?, ?, ?, ?, ?)""",
@@ -417,6 +430,7 @@ async def index_self_knowledge(
 # ---------------------------------------------------------------------------
 # Retrieval (called during RAG assembly)
 # ---------------------------------------------------------------------------
+
 
 def search_self_chunks(
     conn: sqlite3.Connection,
@@ -646,15 +660,15 @@ async def reflect_and_update(
         logger.info("🪞 self_context: no pending interactions to reflect on for guild %s — nothing to do", guild_id)
         return load_self_md(guild_id)
 
-    logger.info("🪞 self_context: starting reflection for guild %s (%d pending interactions)", guild_id, len(interactions))
+    logger.info(
+        "🪞 self_context: starting reflection for guild %s (%d pending interactions)", guild_id, len(interactions)
+    )
 
     current = load_self_md(guild_id)
     if not current:
         current = "(no existing self-document yet — this is the first reflection)"
 
-    interaction_block = "\n\n".join(
-        f"[{i+1}]\n{txt}" for i, txt in enumerate(interactions)
-    )
+    interaction_block = "\n\n".join(f"[{i+1}]\n{txt}" for i, txt in enumerate(interactions))
 
     _model = model or os.getenv("LOCAL_CHAT", "local-model")
 
@@ -662,9 +676,13 @@ async def reflect_and_update(
     logger.info("🪞 [1/4] regenerating full self-document via LLM (max %d words)…", max_words)
     messages = [
         {"role": "system", "content": _REFLECT_SYSTEM.format(max_words=max_words)},
-        {"role": "user", "content": _REFLECT_USER.format(
-            current_self_md=current, interactions=interaction_block,
-        )},
+        {
+            "role": "user",
+            "content": _REFLECT_USER.format(
+                current_self_md=current,
+                interactions=interaction_block,
+            ),
+        },
     ]
 
     try:
@@ -685,23 +703,32 @@ async def reflect_and_update(
         if pruned_match:
             pruned_text = pruned_match.group(1).strip()
             # Remove the ## pruned section from the main document
-            new_full = new_full[:pruned_match.start()].strip()
+            new_full = new_full[: pruned_match.start()].strip()
             if pruned_text:
                 append_to_archive(guild_id, pruned_text)
-                logger.info("self_context: archived %d chars of pruned entries for guild %s",
-                            len(pruned_text), guild_id)
+                logger.info(
+                    "self_context: archived %d chars of pruned entries for guild %s", len(pruned_text), guild_id
+                )
 
         save_self_md(guild_id, new_full)
-        logger.info("self_context: reflection complete for guild %s — %d interactions → %d chars",
-                     guild_id, len(interactions), len(new_full))
+        logger.info(
+            "self_context: reflection complete for guild %s — %d interactions → %d chars",
+            guild_id,
+            len(interactions),
+            len(new_full),
+        )
 
         # --- Step 3: Generate core summary ---
         logger.info("🪞 [2/4] regenerating compressed core summary (max %d words)…", core_max_words)
         core_messages = [
             {"role": "system", "content": _CORE_SYSTEM.format(max_words=core_max_words)},
-            {"role": "user", "content": _CORE_USER.format(
-                full_doc=new_full, max_words=core_max_words,
-            )},
+            {
+                "role": "user",
+                "content": _CORE_USER.format(
+                    full_doc=new_full,
+                    max_words=core_max_words,
+                ),
+            },
         ]
         try:
             core_response = await llm_func(
@@ -727,9 +754,13 @@ async def reflect_and_update(
             logger.info("🪞 [3/4] distilling always-on identity anchor (max %d chars)…", anchor_max_chars)
             anchor_messages = [
                 {"role": "system", "content": _ANCHOR_SYSTEM},
-                {"role": "user", "content": _ANCHOR_USER.format(
-                    max_chars=anchor_max_chars, doc=anchor_source,
-                )},
+                {
+                    "role": "user",
+                    "content": _ANCHOR_USER.format(
+                        max_chars=anchor_max_chars,
+                        doc=anchor_source,
+                    ),
+                },
             ]
             try:
                 anchor_response = await llm_func(

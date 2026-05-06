@@ -271,7 +271,7 @@ class SearchCog(commands.Cog):
 
             # Process articles and extract content
             processed_articles = []
-            total_tokens = 0
+            _total_tokens = 0
             MAX_TOKENS_PER_ARTICLE = 1000  # Limit tokens per article
 
             for article in articles:

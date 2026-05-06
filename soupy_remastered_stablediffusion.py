@@ -645,7 +645,7 @@ def universal_cooldown_check():
             if isinstance(args[0], commands.Bot) or isinstance(args[0], View):
                 # It's a method call, so the real interaction is args[1]
                 interaction = args[1]
-                self_obj = args[0]  # if you need it
+                _self_obj = args[0]  # if you need it
             else:
                 # It's a normal slash command function, so args[0] is the interaction
                 interaction = args[0]
@@ -884,7 +884,7 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
                 # Capture the randomly chosen terms as a comma-separated string
                 # Flatten the terms from the dictionary
                 selected_terms_list = []
-                for category, terms in random_terms.items():
+                for _category, terms in random_terms.items():
                     # Split by comma in case there are multiple terms in a single category
                     split_terms = [term.strip() for term in terms.split(",")]
                     selected_terms_list.extend(split_terms)
@@ -1432,7 +1432,7 @@ async def judge_best_of_candidates(messages_context: list, candidates: list, mod
 
     # Build the user content listing the context and each candidate
     candidate_sections = []
-    for label, text in zip(labels, candidates):
+    for label, text in zip(labels, candidates, strict=False):
         candidate_sections.append(f"Candidate {label}:\n{text}")
     candidates_block = "\n\n".join(candidate_sections)
 
@@ -1501,7 +1501,7 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
     background_messages = []  # Track older context messages
 
     # Create a single session for all URL requests
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession() as _session:  # noqa: F841 — kept for future use
         async for msg in channel.history(limit=limit, oldest_first=False):
             # Skip command messages and bot's image generation messages
             if msg.content.startswith("!") or (msg.author == bot.user and "Generated Image" in msg.content):
@@ -2648,7 +2648,7 @@ async def stats_command(interaction: discord.Interaction):
         stats_data = await read_user_stats()
         if stats_data:
             users_stats = []
-            for uid, data in stats_data.items():
+            for _uid, data in stats_data.items():
                 if "servers" in data and server_id in data["servers"]:
                     ss = data["servers"][server_id]
                     imgs = ss.get("images_generated", 0)
@@ -4172,7 +4172,7 @@ async def handle_2x2_grid(interaction, prompt, width, height, seed, queue_size):
             (thumbnail_width, thumbnail_height),  # Bottom-right
         ]
 
-        for i, (image_bytes, pos) in enumerate(zip(thumbnail_images, positions)):
+        for i, (image_bytes, pos) in enumerate(zip(thumbnail_images, positions, strict=False)):
             thumbnail_img = Image.open(BytesIO(image_bytes))
             combined_image.paste(thumbnail_img, pos)
             logger.debug(f"🔲 Pasted thumbnail {i+1} at position {pos}")
@@ -4341,7 +4341,7 @@ class ThumbnailSelectionView(View):
             )
 
             selected_thumbnail = self.thumbnail_data[thumbnail_index]
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
 
             await bot.sd_queue.put(
                 {
@@ -4492,7 +4492,7 @@ class SDRemixView(View):
         logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
             await interaction.response.send_message("🛠️ Making it fancy...", ephemeral=True)
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4517,7 +4517,7 @@ class SDRemixView(View):
         logger.info(f"'Remix' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
             await interaction.response.send_message("🛠️ Remixing...", ephemeral=True)
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             new_seed = random.randint(0, 2**32 - 1)
             await bot.sd_queue.put(
                 {
@@ -4564,7 +4564,7 @@ class SDRemixView(View):
             # Use LLM-generated prompt (set prompt to None so handle_random generates it)
             prompt = None  # Will be generated in handle_random
 
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4608,14 +4608,14 @@ class SDRemixView(View):
             random_terms = get_random_terms()
             # Flatten the terms from the dictionary into a comma-separated string
             terms_list = []
-            for category, terms in random_terms.items():
+            for _category, terms in random_terms.items():
                 # Split by comma in case there are multiple terms in a single category
                 split_terms = [term.strip() for term in terms.split(",")]
                 terms_list.extend(split_terms)
             prompt = ", ".join(terms_list)
             logger.info(f"🔤 Using only random terms for {interaction.user}: {prompt}")
 
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4640,7 +4640,7 @@ class SDRemixView(View):
         logger.info(f"'Wide' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
             await interaction.response.send_message("🛠️ Generating wide version...", ephemeral=True)
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4665,7 +4665,7 @@ class SDRemixView(View):
         logger.info(f"'Tall' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
             await interaction.response.send_message("🛠️ Generating tall version...", ephemeral=True)
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4692,7 +4692,7 @@ class SDRemixView(View):
             await interaction.response.send_message(
                 "🛠️ Generating 2x2 grid (4× 1024×1024 @ 10 steps)...", ephemeral=True
             )
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4717,7 +4717,7 @@ class SDRemixView(View):
         logger.info(f"'Outpaint Both' button clicked by {interaction.user} for prompt: '{self.prompt}'")
         try:
             await interaction.response.send_message("🛠️ Extending image in all directions...", ephemeral=True)
-            queue_size = bot.sd_queue.qsize()
+            _queue_size = bot.sd_queue.qsize()
             await bot.sd_queue.put(
                 {
                     "type": "button",
@@ -4914,7 +4914,7 @@ async def generate_sd_image(
                                     view=new_view,
                                 )
                         else:
-                            msg = await interaction.channel.send(
+                            _msg = await interaction.channel.send(
                                 content=f"{interaction.user.mention} 🖼️ Generated Image:",
                                 embeds=[description_embed, details_embed],
                                 file=image_file,
@@ -5031,7 +5031,7 @@ Event Handlers
 # Add this BEFORE your bot.event decorators and command definitions
 async def load_extensions():
     """Load all extension cogs"""
-    current_dir = Path(__file__).parent
+    _current_dir = Path(__file__).parent
 
     # Load extensions
     try:
@@ -5888,7 +5888,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 # Now remove any surrounding quotation marks
                 cleaned_chunk = clean_response(cleaned_chunk)
                 logger.debug(f"✂️ Sending cleaned chunk to {message.channel}: '{cleaned_chunk}'")
-                out_msg = await message.channel.send(cleaned_chunk)
+                _out_msg = await message.channel.send(cleaned_chunk)
                 try:
                     # Only include terminal output on the first chunk
                     archive_sent_message(

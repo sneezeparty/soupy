@@ -20,7 +20,7 @@ from . import (
     s08_handoff,
 )
 
-StepFn = Callable[[Dict, "ui.UI"], Dict]  # type: ignore[name-defined]
+StepFn = Callable[[Dict, "ui.UI"], Dict]  # type: ignore[name-defined]  # noqa: F821
 
 STEPS: List[Tuple[str, str, StepFn]] = [
     ("goals", "Goals", s01_goals.run),

@@ -1581,7 +1581,7 @@ class BlueskyEngageCog(commands.Cog):
                 ):
                     continue
                 clean_lines.append(line.strip())
-            candidate = " ".join(l for l in clean_lines if l)
+            candidate = " ".join(ln for ln in clean_lines if ln)
 
             # Strip em dashes and hyphens used as dashes
             candidate = candidate.replace("—", ",").replace("–", ",").replace(" - ", ", ")
@@ -1807,7 +1807,7 @@ class BlueskyEngageCog(commands.Cog):
             return False, "LLM declined all posts (SKIP)", None
 
         chosen_uri = chosen.get("uri", "")
-        chosen_cid = chosen.get("cid", "")
+        _chosen_cid = chosen.get("cid", "")
         chosen_author = chosen.get("author", {}).get("displayName", "?")
         chosen_text = chosen.get("record", {}).get("text", "")[:100]
 
@@ -2356,7 +2356,7 @@ class BlueskyEngageCog(commands.Cog):
                 ):
                     continue
                 clean_lines.append(line.strip())
-            c = " ".join(l for l in clean_lines if l)
+            c = " ".join(ln for ln in clean_lines if ln)
             # Strip em dashes and hyphens used as dashes
             c = c.replace("—", ",").replace("–", ",").replace(" - ", ", ")
             if len(c) > 295:
