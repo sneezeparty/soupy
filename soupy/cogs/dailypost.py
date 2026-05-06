@@ -168,6 +168,35 @@ DEFAULT_BEHAVIOUR_DAILY_POST = (
 # ---------------------------------------------------------------------------
 
 
+# Tracking-parameter prefixes / exact names to strip from URLs before
+# posting them. Discord's embed unfurler and Bluesky's link-card resolver
+# both choke on URLs with aggressive tracking suffixes (especially Bing
+# News redirects via msn.com, which add `ocid=BingNewsVerp`). Removing
+# these doesn't change which page loads — it just gives the unfurlers a
+# canonical URL with a better chance of rendering an embed card.
+_URL_STRIP_PREFIXES = ("utm_", "fbclid", "gclid", "yclid", "_ga", "_gl", "mc_", "ref_", "ref=")
+_URL_STRIP_EXACT = {"ocid", "wt_mc", "icid", "cmpid", "WT.mc_id", "spm"}
+
+
+def _clean_share_url(url: str) -> str:
+    """Strip tracking parameters from a URL so it embeds cleanly on Discord
+    and Bluesky. Returns the original URL unchanged if anything goes wrong."""
+    if not url or "?" not in url:
+        return url
+    try:
+        from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+        parsed = urlparse(url)
+        kept = [
+            (k, v)
+            for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+            if k not in _URL_STRIP_EXACT and not any(k.startswith(p) for p in _URL_STRIP_PREFIXES)
+        ]
+        return urlunparse(parsed._replace(query=urlencode(kept)))
+    except Exception:
+        return url
+
+
 async def _llm_call(
     system: str,
     user: str,
@@ -1940,6 +1969,13 @@ class DailyPostCog(commands.Cog):
                 return False, "LLM declined to pick an article (SKIP or all already posted)"
 
             commentary, url, title = result
+            # Strip tracking gunk so Discord's auto-unfurler and Bluesky's
+            # link-card resolver have a canonical URL to work with. The
+            # underlying article still loads.
+            original_url = url
+            url = _clean_share_url(url)
+            if url != original_url:
+                logger.info("📰 🧹 Cleaned tracking params from URL: %s -> %s", original_url[:80], url[:80])
 
             # Step 6: Send to channel
             channel = self.bot.get_channel(int(channel_id))
