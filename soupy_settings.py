@@ -329,6 +329,39 @@ class Settings:
     def daily_post_max_age_days(self) -> int:
         return _env_int("DAILY_POST_MAX_AGE_DAYS", 21)
 
+    @cached_property
+    def daily_post_channels(self) -> str:
+        """Raw JSON string mapping channel-id -> topic hint. Parse at use site."""
+        return _env_str("DAILY_POST_CHANNELS", "{}")
+
+    @cached_property
+    def daily_post_active_start(self) -> int:
+        return _env_int("DAILY_POST_ACTIVE_START", 8)
+
+    @cached_property
+    def daily_post_active_end(self) -> int:
+        return _env_int("DAILY_POST_ACTIVE_END", 18)
+
+    @cached_property
+    def daily_post_interval_hours(self) -> int:
+        return _env_int("DAILY_POST_INTERVAL_HOURS", 24)
+
+    @cached_property
+    def daily_post_topic_dedup_sim(self) -> float:
+        return _env_float("DAILY_POST_TOPIC_DEDUP_SIM", 0.65)
+
+    @cached_property
+    def daily_post_topic_dedup_days(self) -> int:
+        return _env_int("DAILY_POST_TOPIC_DEDUP_DAYS", 10)
+
+    @cached_property
+    def daily_post_reject_no_date(self) -> bool:
+        return _env_bool("DAILY_POST_REJECT_NO_DATE", default=False)
+
+    @cached_property
+    def daily_post_fallback_to_top_rated(self) -> bool:
+        return _env_bool("DAILY_POST_FALLBACK_TO_TOP_RATED", default=True)
+
     # ----- Musings -------------------------------------------------------
 
     # Note: musing inline defaults below intentionally differ from the

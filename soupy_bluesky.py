@@ -29,6 +29,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from openai import OpenAI
 
+from soupy_settings import settings
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -36,8 +38,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 client = OpenAI(
-    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1"),
-    api_key=os.getenv("OPENAI_API_KEY", "lm-studio"),
+    base_url=settings.openai_base_url,
+    api_key=settings.openai_api_key,
 )
 
 
@@ -50,7 +52,7 @@ async def _llm_call(
 ) -> str:
     def _sync():
         return client.chat.completions.create(
-            model=os.getenv("LOCAL_CHAT", "local-model"),
+            model=settings.local_chat or "local-model",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -79,7 +81,7 @@ async def _describe_image(
 
     Returns a short description string, or None if vision is disabled or fails.
     """
-    if os.getenv("ENABLE_VISION", "false").lower() != "true":
+    if not settings.enable_vision:
         return None
 
     try:
@@ -110,15 +112,15 @@ async def _describe_image(
         encoded = base64.b64encode(jpeg_bytes).decode("utf-8")
 
         # Call LM Studio vision endpoint
-        base = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1").rstrip("/")
+        base = settings.openai_base_url.rstrip("/")
         endpoint = f"{base}/chat/completions"
 
         headers = {"Content-Type": "application/json"}
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = settings.openai_api_key
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        model_name = os.getenv("VISION_MODEL") or os.getenv("LOCAL_CHAT")
+        model_name = settings.vision_model or settings.local_chat
         payload = {
             "model": model_name,
             "messages": [
@@ -130,7 +132,7 @@ async def _describe_image(
                     ],
                 }
             ],
-            "max_tokens": int(os.getenv("VISION_MAX_TOKENS", "200")),
+            "max_tokens": settings.vision_max_tokens,
             "temperature": 0.3,
         }
 
@@ -686,8 +688,8 @@ class BlueskyClient:
         self._expiry: Optional[datetime] = None
 
     async def auth(self) -> Optional[str]:
-        handle = os.getenv("BLUESKY_HANDLE", "")
-        app_pw = os.getenv("BLUESKY_APP_PASSWORD", "")
+        handle = settings.bluesky_handle
+        app_pw = settings.bluesky_app_password
         if not handle or not app_pw:
             return None
 
@@ -1062,7 +1064,7 @@ class BlueskyEngageCog(commands.Cog):
     # ------------------------------------------------------------------
 
     def _owner_ids(self) -> set:
-        raw = os.getenv("OWNER_IDS", "")
+        raw = ",".join(str(x) for x in settings.owner_ids)
         try:
             return {int(x.strip()) for x in raw.split(",") if x.strip()}
         except Exception:
@@ -1089,7 +1091,7 @@ class BlueskyEngageCog(commands.Cog):
         bsky["reposts_today"] = sum(1 for r in self.history.get("reposts", []) if r.get("ts", "").startswith(today_iso))
 
     def _musing_channel_id(self) -> Optional[int]:
-        raw = os.getenv("MUSING_CHANNEL_ID", "")
+        raw = str(settings.musing_channel_id) if settings.musing_channel_id else ""
         try:
             return int(raw) if raw else None
         except ValueError:
@@ -1260,7 +1262,7 @@ class BlueskyEngageCog(commands.Cog):
         # Load self-knowledge for context
         self_context = ""
         try:
-            guild_id = int(os.getenv("GUILD_ID", "0"))
+            guild_id = settings.guild_id or 0
             from soupy_database.self_context import load_self_core, is_self_md_enabled
 
             if is_self_md_enabled() and guild_id:
@@ -1530,7 +1532,7 @@ class BlueskyEngageCog(commands.Cog):
         # Load self-knowledge
         self_context = ""
         try:
-            guild_id = int(os.getenv("GUILD_ID", "0"))
+            guild_id = settings.guild_id or 0
             from soupy_database.self_context import load_self_core, is_self_md_enabled
 
             if is_self_md_enabled() and guild_id:
@@ -1680,7 +1682,7 @@ class BlueskyEngageCog(commands.Cog):
     async def _like_good_comments(self, thread: Dict, max_likes: int = 3) -> int:
         """Like a few interesting comments in the thread."""
         _reset_daily_if_needed(self.history)
-        max_per_day = int(os.getenv("BLUESKY_MAX_LIKES_PER_DAY", "10"))
+        max_per_day = settings.bluesky_max_likes_per_day
         likes_left = max_per_day - len(self.history.get("likes_today", []))
         if likes_left <= 0:
             logger.info("🦋 Daily like limit reached, skipping")
@@ -1730,7 +1732,7 @@ class BlueskyEngageCog(commands.Cog):
     async def _maybe_follow(self, post: Dict) -> bool:
         """Consider following the post author if they're interesting."""
         _reset_daily_if_needed(self.history)
-        max_per_day = int(os.getenv("BLUESKY_MAX_FOLLOWS_PER_DAY", "2"))
+        max_per_day = settings.bluesky_max_follows_per_day
         follows_today = self.history.get("follows_today", [])
         if len(follows_today) >= max_per_day:
             logger.info("🦋 Already followed %d people today, skipping", max_per_day)
@@ -1923,7 +1925,7 @@ class BlueskyEngageCog(commands.Cog):
         # Load self-knowledge
         self_context = ""
         try:
-            guild_id = int(os.getenv("GUILD_ID", "0"))
+            guild_id = settings.guild_id or 0
             from soupy_database.self_context import load_self_core, is_self_md_enabled
 
             if is_self_md_enabled() and guild_id:
@@ -2213,7 +2215,7 @@ class BlueskyEngageCog(commands.Cog):
             if age is None:
                 logger.info("🦋   [%d] ⏭ No date found, rejecting: %s", idx, title[:60])
                 continue
-            freshness_days = int(os.getenv("BLUESKY_ARTICLE_FRESHNESS_DAYS", "14"))
+            freshness_days = settings.bluesky_article_freshness_days
             if age > freshness_days:
                 logger.info("🦋   [%d] ⏭ Too old (~%d days): %s", idx, age, title[:60])
                 continue
@@ -2281,7 +2283,7 @@ class BlueskyEngageCog(commands.Cog):
         # Load self-knowledge for personality context
         self_context = ""
         try:
-            guild_id = int(os.getenv("GUILD_ID", "0"))
+            guild_id = settings.guild_id or 0
             from soupy_database.self_context import load_self_core, is_self_md_enabled
 
             if is_self_md_enabled() and guild_id:
@@ -2573,8 +2575,8 @@ class BlueskyEngageCog(commands.Cog):
 
         # Replies (configurable range)
         try:
-            reply_min = int(os.getenv("BLUESKY_REPLIES_MIN", "4"))
-            reply_max = int(os.getenv("BLUESKY_REPLIES_MAX", "7"))
+            reply_min = settings.bluesky_replies_min
+            reply_max = settings.bluesky_replies_max
         except ValueError:
             reply_min, reply_max = 4, 7
         reply_count = random.randint(reply_min, max(reply_min, reply_max))
@@ -2583,7 +2585,7 @@ class BlueskyEngageCog(commands.Cog):
 
         # Reposts per day (configurable)
         try:
-            repost_count = int(os.getenv("BLUESKY_REPOSTS_PER_DAY", "1"))
+            repost_count = settings.bluesky_reposts_per_day
         except ValueError:
             repost_count = 1
         for _ in range(repost_count):
@@ -2591,7 +2593,7 @@ class BlueskyEngageCog(commands.Cog):
 
         # Original posts per day (configurable)
         try:
-            post_count = int(os.getenv("BLUESKY_POSTS_PER_DAY", "1"))
+            post_count = settings.bluesky_posts_per_day
         except ValueError:
             post_count = 1
         for _ in range(post_count):
@@ -2601,7 +2603,7 @@ class BlueskyEngageCog(commands.Cog):
         events.sort(key=lambda e: e[0])
 
         # Enforce minimum gap between actions (env-tunable; default 45 min).
-        min_gap_seconds = int(os.getenv("BLUESKY_MIN_GAP_MINUTES", "45")) * 60
+        min_gap_seconds = settings.bluesky_min_gap_minutes * 60
         spaced: List[Tuple[datetime, str]] = []
         for t, action in events:
             if not spaced or (t - spaced[-1][0]).total_seconds() >= min_gap_seconds:

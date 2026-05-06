@@ -29,6 +29,7 @@ from openai import OpenAI
 import soupy_prompts
 from soupy_database.database import get_db_path
 from soupy_database.user_profiles import _load_structured_profiles, ensure_user_profile_schema
+from soupy_settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 client = OpenAI(
-    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1"),
-    api_key=os.getenv("OPENAI_API_KEY", "lm-studio"),
+    base_url=settings.openai_base_url,
+    api_key=settings.openai_api_key,
 )
 
 HISTORY_PATH = os.path.join("data", "daily_post_history.json")
@@ -181,7 +182,7 @@ async def _llm_call(
 
     def _sync():
         return client.chat.completions.create(
-            model=os.getenv("LOCAL_CHAT", "local-model"),
+            model=settings.local_chat or "local-model",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -479,7 +480,7 @@ class DailyPostCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.timezone = pytz.timezone(os.getenv("TIMEZONE", "UTC"))
+        self.timezone = pytz.timezone(settings.timezone or "UTC")
         self.history: Dict[str, List[Dict[str, str]]] = _load_history()
         self.schedule: List[Dict[str, Any]] = []  # [{ch_id, time, slot}, ...]
         self._last_schedule_date: Optional[str] = None
@@ -531,7 +532,7 @@ class DailyPostCog(commands.Cog):
 
     def _get_channels(self) -> Dict[str, str]:
         """Return {channel_id_str: topic_hint} from DAILY_POST_CHANNELS env."""
-        raw = os.getenv("DAILY_POST_CHANNELS", "")
+        raw = settings.daily_post_channels
         if not raw.strip():
             return {}
         try:
@@ -543,16 +544,16 @@ class DailyPostCog(commands.Cog):
         return {}
 
     def _active_start(self) -> int:
-        return int(os.getenv("DAILY_POST_ACTIVE_START", "8"))
+        return settings.daily_post_active_start
 
     def _active_end(self) -> int:
-        return int(os.getenv("DAILY_POST_ACTIVE_END", "18"))
+        return settings.daily_post_active_end
 
     def _interval_hours(self) -> int:
-        return int(os.getenv("DAILY_POST_INTERVAL_HOURS", "24"))
+        return settings.daily_post_interval_hours
 
     def _owner_ids(self) -> set[int]:
-        raw = os.getenv("OWNER_IDS", "")
+        raw = ",".join(str(x) for x in settings.owner_ids)
         try:
             return {int(x.strip()) for x in raw.split(",") if x.strip()}
         except Exception:
@@ -1008,7 +1009,7 @@ class DailyPostCog(commands.Cog):
         # Pre-filter: reject non-article pages and old articles
         # Age threshold configurable via DAILY_POST_MAX_AGE_DAYS (default 21)
         try:
-            prefilter_max_age = int(os.getenv("DAILY_POST_MAX_AGE_DAYS", "21"))
+            prefilter_max_age = settings.daily_post_max_age_days
         except ValueError:
             prefilter_max_age = 21
         import re as _re_filter
@@ -1101,8 +1102,8 @@ class DailyPostCog(commands.Cog):
         Caches the token and refreshes when expired or missing.
         Returns None if credentials aren't configured or auth fails.
         """
-        handle = os.getenv("BLUESKY_HANDLE", "")
-        app_pw = os.getenv("BLUESKY_APP_PASSWORD", "")
+        handle = settings.bluesky_handle
+        app_pw = settings.bluesky_app_password
         if not handle or not app_pw:
             return None
 
@@ -1467,7 +1468,7 @@ class DailyPostCog(commands.Cog):
 
         # Check if any high-similarity hits are from the last N days
         try:
-            sim_threshold = float(os.getenv("DAILY_POST_TOPIC_DEDUP_SIM", "0.65"))
+            sim_threshold = settings.daily_post_topic_dedup_sim
         except ValueError:
             sim_threshold = 0.65
 
@@ -1579,10 +1580,10 @@ class DailyPostCog(commands.Cog):
         # Articles with no extractable date are kept by default (treated as ~7 days old);
         # set DAILY_POST_REJECT_NO_DATE=true to revert to the old hard-reject behaviour.
         try:
-            max_age_days = int(os.getenv("DAILY_POST_MAX_AGE_DAYS", "21"))
+            max_age_days = settings.daily_post_max_age_days
         except ValueError:
             max_age_days = 21
-        reject_no_date = os.getenv("DAILY_POST_REJECT_NO_DATE", "false").lower() == "true"
+        reject_no_date = settings.daily_post_reject_no_date
 
         posted_urls = set()
         for entry in self.history.get(channel_id, []):
@@ -1621,7 +1622,7 @@ class DailyPostCog(commands.Cog):
             # Topic dedup: check if this topic was already discussed on the server recently
             if guild_id:
                 try:
-                    topic_days = int(os.getenv("DAILY_POST_TOPIC_DEDUP_DAYS", "10"))
+                    topic_days = settings.daily_post_topic_dedup_days
                 except ValueError:
                     topic_days = 10
                 already = await self._topic_already_discussed(
@@ -1671,7 +1672,7 @@ class DailyPostCog(commands.Cog):
         # Parse chosen index, with fallback to top-rated when judge says SKIP
         chosen_idx: Optional[int] = None
         if pick_result.strip().upper().startswith("SKIP"):
-            fallback_enabled = os.getenv("DAILY_POST_FALLBACK_TO_TOP_RATED", "true").lower() == "true"
+            fallback_enabled = settings.daily_post_fallback_to_top_rated
             if fallback_enabled:
                 logger.info(
                     "🏆 ⏭ LLM said SKIP — falling back to top-rated article (DAILY_POST_FALLBACK_TO_TOP_RATED=true)"
