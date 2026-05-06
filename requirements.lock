@@ -105,7 +105,10 @@ lxml[html_clean]==6.1.0
     #   duckduckgo-search
     #   htmldate
     #   justext
+    #   lxml-html-clean
     #   trafilatura
+lxml-html-clean==0.4.4
+    # via -r requirements.txt
 markupsafe==3.0.3
     # via jinja2
 multidict==6.7.1

@@ -20,6 +20,10 @@ duckduckgo-search>=6.0.0
 trafilatura>=2.0.0
 beautifulsoup4>=4.12.3
 html2text>=2024.2.26
+# lxml >=5.2 moved html.clean to a separate package; trafilatura/justext
+# still import the old path. Pulling in lxml_html_clean explicitly keeps
+# the clean module reachable.
+lxml_html_clean>=0.1.0
 
 # Image processing
 opencv-python>=4.8.0
