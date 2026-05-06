@@ -7,11 +7,10 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import os
+import sqlite3
 import sys
 from datetime import datetime
-from pathlib import Path
 
 parser = argparse.ArgumentParser(description="Print a detailed progress report for a guild's Soupy database.")
 parser.add_argument("guild_id", help="Discord guild/server ID (the database file is guild_<id>.db)")
@@ -81,7 +80,7 @@ try:
         earliest = datetime.strptime(time_result["earliest"], "%Y-%m-%d %H:%M:%S")
         latest = datetime.strptime(time_result["latest"], "%Y-%m-%d %H:%M:%S")
         days = (latest - earliest).days
-        print(f"📅 Time Period Covered:")
+        print("📅 Time Period Covered:")
         print(f"   Earliest: {earliest.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"   Latest:   {latest.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"   Span:     {days} days")

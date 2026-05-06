@@ -3,23 +3,21 @@ Search functionality for Soupy Bot
 Provides DuckDuckGo search capabilities with rate limiting and result processing
 """
 
-import discord
-from discord import app_commands
-from discord.ext import commands
-import logging
-from collections import defaultdict
-import time
-import os
 import asyncio
-from typing import Optional, List, Dict
-from ddgs import DDGS
-from openai import OpenAI
+import logging
+import re
+import time
+from collections import defaultdict
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
+
 import aiohttp
+import discord
 import trafilatura
 from bs4 import BeautifulSoup
-import json
-import re
-from urllib.parse import urlparse
+from ddgs import DDGS
+from discord import app_commands
+from discord.ext import commands
 
 import soupy_prompts
 from soupy_settings import openai_client, settings

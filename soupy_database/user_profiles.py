@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import time
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
@@ -21,13 +22,13 @@ import aiohttp
 from .database import get_db_path
 from .profile_batch import (
     cancel_profile_task,
+    delete_job,
     ensure_profile_job_schema,
+    get_job_row,
     profile_job_log_append,
     profile_job_log_clear,
     spawn_profile_worker,
     upsert_job,
-    delete_job,
-    get_job_row,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,8 +45,7 @@ def _migrate_profile_columns(conn: sqlite3.Connection) -> None:
 
 def ensure_user_profile_schema(conn: sqlite3.Connection) -> None:
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS user_profile_summaries (
             user_id INTEGER PRIMARY KEY,
             nickname_hint TEXT,
@@ -56,8 +56,7 @@ def ensure_user_profile_schema(conn: sqlite3.Connection) -> None:
             model_used TEXT,
             structured_json TEXT
         )
-        """
-    )
+        """)
     conn.commit()
     _migrate_profile_columns(conn)
     ensure_profile_job_schema(conn)
@@ -263,9 +262,7 @@ def _top_member_directory(conn: sqlite3.Connection, limit: int) -> List[Dict[str
     return out
 
 
-def _peer_interaction_hints(
-    conn: sqlite3.Connection, user_id: int, limit: int = 12
-) -> List[str]:
+def _peer_interaction_hints(conn: sqlite3.Connection, user_id: int, limit: int = 12) -> List[str]:
     """Short lines: who shares channels most with this user (proxy for interaction)."""
     cur = conn.cursor()
     cur.execute(
@@ -602,21 +599,20 @@ async def _llm_profile_build_or_merge(
             "3) Update fields when new messages add detail or clearly contradict old inferences.\n"
             "4) Remove or replace items only when they are clearly wrong or obsolete—do not wipe a field "
             "just because new messages are quiet about it.\n"
-            "5) Demographics (politics, location, work) are soft inferences—use \"unknown\" when unsupported.\n"
-            "6) If the stored profile still has only \"topics_interests\", migrate entries into hobbies, "
+            '5) Demographics (politics, location, work) are soft inferences—use "unknown" when unsupported.\n'
+            '6) If the stored profile still has only "topics_interests", migrate entries into hobbies, '
             "media_entertainment, and discussion_topics where they fit.\n"
             "7) Pay special attention to new personal details: pets, family, possessions, life events, "
-            "projects. Add them to \"personal_and_biographical\" even if they seem minor—these facts "
+            'projects. Add them to "personal_and_biographical" even if they seem minor—these facts '
             "are how the bot answers personal questions about the user.\n"
-            "8) Capture actual OPINIONS and STANCES in the \"opinions_and_stances\" field. Not just "
-            "\"discusses politics\" but what they actually think and why.\n"
+            '8) Capture actual OPINIONS and STANCES in the "opinions_and_stances" field. Not just '
+            '"discusses politics" but what they actually think and why.\n'
             "9) Be thorough—a rich, detailed profile is better than a short generic one.\n"
             "10) CRITICAL: The overview MUST stay short (4-8 sentences). It is a SUMMARY paragraph only. "
             "All specific facts, life events, and details MUST go into the array fields "
             "(personal_and_biographical, opinions_and_stances, hobbies, media_entertainment, etc.). "
             "Do NOT dump everything into the overview.\n\n"
-            "Keys:\n"
-            + schema
+            "Keys:\n" + schema
         )
     else:
         sys_prompt = (
@@ -628,8 +624,7 @@ async def _llm_profile_build_or_merge(
             "CRITICAL: Keep the overview SHORT (4-8 sentences). Put all specific facts, details, and life events "
             "into the array fields (personal_and_biographical, opinions_and_stances, hobbies, media_entertainment, etc.). "
             "A good profile has a concise overview and RICH, FULL arrays. A bad profile dumps everything into the overview "
-            "and leaves the arrays empty. Keys:\n"
-            + schema
+            "and leaves the arrays empty. Keys:\n" + schema
         )
 
     def _trim_lines_to_budget(raw_lines: List[str]) -> List[str]:
@@ -760,7 +755,10 @@ async def _llm_profile_build_or_merge(
         label = f"attempt {overall_attempt + 1}"
         try:
             parsed, raw, finish_reason = await _attempt_llm_call(
-                cur_lines, attempt_max, llm_timeout, label,
+                cur_lines,
+                attempt_max,
+                llm_timeout,
+                label,
             )
         except _ContextOverflowError as ce:
             if overall_attempt < max_timeout_retries and len(cur_lines) > 8:
@@ -773,8 +771,7 @@ async def _llm_profile_build_or_merge(
                 cur_lines = cur_lines[-new_count:]
                 continue
             raise RuntimeError(
-                f"Profile LLM context overflow even after reducing to "
-                f"{len(cur_lines)} message lines: {ce}"
+                f"Profile LLM context overflow even after reducing to " f"{len(cur_lines)} message lines: {ce}"
             ) from ce
         except (asyncio.TimeoutError, TimeoutError) as te:
             if overall_attempt < max_timeout_retries and len(cur_lines) > 8:
@@ -793,9 +790,7 @@ async def _llm_profile_build_or_merge(
 
         if parsed is not None:
             break
-        looks_truncated = finish_reason == "length" or (
-            len(raw) >= 100 and raw.lstrip().startswith("{")
-        )
+        looks_truncated = finish_reason == "length" or (len(raw) >= 100 and raw.lstrip().startswith("{"))
         if overall_attempt == 0 and looks_truncated:
             attempt_max = min(max(attempt_max * 2, max_tok + 800), retry_cap)
             if progress:
@@ -808,9 +803,7 @@ async def _llm_profile_build_or_merge(
 
     if progress:
         if parsed is None:
-            progress(
-                "Model output is not valid JSON — storing raw text as overview only (fallback shape)."
-            )
+            progress("Model output is not valid JSON — storing raw text as overview only (fallback shape).")
         else:
             keys = [k for k in parsed.keys() if isinstance(k, str)]
             preview = ", ".join(keys[:8])
@@ -890,8 +883,13 @@ async def _chunked_profile_build(
 
     # Fixed overhead: system prompt + member directory + peer hints
     sys_chars = len(schema) + 600  # approximate system prompt size
-    suffix_chars = sum(len(f"- user_id={m['user_id']} display={m['label'][:80]} (msgs≈{m['message_count']})")
-                       for m in member_directory[:45]) + 200
+    suffix_chars = (
+        sum(
+            len(f"- user_id={m['user_id']} display={m['label'][:80]} (msgs≈{m['message_count']})")
+            for m in member_directory[:45]
+        )
+        + 200
+    )
     peer_chars = sum(len(p) for p in peer_hints[:20]) + 100
 
     total = len(all_lines_chrono)
@@ -925,9 +923,7 @@ async def _chunked_profile_build(
         else:
             profile_overhead = 0
 
-        chunk_size = _estimate_lines_per_chunk(
-            sys_chars, profile_overhead, suffix_chars + peer_chars, prompt_budget
-        )
+        chunk_size = _estimate_lines_per_chunk(sys_chars, profile_overhead, suffix_chars + peer_chars, prompt_budget)
         # Ensure minimum progress per chunk
         chunk_size = max(chunk_size, 15)
 
@@ -955,8 +951,7 @@ async def _chunked_profile_build(
 
         if progress:
             progress(
-                f"  ◂ Pass {pass_num} done in {chunk_elapsed:.1f}s · "
-                f"{end}/{total} messages processed [{msgs_pct}%]"
+                f"  ◂ Pass {pass_num} done in {chunk_elapsed:.1f}s · " f"{end}/{total} messages processed [{msgs_pct}%]"
             )
 
         pos = end
@@ -1024,6 +1019,7 @@ async def refresh_user_profile(
     Later runs: merge stored JSON with new messages since source_max_message_id
     when enough new lines exist.
     """
+
     def _p(msg: str) -> None:
         if progress:
             progress(msg)
@@ -1120,8 +1116,7 @@ async def refresh_user_profile(
                 except ValueError:
                     max_age_days = 14
                 profile_is_stale = (
-                    profile_age_days is not None and max_age_days > 0
-                    and profile_age_days >= max_age_days
+                    profile_age_days is not None and max_age_days > 0 and profile_age_days >= max_age_days
                 )
                 if last_max_mid is not None:
                     lines_nf, n_new, nick = _sample_messages_for_user(
@@ -1143,9 +1138,7 @@ async def refresh_user_profile(
                         }
                     if n_new < min_new_merge and profile_is_stale:
                         # Stale profile: fall back to a recent window instead of just new messages
-                        lines_nf, n_new, nick = _sample_messages_for_user(
-                            conn, user_id, merge_sample_limit_eff
-                        )
+                        lines_nf, n_new, nick = _sample_messages_for_user(conn, user_id, merge_sample_limit_eff)
                     chrono = list(reversed(lines_nf))
                     stale_note = f" (profile was {profile_age_days:.0f}d old)" if profile_is_stale else ""
                     return {
@@ -1208,9 +1201,7 @@ async def refresh_user_profile(
             )
             if create_strat:
                 lines_nf, n, nick = _sample_messages_stratified(conn, user_id, create_budget_eff)
-                intro_detail = (
-                    f"stratified sample (budget {create_budget_eff} lines: oldest + newest + spread middle)"
-                )
+                intro_detail = f"stratified sample (budget {create_budget_eff} lines: oldest + newest + spread middle)"
             else:
                 lines_nf, n, nick = _sample_messages_for_user(conn, user_id, sample_limit_eff)
                 intro_detail = f"recent-only window ({sample_limit_eff} newest messages)"
@@ -1252,10 +1243,7 @@ async def refresh_user_profile(
     if plan["kind"] == "skip":
         reason = plan["reason"]
         if reason == "no_new_messages_for_merge":
-            _p(
-                f"Skip merge: only {plan['n_new']} new message(s) since last profile "
-                f"(need ≥{plan['min_new']})."
-            )
+            _p(f"Skip merge: only {plan['n_new']} new message(s) since last profile " f"(need ≥{plan['min_new']}).")
             return {
                 "ok": True,
                 "skipped": True,
@@ -1263,10 +1251,7 @@ async def refresh_user_profile(
                 "n_new": plan["n_new"],
                 "total_msgs": plan.get("total_msgs"),
             }
-        _p(
-            f"Skip profile: only {plan['n']} usable messages in archive "
-            f"(minimum {plan['min_m']})."
-        )
+        _p(f"Skip profile: only {plan['n']} usable messages in archive " f"(minimum {plan['min_m']}).")
         return {
             "ok": True,
             "skipped": True,
@@ -1286,10 +1271,7 @@ async def refresh_user_profile(
     intro = plan.get("intro") or ""
 
     nick_s = (nick or "").strip() or "(none)"
-    _p(
-        f"user_id={user_id} ({nick_s}) · {intro} · "
-        f"member_directory={len(directory)} · peer_hints={len(peers)}"
-    )
+    _p(f"user_id={user_id} ({nick_s}) · {intro} · " f"member_directory={len(directory)} · peer_hints={len(peers)}")
     profile_t0 = time.monotonic()
 
     # Use chunked multi-pass build for CREATE when the archive has significantly
@@ -1637,8 +1619,7 @@ async def _run_profile_batch_inner(guild_id: int) -> None:
                 mode = result.get("mode", "?")
                 profile_job_log_append(
                     guild_id,
-                    f"✅ Saved profile for user_id={uid}{nick_label} "
-                    f"(mode={mode}, messages_in_prompt={msgs_used})",
+                    f"✅ Saved profile for user_id={uid}{nick_label} " f"(mode={mode}, messages_in_prompt={msgs_used})",
                 )
             else:
                 stats["failed"] = stats.get("failed", 0) + 1
@@ -1839,9 +1820,7 @@ def get_user_profile_stats(guild_id: int) -> Dict[str, Any]:
         conn.close()
 
 
-def _load_summaries(
-    conn: sqlite3.Connection, user_ids: Sequence[int]
-) -> Dict[int, Tuple[str, str]]:
+def _load_summaries(conn: sqlite3.Connection, user_ids: Sequence[int]) -> Dict[int, Tuple[str, str]]:
     """user_id -> (nickname_hint, summary)"""
     ids = [int(u) for u in user_ids if u]
     if not ids:
@@ -1858,9 +1837,7 @@ def _load_summaries(
     return out
 
 
-def _load_structured_profiles(
-    conn: sqlite3.Connection, user_ids: Sequence[int]
-) -> Dict[int, Dict[str, Any]]:
+def _load_structured_profiles(conn: sqlite3.Connection, user_ids: Sequence[int]) -> Dict[int, Dict[str, Any]]:
     """user_id -> {nickname_hint, structured, age_days}"""
     ids = [int(u) for u in user_ids if u]
     if not ids:
@@ -1904,51 +1881,199 @@ def _load_structured_profiles(
 # Checked against query tokens; the highest-scoring sections are included first.
 _SECTION_QUERY_KEYWORDS: Dict[str, List[str]] = {
     "personal_and_biographical": [
-        "own", "have", "has", "got", "pet", "pets", "cat", "dog", "animal",
-        "family", "kid", "kids", "child", "children", "wife", "husband",
-        "partner", "house", "home", "car", "drive", "buy", "bought",
-        "married", "move", "moved", "life", "personal", "my", "your",
+        "own",
+        "have",
+        "has",
+        "got",
+        "pet",
+        "pets",
+        "cat",
+        "dog",
+        "animal",
+        "family",
+        "kid",
+        "kids",
+        "child",
+        "children",
+        "wife",
+        "husband",
+        "partner",
+        "house",
+        "home",
+        "car",
+        "drive",
+        "buy",
+        "bought",
+        "married",
+        "move",
+        "moved",
+        "life",
+        "personal",
+        "my",
+        "your",
     ],
     "opinions_and_stances": [
-        "think", "thinks", "opinion", "believe", "believes", "feel", "feels",
-        "stance", "position", "view", "agree", "disagree", "support",
-        "oppose", "hate", "love", "like", "dislike", "prefer", "wrong",
-        "right", "should", "shouldnt", "why", "because", "against", "for",
+        "think",
+        "thinks",
+        "opinion",
+        "believe",
+        "believes",
+        "feel",
+        "feels",
+        "stance",
+        "position",
+        "view",
+        "agree",
+        "disagree",
+        "support",
+        "oppose",
+        "hate",
+        "love",
+        "like",
+        "dislike",
+        "prefer",
+        "wrong",
+        "right",
+        "should",
+        "shouldnt",
+        "why",
+        "because",
+        "against",
+        "for",
     ],
     "media_entertainment": [
-        "game", "games", "gaming", "play", "playing", "watch", "movie", "film",
-        "show", "anime", "music", "book", "books", "read", "stream", "streaming",
-        "youtube", "twitch", "series", "tv", "netflix", "podcast", "manga",
+        "game",
+        "games",
+        "gaming",
+        "play",
+        "playing",
+        "watch",
+        "movie",
+        "film",
+        "show",
+        "anime",
+        "music",
+        "book",
+        "books",
+        "read",
+        "stream",
+        "streaming",
+        "youtube",
+        "twitch",
+        "series",
+        "tv",
+        "netflix",
+        "podcast",
+        "manga",
     ],
     "hobbies": [
-        "hobby", "hobbies", "sport", "sports", "craft", "outdoor", "outdoors",
-        "fitness", "cook", "cooking", "build", "building", "code", "coding",
-        "project", "gym", "run", "running", "drawing", "art", "photography",
+        "hobby",
+        "hobbies",
+        "sport",
+        "sports",
+        "craft",
+        "outdoor",
+        "outdoors",
+        "fitness",
+        "cook",
+        "cooking",
+        "build",
+        "building",
+        "code",
+        "coding",
+        "project",
+        "gym",
+        "run",
+        "running",
+        "drawing",
+        "art",
+        "photography",
     ],
     "discussion_topics": [
-        "think", "opinion", "believe", "politics", "view", "stance", "feel",
-        "discuss", "debate", "topic", "argue", "argument", "say", "said",
-        "rant", "issue", "news", "current",
+        "think",
+        "opinion",
+        "believe",
+        "politics",
+        "view",
+        "stance",
+        "feel",
+        "discuss",
+        "debate",
+        "topic",
+        "argue",
+        "argument",
+        "say",
+        "said",
+        "rant",
+        "issue",
+        "news",
+        "current",
     ],
     "communication_style": [
-        "style", "tone", "communicate", "talk", "argue", "funny", "humor",
-        "sarcastic", "sarcasm", "serious", "joke", "how",
+        "style",
+        "tone",
+        "communicate",
+        "talk",
+        "argue",
+        "funny",
+        "humor",
+        "sarcastic",
+        "sarcasm",
+        "serious",
+        "joke",
+        "how",
     ],
     "inferred_location": [
-        "live", "where", "location", "country", "city", "region", "timezone",
-        "from", "based", "local",
+        "live",
+        "where",
+        "location",
+        "country",
+        "city",
+        "region",
+        "timezone",
+        "from",
+        "based",
+        "local",
     ],
     "inferred_politics": [
-        "politics", "political", "vote", "voting", "liberal", "conservative",
-        "left", "right", "party", "ideology", "democrat", "republican",
+        "politics",
+        "political",
+        "vote",
+        "voting",
+        "liberal",
+        "conservative",
+        "left",
+        "right",
+        "party",
+        "ideology",
+        "democrat",
+        "republican",
     ],
     "inferred_work_or_education": [
-        "work", "job", "career", "school", "study", "studying", "degree",
-        "field", "profession", "college", "university", "major",
+        "work",
+        "job",
+        "career",
+        "school",
+        "study",
+        "studying",
+        "degree",
+        "field",
+        "profession",
+        "college",
+        "university",
+        "major",
     ],
     "relationships_with_others": [
-        "friend", "friends", "know", "knows", "relationship", "together",
-        "interact", "crew", "group", "people",
+        "friend",
+        "friends",
+        "know",
+        "knows",
+        "relationship",
+        "together",
+        "interact",
+        "crew",
+        "group",
+        "people",
     ],
 }
 
@@ -2054,6 +2179,7 @@ def format_profile_prefix_for_rag(
     if "Current message:\n" in _cur_msg:
         _cur_msg = _cur_msg.split("Current message:\n")[-1].strip()
     import re as _re
+
     _cur_msg = _re.sub(r"^(?:user|assistant)\s*\([^)]*\)\s*:\s*", "", _cur_msg, flags=_re.IGNORECASE).strip()
     qnorm = normalize_rag_query_text(_cur_msg or query_text or "")
     query_tokens = _extract_query_tokens(qnorm)
@@ -2110,9 +2236,4 @@ def format_profile_prefix_for_rag(
     out = header + "\n\n" + "\n\n".join(sketch_parts)
     if len(out) > max_total:
         out = out[: max_total - 1] + "…"
-    return (
-        "--- Member sketches (approximate; excerpts below win for facts) ---\n"
-        + out
-        + "\n--- end sketches ---\n\n"
-    )
-
+    return "--- Member sketches (approximate; excerpts below win for facts) ---\n" + out + "\n--- end sketches ---\n\n"

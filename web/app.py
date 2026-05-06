@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
-import sys
 import re
-import time as _time
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -15,7 +13,6 @@ from typing import Any, Dict
 # Coloured logging — uses the canonical formatter from soupy_logging so
 # the web app and the bot agree on output format.
 # ---------------------------------------------------------------------------
-
 from soupy_logging import ColoredFormatter
 
 _web_fmt = ColoredFormatter(datefmt="%Y-%m-%d %H:%M:%S,f")
@@ -58,18 +55,17 @@ except ImportError:
     # Fallback for Python < 3.9
     from backports.zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from dotenv import load_dotenv
+from soupy_settings import settings
 
 from .services.bot_runner import BotRunner
-from .services.log_stream import WebsocketManager
 from .services.env_store import parse_env, write_env
-
-from soupy_settings import settings
+from .services.log_stream import WebsocketManager
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOGS_DIR = BASE_DIR / "logs"
@@ -399,8 +395,6 @@ def create_app() -> FastAPI:
 
     @app.get("/api/archive/images")
     async def api_archive_images(limit: int = 50, offset: int = 0, kind: str | None = None):
-        import json
-        from pathlib import Path
 
         idx = media_dir / "images" / "index.jsonl"
         all_items = []
@@ -427,7 +421,6 @@ def create_app() -> FastAPI:
 
     @app.get("/api/archive/messages")
     async def api_archive_messages(limit: int = 50, offset: int = 0):
-        import json
 
         log = media_dir / "messages.jsonl"
         all_items = []
@@ -453,7 +446,6 @@ def create_app() -> FastAPI:
         This is primarily used to retrieve the full, non-truncated description for
         images that were analyzed (vision events) when the paginated preload misses it.
         """
-        import json
         import re
 
         # Basic filename validation to prevent traversal or odd inputs
@@ -491,7 +483,6 @@ def create_app() -> FastAPI:
 
     @app.get("/api/stats/raw")
     async def api_stats_raw():
-        import json
 
         stats_path = BASE_DIR / "user_stats.json"
         if not stats_path.exists():
@@ -503,9 +494,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/stats/summary")
     async def api_stats_summary(server_id: str | None = None, limit: int = 5):
-        import json
         import datetime
-        from collections import Counter, defaultdict
+        from collections import Counter
 
         stats_path = BASE_DIR / "user_stats.json"
         media_messages = media_dir / "messages.jsonl"
@@ -850,7 +840,6 @@ def create_app() -> FastAPI:
 
     @app.delete("/api/archive/images/{filename}")
     async def api_delete_image(filename: str):
-        import json
         import re
         from tempfile import NamedTemporaryFile
 
@@ -1227,11 +1216,10 @@ def create_app() -> FastAPI:
           ?limit=50  (default: 50, max: 200)
         """
         import json as _json
-        from datetime import date, datetime, timezone
+        from datetime import date
 
         req = app.state._request if hasattr(app.state, "_request") else None
         # Parse from starlette request
-        from starlette.requests import Request
 
         # We'll just return everything and let the frontend filter
         today = date.today().isoformat()
@@ -1298,6 +1286,7 @@ def create_app() -> FastAPI:
     async def api_channels_list(guild_id: int):
         """Return all known channels for a guild from the SQLite archive."""
         import sqlite3 as _sql
+
         from soupy_database.database import get_db_path
 
         db_path = get_db_path(guild_id)
@@ -1708,9 +1697,10 @@ def create_app() -> FastAPI:
     async def api_database_status():
         """Get active scans and overall database status."""
         try:
-            from soupy_database import get_stats
             import os
             from pathlib import Path
+
+            from soupy_database import get_stats
 
             # Get active scans (try to import, but handle if bot isn't running)
             active = {}
@@ -1771,11 +1761,12 @@ def create_app() -> FastAPI:
     async def api_database_stats(guild_id: str):
         """Get detailed stats for a specific server database."""
         try:
-            from soupy_database import get_stats, get_last_scan_time
-            import sqlite3
-            from datetime import datetime, timedelta
-            from collections import defaultdict
             import os
+            import sqlite3
+            from collections import defaultdict
+            from datetime import datetime
+
+            from soupy_database import get_stats
 
             # Get display timezone (from app context or env)
             display_tz_str = settings.timezone
@@ -2118,7 +2109,7 @@ def create_app() -> FastAPI:
                         dt_local = dt_utc.astimezone(display_tz)
                         weekday = dt_local.weekday()  # 0=Monday, 6=Sunday
                         user_weekday_activity[user_id]["weekdays"][weekday] += row["message_count"]
-                    except:
+                    except Exception:
                         pass
 
                 # Convert to list
@@ -2315,6 +2306,7 @@ def create_app() -> FastAPI:
         """Browse database rows with safe, pre-defined filtering."""
         try:
             import sqlite3
+
             from soupy_database.database import get_db_path
         except Exception as exc:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)

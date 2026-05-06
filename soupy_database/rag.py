@@ -1556,7 +1556,7 @@ async def fetch_rag_context_for_query(
         _self_hits: List[Tuple[float, str, str]] = []
         if qv is not None:
             try:
-                from .self_context import search_self_chunks, is_self_md_enabled
+                from .self_context import is_self_md_enabled, search_self_chunks
                 if is_self_md_enabled():
                     _self_top_k = int(os.getenv("RAG_SELF_KNOWLEDGE_TOP_K", "5"))
                     _self_min_sim = float(os.getenv("RAG_SELF_KNOWLEDGE_MIN_SIM", "0.3"))

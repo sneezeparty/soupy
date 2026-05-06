@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from installer import state as state_mod
-from installer.ui import NonInteractiveUI, UI, WizardAbort
 from installer.steps import STEPS
+from installer.ui import UI, NonInteractiveUI, WizardAbort
 
 REPO_ROOT = Path(__file__).resolve().parent
 STATE_PATH = REPO_ROOT / ".install-state.json"

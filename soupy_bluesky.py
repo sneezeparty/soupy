@@ -15,11 +15,10 @@ import json
 import logging
 import os
 import random
+import re as _re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-import re as _re
 
 import aiohttp
 import discord
@@ -27,7 +26,6 @@ import trafilatura
 from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
-from openai import OpenAI
 
 from soupy_settings import openai_client, settings
 
@@ -84,6 +82,7 @@ async def _describe_image(
     try:
         import base64
         from io import BytesIO
+
         from PIL import Image
 
         # Download the image
@@ -419,6 +418,7 @@ def _resize_image_for_blob(image_bytes: bytes) -> Optional[Tuple[bytes, str]]:
     """
     try:
         from io import BytesIO
+
         from PIL import Image
     except Exception as e:
         logger.warning("🦋 Pillow unavailable, can't resize og:image: %s", e)
@@ -1260,7 +1260,7 @@ class BlueskyEngageCog(commands.Cog):
         self_context = ""
         try:
             guild_id = settings.guild_id or 0
-            from soupy_database.self_context import load_self_core, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_core
 
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
@@ -1530,7 +1530,7 @@ class BlueskyEngageCog(commands.Cog):
         self_context = ""
         try:
             guild_id = settings.guild_id or 0
-            from soupy_database.self_context import load_self_core, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_core
 
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
@@ -1923,7 +1923,7 @@ class BlueskyEngageCog(commands.Cog):
         self_context = ""
         try:
             guild_id = settings.guild_id or 0
-            from soupy_database.self_context import load_self_core, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_core
 
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)
@@ -2281,7 +2281,7 @@ class BlueskyEngageCog(commands.Cog):
         self_context = ""
         try:
             guild_id = settings.guild_id or 0
-            from soupy_database.self_context import load_self_core, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_core
 
             if is_self_md_enabled() and guild_id:
                 core = load_self_core(guild_id)

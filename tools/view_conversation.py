@@ -7,8 +7,8 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import os
+import sqlite3
 import sys
 from datetime import datetime, timedelta
 
@@ -114,7 +114,7 @@ try:
 
     # Show a few example conversations
     print("=" * 80)
-    print(f"📋 EXAMPLE CONVERSATIONS (showing up to 5, sorted by length)")
+    print("📋 EXAMPLE CONVERSATIONS (showing up to 5, sorted by length)")
     print("=" * 80)
     print()
 
@@ -177,7 +177,7 @@ try:
         print()
 
     print("=" * 80)
-    print(f"📊 CONVERSATION STATISTICS")
+    print("📊 CONVERSATION STATISTICS")
     print("=" * 80)
     print()
 
@@ -226,10 +226,10 @@ try:
                 print("   (no text)")
 
             if msg["image_description"]:
-                print(f"   🖼️  [Has image description]")
+                print("   🖼️  [Has image description]")
 
             if msg["url_summary"]:
-                print(f"   🔗 [Has URL summary]")
+                print("   🔗 [Has URL summary]")
 
             print()
 

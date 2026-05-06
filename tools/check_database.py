@@ -8,10 +8,9 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import os
+import sqlite3
 import sys
-from pathlib import Path
 
 parser = argparse.ArgumentParser(description="Show a quick summary of a guild's Soupy database.")
 parser.add_argument("guild_id", help="Discord guild/server ID (the database file is guild_<id>.db)")
@@ -99,7 +98,7 @@ try:
             preview = content[:100] + "..." if len(content) > 100 else content
             print(f"   💬 {preview}")
         else:
-            print(f"   💬 (no text content)")
+            print("   💬 (no text content)")
 
         if row["image_description"]:
             img_preview = (

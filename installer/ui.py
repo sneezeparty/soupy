@@ -17,7 +17,8 @@ import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:  # pragma: no cover — colour is cosmetic
-    from colorama import Fore, Style, init as _colorama_init
+    from colorama import Fore, Style
+    from colorama import init as _colorama_init
 
     _colorama_init()
     _COLOUR = True

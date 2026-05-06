@@ -4,18 +4,17 @@ Helper functions for processing images and URLs during scanning.
 
 import base64
 import logging
-import os
-
-from soupy_settings import settings
 import re
-import asyncio
-import aiohttp
 from io import BytesIO
-from PIL import Image
-from typing import Optional, List
+from typing import List, Optional
 from urllib.parse import urlparse
+
+import aiohttp
 import html2text
 import trafilatura
+from PIL import Image
+
+from soupy_settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -350,8 +349,9 @@ async def summarize_url(url: str) -> Optional[str]:
     """
     try:
         from urllib.parse import urlparse
-        import trafilatura
+
         import html2text
+        import trafilatura
 
         # Check if URL points to an image/GIF file directly
         parsed = urlparse(url)

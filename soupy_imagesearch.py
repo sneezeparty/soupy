@@ -3,19 +3,19 @@ Image search functionality for Soupy Bot
 Provides DuckDuckGo image search capabilities with rate limiting and result processing
 """
 
+import asyncio
+import logging
+import random
+import time
+from collections import defaultdict
+from io import BytesIO
+from typing import Dict, List, Optional
+
+import aiohttp
 import discord
+from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands
-import logging
-from collections import defaultdict
-import time
-import os
-import asyncio
-from typing import Optional, List, Dict
-from ddgs import DDGS
-import aiohttp
-from io import BytesIO
-import random
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -146,7 +146,7 @@ async def setup(bot):
         # Log registered commands
         for command in bot.tree.get_commands():
             if command.name == "soupyimage":
-                logger.info(f"✅ /soupyimage command registered successfully")
+                logger.info("✅ /soupyimage command registered successfully")
                 return
         logger.warning("⚠️ /soupyimage command not found in command tree")
     except Exception as e:

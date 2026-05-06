@@ -67,7 +67,7 @@ class BotRunner:
         python_exe = sys.executable
         entrypoint = self._resolve_entrypoint()
         if not entrypoint or not os.path.exists(entrypoint):
-            return False, f"Entrypoint not found"
+            return False, "Entrypoint not found"
 
         try:
             # Prepare environment; force colored output and ensure required vars
@@ -91,9 +91,8 @@ class BotRunner:
 
             use_pty = os.name == "posix"
             if use_pty:
-                import pty
                 import fcntl
-                import termios
+                import pty
 
                 master_fd, slave_fd = pty.openpty()
                 # Non-blocking master to avoid potential hangs

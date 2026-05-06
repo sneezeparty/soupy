@@ -18,7 +18,7 @@ def run(state: Dict, ui) -> Dict:
     ui.header("Step 8 — Handoff")
 
     ui.info(f"config: {REPO_ROOT / '.env-stable'}")
-    ui.info(f"web panel will be at: http://127.0.0.1:4941")
+    ui.info("web panel will be at: http://127.0.0.1:4941")
     ui.info("re-run the wizard later with:  python install.py --resume")
     ui.hr()
 

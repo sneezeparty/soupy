@@ -3,22 +3,23 @@ Database module for Soupy message scanning.
 Handles per-server SQLite databases for message storage.
 """
 
-import sqlite3
+import asyncio
 import logging
 import os
-import asyncio
-import time
 import random
-import aiohttp
+import sqlite3
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
+
+import aiohttp
 import discord
-from discord import app_commands
+
 from soupy_settings import settings
 
-from .helpers import describe_image, extract_urls, extract_url_content
-from urllib.parse import urlparse
+from .helpers import describe_image, extract_url_content, extract_urls
 
 logger = logging.getLogger(__name__)
 
@@ -498,7 +499,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
                     f"🔍 Starting initial scan for {guild_name} (going back {lookback_days} day{'s' if lookback_days != 1 else ''})...",
                     ephemeral=True,
                 )
-            except:
+            except Exception:
                 pass  # Interaction may have expired, continue anyway
         else:
             # Only scan messages since last scan
@@ -514,7 +515,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
                 await interaction.followup.send(
                     f"🔍 Starting incremental scan for {guild_name} (since {utc_str})...", ephemeral=True
                 )
-            except:
+            except Exception:
                 pass  # Interaction may have expired, continue anyway
 
         # Get all channels the bot can access, excluding specified channels
@@ -553,7 +554,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
                 logger.info(
                     f"  Time range: Since {cutoff_time.strftime('%Y-%m-%d %H:%M:%S UTC')} ({local_time.strftime('%Y-%m-%d %H:%M:%S')} {local_tz})"
                 )
-            except:
+            except Exception:
                 logger.info(f"  Time range: Since {cutoff_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         logger.info("=" * 70)
         logger.info("")
@@ -577,7 +578,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
 
                 # Check if we can read message history
                 if not channel.permissions_for(interaction.guild.me).read_message_history:
-                    logger.warning(f"  ⚠️  No permission to read messages - skipping")
+                    logger.warning("  ⚠️  No permission to read messages - skipping")
                     continue
 
                 messages_processed = 0
@@ -603,7 +604,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
                         logger.info(
                             f"  → Fetching messages after {after_time.strftime('%Y-%m-%d %H:%M:%S UTC')} ({local_time.strftime('%Y-%m-%d %H:%M:%S')} {local_tz})..."
                         )
-                    except:
+                    except Exception:
                         logger.info(f"  → Fetching messages after {after_time.strftime('%Y-%m-%d %H:%M:%S UTC')}...")
 
                     # Fetch messages - use limit=None to get all messages after cutoff_time
@@ -900,7 +901,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
 
         try:
             await interaction.followup.send(embed=embed, ephemeral=True)
-        except:
+        except Exception:
             # Interaction may have expired, log instead
             logger.info(f"✅ Scan completed for {guild_name}: {total_messages_added} new messages added")
 
@@ -935,7 +936,7 @@ async def run_scan_background(interaction: discord.Interaction, guild_id: int, g
         logger.error(f"Scan error: {e}", exc_info=True)
         try:
             await interaction.followup.send(error_msg, ephemeral=True)
-        except:
+        except Exception:
             # Interaction may have expired, just log
             logger.error(f"Could not send error message to user: {error_msg}")
 
@@ -1066,7 +1067,7 @@ async def process_scan_triggers(bot):
                 # Delete corrupted trigger file
                 try:
                     trigger_file.unlink()
-                except:
+                except Exception:
                     pass
 
     except Exception as e:

@@ -24,7 +24,6 @@ import trafilatura
 from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
-from openai import OpenAI
 
 import soupy_prompts
 from soupy_database.database import get_db_path
@@ -1430,12 +1429,12 @@ class DailyPostCog(commands.Cog):
         Embeds the article title + snippet, searches RAG chunks for high-similarity
         matches, and checks if any matching messages are from the last N days.
         """
+        from soupy_database.database import get_db_path
         from soupy_database.rag import (
             embed_texts_lm_studio,
-            search_rag_chunks,
             ensure_rag_schema,
+            search_rag_chunks,
         )
-        from soupy_database.database import get_db_path
 
         query_text = f"{title}. {snippet[:300]}"
         try:

@@ -3,29 +3,27 @@
 # ================================
 
 import logging
-import time
-import threading
-from io import BytesIO
 import os
+import time
+from io import BytesIO
 from pathlib import Path
 
+import cv2
+import numpy as np
 import torch
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from colorama import Fore, Style, init
+from diffusers import (
+    DPMSolverMultistepScheduler,
+    EulerDiscreteScheduler,
+    StableDiffusion3Pipeline,
+    StableDiffusionPipeline,
+    StableDiffusionXLPipeline,
+)
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from PIL import Image
 from rembg import remove
-from colorama import init, Fore, Style
 
-from diffusers import (
-    StableDiffusionPipeline,
-    StableDiffusionXLPipeline,
-    StableDiffusion3Pipeline,
-    DiffusionPipeline,
-    EulerDiscreteScheduler,
-    DPMSolverMultistepScheduler
-)
-import cv2
-import numpy as np
 # Optional pipelines for img2img/inpaint (import if available)
 try:
     from diffusers import (
@@ -39,8 +37,8 @@ except Exception:
 try:
     from diffusers import (
         StableDiffusion3Img2ImgPipeline,
-        StableDiffusionXLInpaintPipeline,
         StableDiffusionInpaintPipeline,
+        StableDiffusionXLInpaintPipeline,
     )
 except Exception:
     StableDiffusion3Img2ImgPipeline = None
@@ -61,11 +59,9 @@ try:
 except Exception:
     match_histograms = None
 
-import requests
+from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 from threading import Lock
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 # Initialize Colorama
 init(autoreset=True)
@@ -73,7 +69,7 @@ init(autoreset=True)
 class ColoredFormatter(logging.Formatter):
     """Custom logging formatter with colors."""
     LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
-    
+
     COLOR_MAP = {
         logging.DEBUG: Fore.BLUE + LOG_FORMAT + Style.RESET_ALL,
         logging.INFO: Fore.GREEN + LOG_FORMAT + Style.RESET_ALL,
@@ -81,7 +77,7 @@ class ColoredFormatter(logging.Formatter):
         logging.ERROR: Fore.RED + LOG_FORMAT + Style.RESET_ALL,
         logging.CRITICAL: Fore.MAGENTA + LOG_FORMAT + Style.RESET_ALL,
     }
-    
+
     def format(self, record):
         log_fmt = self.COLOR_MAP.get(record.levelno, self.LOG_FORMAT)
         formatter = logging.Formatter(log_fmt)
@@ -91,16 +87,16 @@ def setup_logging():
     """Configure logging with colored output."""
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    
+
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
-    
+
     ch = logging.StreamHandler()
     ch.setLevel(logging.DEBUG)
     formatter = ColoredFormatter()
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-    
+
     # Set specific loggers
     logging.getLogger("uvicorn").setLevel(logging.DEBUG)
     logging.getLogger("fastapi").setLevel(logging.DEBUG)
@@ -132,7 +128,7 @@ DEVICE = get_device()
 
 class StableDiffusionConfig:
     """Configuration for Stable Diffusion model."""
-    
+
     # Recommended uncensored community models - Choose one:
     # REPO_NAME = "Lykon/DreamShaper"  # High quality, minimal censorship, artistic
     # REPO_NAME = "SG161222/Realistic_Vision_V5.1"  # Ultra-realistic characters
@@ -144,7 +140,7 @@ class StableDiffusionConfig:
     # REPO_NAME = "runwayml/stable-diffusion-v1-5"  # Classic base model
     # REPO_NAME = "stabilityai/stable-diffusion-2-1"  # SD 2.1 base model
     REPO_NAME = "stabilityai/stable-diffusion-3.5-medium"
-    
+
     REVISION = None
     USE_SDXL = True  # Set to True for SDXL models (SD 3.5 Medium)
 
@@ -178,7 +174,7 @@ def quantize_and_freeze_model(model, model_name):
     """Apply quantization and freeze model."""
     logging.info(f"Starting quantization for {model_name}...")
     start_time = time.time()
-    
+
     try:
         quantize(model, weights=qfloat8)
         freeze(model)
@@ -191,10 +187,10 @@ def quantize_and_freeze_model(model, model_name):
 def initialize_sd_pipeline(scheduler, use_sdxl=False):
     """Initialize the Stable Diffusion pipeline."""
     logging.info("Initializing Stable Diffusion pipeline...")
-    
+
     repo = StableDiffusionConfig.REPO_NAME
     revision = StableDiffusionConfig.REVISION
-    
+
     try:
         if use_sdxl:
             # Use StableDiffusion3Pipeline for SD 3.5 Medium as it has a different architecture
@@ -231,9 +227,9 @@ def initialize_sd_pipeline(scheduler, use_sdxl=False):
                 torch_dtype=torch.bfloat16,
                 revision=revision
             )
-        
+
         logging.info("Pipeline loaded successfully.")
-        
+
         # Enable memory optimizations
         # Note: On M1 Macs, enable_model_cpu_offload() may not work as expected
         # with MPS. We'll use a different approach for MPS devices.
@@ -249,11 +245,11 @@ def initialize_sd_pipeline(scheduler, use_sdxl=False):
                 pipeline.enable_model_cpu_offload()
         else:
             pipeline.enable_model_cpu_offload()
-        
+
         pipeline.enable_attention_slicing()
-        
+
         return pipeline
-        
+
     except Exception as e:
         logging.error(f"Failed to load pipeline: {e}")
         raise e
@@ -263,7 +259,7 @@ def load_lora_weights(pipeline, lora_path, weight=1.0):
     if not lora_path or not Path(lora_path).exists():
         logging.warning(f"LoRA path not found: {lora_path}")
         return pipeline
-    
+
     try:
         logging.info(f"Loading LoRA weights from {lora_path} with weight {weight}")
         pipeline.load_lora_weights(lora_path)
@@ -278,7 +274,7 @@ def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height
     """Generate an image using Stable Diffusion."""
     generation_start = time.perf_counter()
     logging.info(f"Starting image generation for prompt: '{prompt}'")
-    
+
     with pipeline_lock:
         try:
             # Ensure dimensions are valid (SD3/SDXL require multiples of 16)
@@ -299,11 +295,11 @@ def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height
             else:
                 seed = int(seed) % (2**32)
                 logging.info(f"Using seed: {seed}")
-            
+
             generator = torch.Generator().manual_seed(seed)
-            
+
             logging.info(f"Generating with {steps} steps, guidance {guidance_scale}, size {width}x{height}")
-            
+
             # Generate image
             pipeline_start = time.perf_counter()
             output = pipeline(
@@ -316,13 +312,13 @@ def generate_image(prompt, negative_prompt, steps, guidance_scale, width, height
                 generator=generator,
             )
             pipeline_end = time.perf_counter()
-            
+
             image = output.images[0]
             total_time = time.perf_counter() - generation_start
-            
+
             logging.info(f"Generation completed in {total_time:.2f} seconds")
             return image
-            
+
         except Exception as e:
             logging.error(f"Error during image generation: {e}")
             raise HTTPException(status_code=500, detail="Image generation failed.")
@@ -331,22 +327,22 @@ def remove_background_image(image: Image.Image) -> Image.Image:
     """Remove background from image."""
     logging.info("Removing background...")
     start_time = time.time()
-    
+
     try:
         if image.mode != "RGBA":
             image = image.convert("RGBA")
-        
+
         buffered = BytesIO()
         image.save(buffered, format="PNG")
         image_bytes = buffered.getvalue()
-        
+
         output_bytes = remove(image_bytes)
         output_image = Image.open(BytesIO(output_bytes)).convert("RGBA")
-        
+
         end_time = time.time()
         logging.info(f"Background removal completed in {end_time - start_time:.2f} seconds.")
         return output_image
-        
+
     except Exception as e:
         logging.error(f"Error during background removal: {e}")
         raise HTTPException(status_code=500, detail="Background removal failed.")
@@ -374,26 +370,26 @@ async def startup_event():
     """Initialize the pipeline on startup."""
     global pipeline
     logging.info("Starting Stable Diffusion API...")
-    
+
     try:
         # Load scheduler
         scheduler = load_scheduler(
-            StableDiffusionConfig.REPO_NAME, 
+            StableDiffusionConfig.REPO_NAME,
             StableDiffusionConfig.REVISION,
             StableDiffusionConfig.USE_SDXL
         )
-        
+
         # Initialize pipeline
         pipeline = initialize_sd_pipeline(scheduler, StableDiffusionConfig.USE_SDXL)
-        
+
         # Load LoRA if specified
         lora_path = os.getenv("LORA_PATH", "")
         lora_weight = float(os.getenv("LORA_WEIGHT", "1.0"))
         if lora_path:
             pipeline = load_lora_weights(pipeline, lora_path, lora_weight)
-        
+
         logging.info("Stable Diffusion API is ready!")
-        
+
     except Exception as e:
         logging.error(f"Startup failed: {e}")
         raise e
@@ -449,7 +445,7 @@ def _init_img2img_pipeline():
                 pipeline_img2img.enable_model_cpu_offload()
         else:
             pipeline_img2img.enable_model_cpu_offload()
-        
+
         pipeline_img2img.enable_attention_slicing()
         logging.info("Img2Img pipeline initialized.")
         return pipeline_img2img
@@ -551,31 +547,31 @@ def _match_lightness_lab(source_seam: Image.Image, reference_ring: Image.Image) 
         ref_lab = cv2.cvtColor(ref, cv2.COLOR_RGB2LAB)
         src_L = src_lab[:,:,0].astype(np.float32)
         ref_L = ref_lab[:,:,0].astype(np.float32)
-        
+
         # More robust mean calculation - exclude very dark and very bright pixels
         src_valid = src_L[(src_L > 10) & (src_L < 245)]
         ref_valid = ref_L[(ref_L > 10) & (ref_L < 245)]
-        
+
         if len(src_valid) == 0 or len(ref_valid) == 0:
             return source_seam
-            
+
         src_mean = float(src_valid.mean())
         ref_mean = float(ref_valid.mean())
-        
+
         if src_mean <= 1e-3 or ref_mean <= 1e-3:
             return source_seam
-            
+
         gain = ref_mean / src_mean
-        
+
         # Much more conservative gain limits to prevent extreme changes
         gain = float(np.clip(gain, 0.95, 1.05))  # Only allow 5% adjustment max
-        
+
         # Apply gain only to pixels that aren't already very dark or very bright
         mask = (src_L > 10) & (src_L < 245)
         src_L_adjusted = src_L.copy()
         src_L_adjusted[mask] = np.clip(src_L[mask] * gain, 0, 255)
         src_L_adjusted = src_L_adjusted.astype(np.uint8)
-        
+
         src_lab[:,:,0] = src_L_adjusted
         out_rgb = cv2.cvtColor(src_lab, cv2.COLOR_LAB2RGB)
         return Image.fromarray(out_rgb)
@@ -622,29 +618,29 @@ async def sd_endpoint(
 ):
     """Generate an image using Stable Diffusion."""
     endpoint_start = time.perf_counter()
-    
+
     if pipeline is None:
         raise HTTPException(status_code=500, detail="Pipeline not initialized.")
-    
+
     try:
         image = generate_image(
-            prompt, negative_prompt, steps, guidance_scale, 
+            prompt, negative_prompt, steps, guidance_scale,
             width, height, seed, pipeline
         )
-        
+
         buffer = BytesIO()
         image.save(buffer, format="JPEG", quality=85, optimize=False)
         buffer.seek(0)
-        
+
         return StreamingResponse(
-            buffer, 
+            buffer,
             media_type="image/jpeg",
             headers={
                 "Cache-Control": "public, max-age=3600",
                 "Content-Disposition": "inline"
             }
         )
-        
+
     except Exception as e:
         logging.error(f"Error in SD endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -658,7 +654,7 @@ async def remove_background_endpoint(file: UploadFile = File(...)):
     except Exception as e:
         logging.error(f"Error reading file: {e}")
         raise HTTPException(status_code=400, detail="Invalid image file.")
-    
+
     try:
         output_image = remove_background_image(image)
     except HTTPException as he:
@@ -666,11 +662,11 @@ async def remove_background_endpoint(file: UploadFile = File(...)):
     except Exception as e:
         logging.error(f"Error during background removal: {e}")
         raise HTTPException(status_code=500, detail="Background removal failed.")
-    
+
     buffer = BytesIO()
     output_image.save(buffer, format="PNG")
     buffer.seek(0)
-    
+
     return StreamingResponse(buffer, media_type="image/png")
 
 @app.get("/")
@@ -689,11 +685,11 @@ def upscale_image_with_opencv(image: Image.Image, target_width: int, target_heig
     try:
         # Convert PIL to OpenCV format
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        
+
         # Calculate scale factors
         scale_x = target_width / image.width
         scale_y = target_height / image.height
-        
+
         # Choose interpolation method based on scale factor for optimal quality
         if scale_x <= 2.0 and scale_y <= 2.0:
             # For smaller scale factors, use INTER_LANCZOS4 (highest quality)
@@ -703,15 +699,15 @@ def upscale_image_with_opencv(image: Image.Image, target_width: int, target_heig
             # For larger scale factors, use INTER_CUBIC (good balance of quality/speed)
             interpolation = cv2.INTER_CUBIC
             logging.info(f"Using INTER_CUBIC for scale factors: {scale_x:.2f}x{scale_y:.2f}")
-        
+
         upscaled_cv = cv2.resize(cv_image, (target_width, target_height), interpolation=interpolation)
-        
+
         # Convert back to PIL
         upscaled_image = Image.fromarray(cv2.cvtColor(upscaled_cv, cv2.COLOR_BGR2RGB))
-        
+
         logging.info(f"OpenCV upscaling completed: {image.width}x{image.height} -> {target_width}x{target_height}")
         return upscaled_image
-        
+
     except Exception as e:
         logging.error(f"OpenCV upscaling failed: {e}")
         # Fallback to PIL's LANCZOS resampling
@@ -723,19 +719,19 @@ def upscale_image_with_ai(image: Image.Image, target_width: int, target_height: 
         # For now, fall back to OpenCV LANCZOS4 as AI models require additional dependencies
         # In the future, you could add Real-ESRGAN or similar AI upscaling models here
         logging.info("AI upscaling requested, using high-quality OpenCV fallback")
-        
+
         # Convert PIL to OpenCV format
         cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-        
+
         # Use INTER_LANCZOS4 for highest quality
         upscaled_cv = cv2.resize(cv_image, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
-        
+
         # Convert back to PIL
         upscaled_image = Image.fromarray(cv2.cvtColor(upscaled_cv, cv2.COLOR_BGR2RGB))
-        
+
         logging.info(f"AI-style upscaling completed: {image.width}x{image.height} -> {target_width}x{target_height}")
         return upscaled_image
-        
+
     except Exception as e:
         logging.error(f"AI upscaling failed: {e}")
         # Fallback to PIL's LANCZOS resampling
@@ -746,24 +742,24 @@ def preprocess_img2img_image(image: Image.Image) -> Image.Image:
     try:
         # Convert to numpy array for processing
         img_array = np.array(image)
-        
+
         # Apply slight sharpening to improve detail preservation
         kernel = np.array([[-1,-1,-1],
                           [-1, 9,-1],
                           [-1,-1,-1]])
-        
+
         # Apply sharpening filter
         sharpened = cv2.filter2D(img_array, -1, kernel)
-        
+
         # Blend original with sharpened (70% original, 30% sharpened)
         processed_array = cv2.addWeighted(img_array, 0.7, sharpened, 0.3, 0)
-        
+
         # Convert back to PIL Image
         processed_image = Image.fromarray(processed_array)
-        
+
         logging.info("Image preprocessing completed for img2img")
         return processed_image
-        
+
     except Exception as e:
         logging.warning(f"Image preprocessing failed, using original: {e}")
         return image
@@ -781,7 +777,7 @@ async def upscale_endpoint(
         contents = await image.read()
         input_image = Image.open(BytesIO(contents)).convert("RGB")
         orig_w, orig_h = input_image.size
-        
+
         # Determine target dimensions
         if target_width and target_height:
             tgt_w, tgt_h = target_width, target_height
@@ -789,9 +785,9 @@ async def upscale_endpoint(
             # Use scale factor
             tgt_w = int(orig_w * scale_factor)
             tgt_h = int(orig_h * scale_factor)
-        
+
         logging.info(f"Upscaling image from {orig_w}x{orig_h} to {tgt_w}x{tgt_h} using method: {method}")
-        
+
         # Choose upscaling method
         if method.lower() == "ai":
             # Use AI super-resolution (if available)
@@ -799,14 +795,14 @@ async def upscale_endpoint(
         else:
             # Use OpenCV for high-quality upscaling that preserves content
             upscaled_image = upscale_image_with_opencv(input_image, tgt_w, tgt_h)
-        
+
         buffer = BytesIO()
         upscaled_image.save(buffer, format="JPEG", quality=95, optimize=False)
         buffer.seek(0)
-        
-        logging.info(f"Upscaling completed successfully")
+
+        logging.info("Upscaling completed successfully")
         return StreamingResponse(buffer, media_type="image/jpeg")
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -830,10 +826,10 @@ async def sd_img2img_endpoint(
     try:
         contents = await image.read()
         init_image = Image.open(BytesIO(contents)).convert("RGB")
-        
+
         # Preprocess image for better img2img results
         init_image = preprocess_img2img_image(init_image)
-        
+
         src_w, src_h = init_image.size
         tgt_w = width or src_w
         tgt_h = height or src_h
@@ -1117,19 +1113,19 @@ async def outpaint_hybrid_endpoint(
                 ring = cv2.erode(inv_mask_np, np.ones((7,7), np.uint8), iterations=1)
                 ring = inv_mask_np - ring
                 ring_img = Image.fromarray(ring).convert('L')
-                
+
                 # Create a mask for the seam region (where we want to adjust colors)
                 # Use a slightly dilated version of the seam mask to include the border area
                 seam_dilated = cv2.dilate(np.array(seam_mask), np.ones((5,5), np.uint8), iterations=1)
                 seam_mask_dilated = Image.fromarray(seam_dilated).convert('L')
-                
+
                 # Extract the seam region and the reference ring
                 seam_rgb = Image.composite(blended, Image.new('RGB', blended.size, (0,0,0)), seam_mask_dilated)
                 ref = Image.composite(base_rgb, Image.new('RGB', base_rgb.size, (0,0,0)), ring_img)
-                
+
                 # Apply conservative lightness matching (max 5% adjustment)
                 matched_seam = _match_lightness_lab(seam_rgb, ref)
-                
+
                 # Composite the matched seam back into the blended image
                 blended = Image.composite(matched_seam, blended, seam_mask_dilated)
                 logging.info("Applied conservative lightness matching for color consistency")
@@ -1173,9 +1169,10 @@ async def outpaint_hybrid_endpoint(
         raise HTTPException(status_code=500, detail="Outpaint hybrid failed.")
 
 if __name__ == "__main__":
-    import uvicorn
     import os
-    
+
+    import uvicorn
+
     uvicorn.run(
         app,
         host="0.0.0.0",

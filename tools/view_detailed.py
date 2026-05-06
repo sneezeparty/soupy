@@ -7,10 +7,9 @@ Usage:
 """
 
 import argparse
-import sqlite3
 import os
+import sqlite3
 import sys
-from pathlib import Path
 
 parser = argparse.ArgumentParser(
     description="Print every archived message from a given username, plus one full sample row."
@@ -87,7 +86,7 @@ try:
         print(f"📁 Channel:      #{msg['channel_name']} (ID: {msg['channel_id']})")
         print(f"💾 Created At:   {msg['created_at']}")
         print()
-        print(f"💬 Message Content:")
+        print("💬 Message Content:")
         if msg["message_content"]:
             # Show full content, wrapped
             content = msg["message_content"]
@@ -101,7 +100,7 @@ try:
         print()
 
         if msg["image_description"]:
-            print(f"🖼️  Image Description:")
+            print("🖼️  Image Description:")
             img_desc = msg["image_description"]
             if len(img_desc) > 200:
                 print(f"   {img_desc[:200]}...")
@@ -114,7 +113,7 @@ try:
             print()
 
         if msg["url_summary"]:
-            print(f"🔗 URL Summary:")
+            print("🔗 URL Summary:")
             url_sum = msg["url_summary"]
             if len(url_sum) > 200:
                 print(f"   {url_sum[:200]}...")

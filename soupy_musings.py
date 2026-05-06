@@ -13,16 +13,14 @@ import logging
 import os
 import random
 import sqlite3
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
-import aiohttp
 import discord
 import pytz
 from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
-from openai import OpenAI
 
 from soupy_database.database import get_db_path
 from soupy_settings import openai_client, settings
@@ -350,7 +348,7 @@ class MusingsCog(commands.Cog):
         # Load self-knowledge for richer reflection
         self_context = ""
         try:
-            from soupy_database.self_context import load_self_core, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_core
 
             if is_self_md_enabled():
                 core = load_self_core(guild_id)
@@ -476,7 +474,7 @@ class MusingsCog(commands.Cog):
         # Load self-knowledge
         self_context = ""
         try:
-            from soupy_database.self_context import load_self_core, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_core
 
             if is_self_md_enabled():
                 core = load_self_core(guild_id)
@@ -501,7 +499,7 @@ class MusingsCog(commands.Cog):
         """Have a random thought based on self-knowledge or general musing."""
         self_context = ""
         try:
-            from soupy_database.self_context import load_self_md, is_self_md_enabled
+            from soupy_database.self_context import is_self_md_enabled, load_self_md
 
             if is_self_md_enabled():
                 full_doc = load_self_md(guild_id)

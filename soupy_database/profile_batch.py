@@ -5,7 +5,6 @@ Background profile batch jobs: logging, pause/resume state in SQLite, worker loo
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import sqlite3

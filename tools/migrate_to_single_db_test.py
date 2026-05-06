@@ -12,7 +12,6 @@ These build synthetic per-guild SQLite fixtures, run the migration, and assert:
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -23,7 +22,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import migrate_to_single_db as m  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Fixture builders

@@ -31,7 +31,6 @@ import asyncio
 import base64
 import json
 import logging
-import mimetypes
 import os
 import random
 import re
@@ -39,61 +38,55 @@ import signal
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, time as datetime_time, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import BytesIO
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
-from urllib.parse import urlparse
+from typing import Dict, List, Optional, Tuple
 
 # Third party imports
 import aiohttp
-import discord
-import pytz
-from aiohttp import ClientConnectorError, ClientOSError, ClientSession, ServerTimeoutError
-from bs4 import BeautifulSoup
-from discord import app_commands, AllowedMentions, Embed
-from discord.ext import commands, tasks
-from discord.ui import View, Modal, TextInput
-from dotenv import load_dotenv
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderServiceError
-from geopy.adapters import AdapterHTTPError
-from openai import OpenAI, OpenAIError
-from timezonefinder import TimezoneFinder
-from logging.handlers import RotatingFileHandler
-import html2text
-import trafilatura
-from PIL import Image, ImageDraw
-import soupy_prompts
-from soupy_settings import openai_client, settings
-import soupy_search
-import soupy_imagesearch
-import aiohttp
-import numpy as np
+
+# Logging and color imports
+import colorama
 import cv2
-from soupy_database import setup_scan_command, get_active_scans, process_scan_triggers
-from soupy_database.helpers import extract_urls, extract_url_content
-from soupy_database.runtime_flags import is_rag_enabled
+import discord
+import numpy as np
+import pytz
+from aiohttp import ClientConnectorError, ClientOSError, ServerTimeoutError
+from discord import app_commands
+from discord.ext import commands
+from discord.ui import Modal, TextInput, View
+from dotenv import load_dotenv
+from geopy.adapters import AdapterHTTPError
+from geopy.exc import GeocoderServiceError, GeocoderTimedOut
+from geopy.geocoders import Nominatim
+from openai import OpenAIError
+from PIL import Image, ImageDraw
+from timezonefinder import TimezoneFinder
+
+import soupy_prompts
+from soupy_database import process_scan_triggers, setup_scan_command
+from soupy_database.helpers import extract_url_content, extract_urls
 from soupy_database.rag import (
     build_rag_retrieval_query,
     fetch_rag_context_for_query,
     strip_rag_gate_word,
     strip_rag_query_invocations,
 )
+from soupy_database.runtime_flags import is_rag_enabled
 from soupy_database.self_context import (
-    is_self_md_enabled,
-    get_self_md_for_injection,
     add_notable_interaction,
-    reflect_and_update as self_md_reflect,
-    pending_interaction_count,
+    get_self_md_for_injection,
+    is_self_md_enabled,
     load_self_md,
+    pending_interaction_count,
 )
-
-# Logging and color imports
-import colorama
-from colorama import Fore, Style
-from colorlog import ColoredFormatter
+from soupy_database.self_context import (
+    reflect_and_update as self_md_reflect,
+)
+from soupy_settings import openai_client
 
 # Initialize colorama
 colorama.init(autoreset=True)
@@ -302,8 +295,6 @@ if not CHANNEL_IDS:
 # at the same names. Function bodies are byte-identical to the previous
 # inline definitions.
 from soupy_triggers import (  # noqa: E402
-    DEFAULT_TRIGGER_KEYWORDS,
-    get_trigger_keywords,
     message_contains_trigger_keyword,
 )
 
@@ -2395,7 +2386,7 @@ async def soupyself_command(
             await interaction.followup.send(f"reflection failed: {exc}", ephemeral=True)
 
     elif act == "reset":
-        from soupy_database.self_context import save_self_md, save_self_core
+        from soupy_database.self_context import save_self_core, save_self_md
 
         save_self_md(guild_id, "")
         save_self_core(guild_id, "")
@@ -2524,7 +2515,7 @@ async def help_command(interaction: discord.Interaction):
 
         for i, chunk in enumerate(chunks):
             embed = discord.Embed(
-                title=f"📚 Soupy Help Menu" + (f" (Part {i+1}/{len(chunks)})" if len(chunks) > 1 else ""),
+                title="📚 Soupy Help Menu" + (f" (Part {i+1}/{len(chunks)})" if len(chunks) > 1 else ""),
                 description=chunk,
                 color=discord.Color.blue(),
                 timestamp=datetime.utcnow(),
@@ -2562,7 +2553,8 @@ async def stats_command(interaction: discord.Interaction):
         server_id = str(guild_id)
         import sqlite3
 
-        from soupy_database.database import get_stats as get_db_stats, get_db_path
+        from soupy_database.database import get_db_path
+        from soupy_database.database import get_stats as get_db_stats
 
         db_stats = get_db_stats(guild_id)
 
@@ -2949,7 +2941,7 @@ async def whattime_command(interaction: discord.Interaction, location: str):
             error_msg = "The geocoding service is rate-limiting requests. Please try again in a moment."
             logger.warning(f"[/whattime Command] Nominatim returned 429 (rate limited): {e}")
         else:
-            error_msg = f"The geocoding service returned an error. Please try again later."
+            error_msg = "The geocoding service returned an error. Please try again later."
             logger.error(f"[/whattime Command] Nominatim HTTP error: {e}")
 
         try:
@@ -3162,7 +3154,7 @@ async def weather_command(interaction: discord.Interaction, location: str):
                     # Parse date and format as "Mon 1" (day of week and day number only)
                     date_obj = datetime.strptime(date_str, "%Y-%m-%d")
                     formatted_date = date_obj.strftime("%a %d")
-                except:
+                except Exception:
                     formatted_date = date_str
 
                 max_temp = daily_max_temps[i] if i < len(daily_max_temps) else 0
@@ -3341,7 +3333,7 @@ def archive_image_bytes(
         import json
         from datetime import datetime, timezone
         from io import BytesIO
-        from pathlib import Path
+
         from PIL import Image
 
         media = _ensure_media_dirs()
@@ -3395,7 +3387,6 @@ def archive_sent_message(
     try:
         import json
         from datetime import datetime, timezone
-        from pathlib import Path
 
         media = _ensure_media_dirs()
         entry = {
@@ -3433,12 +3424,12 @@ def archive_vision_image(
     Returns the filename if successful, None otherwise.
     """
     try:
+        import hashlib
         import json
         from datetime import datetime, timezone
         from io import BytesIO
-        from pathlib import Path
+
         from PIL import Image
-        import hashlib
 
         media = _ensure_media_dirs()
 
@@ -4346,7 +4337,7 @@ class ThumbnailSelectionView(View):
         logger.info(f"Thumbnail {thumbnail_index + 1} selected by {interaction.user} for prompt: '{self.prompt}'")
         try:
             await interaction.response.send_message(
-                f"🛠️ Generating selected image at 1024x1024 using its seed...", ephemeral=True
+                "🛠️ Generating selected image at 1024x1024 using its seed...", ephemeral=True
             )
 
             selected_thumbnail = self.thumbnail_data[thumbnail_index]
@@ -4843,7 +4834,7 @@ async def generate_sd_image(
                             or image_bytes.startswith(b"GIF")
                         ):
                             logger.warning(
-                                f"🖼️ Image data doesn't start with PNG/JPEG/GIF magic bytes, but continuing anyway"
+                                "🖼️ Image data doesn't start with PNG/JPEG/GIF magic bytes, but continuing anyway"
                             )
 
                         # End timing the image generation process
@@ -5260,8 +5251,8 @@ async def rag_reindex_loop(bot):
     Waits one full interval before the first run so startup isn't hammered.
     """
     await bot.wait_until_ready()
-    from soupy_database.rag import index_new_messages
     from soupy_database.database import get_db_path
+    from soupy_database.rag import index_new_messages
 
     try:
         interval_hours = float(os.getenv("RAG_REINDEX_INTERVAL_HOURS", "6"))
@@ -6045,8 +6036,8 @@ def _validate_discord_token_or_warn(token: str) -> None:
     if not token:
         return  # The earlier "if not DISCORD_BOT_TOKEN" check already handled this.
     try:
-        import urllib.request as _urllib_req
         import urllib.error as _urllib_err
+        import urllib.request as _urllib_req
 
         req = _urllib_req.Request(
             "https://discord.com/api/v10/users/@me",
