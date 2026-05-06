@@ -120,58 +120,9 @@ DATE_FORMAT = "%Y-%m-%d %H:%M:%S,%f"  # Changed from .%f to ,%f
 LOG_FORMAT_FILE = "[%(asctime)s] (%(levelname)s) %(name)s => %(message)s"
 
 
-class CustomFormatter(logging.Formatter):
-    """Custom formatter with colors"""
-
-    COLORS = {
-        "DEBUG": "\033[95m",  # Purple
-        "INFO": "\033[92m",  # Bright Green
-        "WARNING": "\033[93m",  # Yellow
-        "ERROR": "\033[91m",  # Red
-        "CRITICAL": "\033[41m",  # Red background
-    }
-
-    RESET = "\033[0m"
-    TIMESTAMP_COLOR = "\033[36m"  # Cyan for timestamps
-    ARROW_COLOR = "\033[90m"  # Grey for the arrow
-    NAME_COLOR = "\033[94m"  # Blue for logger name
-
-    def format(self, record):
-        # Format the timestamp with milliseconds
-        timestamp = self.formatTime(record, self.datefmt)
-
-        # Color the level name with parentheses
-        level_color = self.COLORS.get(record.levelname, "")
-        colored_level = f"{level_color}({record.levelname}){self.RESET}"
-
-        # Format the full message with colors
-        formatted_message = (
-            f"{self.TIMESTAMP_COLOR}[{timestamp}]{self.RESET} "
-            f"{colored_level} "
-            f"{self.NAME_COLOR}{record.name}{self.RESET} "
-            f"{self.ARROW_COLOR}=>{self.RESET} "
-            f"{record.getMessage()}"
-        )
-
-        if record.exc_info:
-            # If there's an exception, add it to the message
-            exc_text = self.formatException(record.exc_info)
-            formatted_message = f"{formatted_message}\n{exc_text}"
-
-        return formatted_message
-
-    def formatTime(self, record, datefmt=None):
-        """Format time with proper milliseconds"""
-        ct = self.converter(record.created)
-        if datefmt:
-            # Get milliseconds directly from the record's created timestamp
-            msec = int((record.created - int(record.created)) * 1000)
-            s = time.strftime(datefmt, ct)
-            # Replace the milliseconds placeholder with actual milliseconds
-            s = s.replace(",f", f",{msec:03d}")
-            return s
-        return time.strftime(self.default_time_format, ct)
-
+# Reuse the canonical formatter from soupy_logging — the same class
+# was duplicated in web/app.py before this module existed.
+from soupy_logging import ColoredFormatter as CustomFormatter  # noqa: E402, F401
 
 # Create the formatters with the correct datetime format
 console_formatter = CustomFormatter(

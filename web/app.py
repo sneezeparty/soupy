@@ -12,42 +12,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 # ---------------------------------------------------------------------------
-# Colored logging (matches bot's CustomFormatter style)
+# Coloured logging — uses the canonical formatter from soupy_logging so
+# the web app and the bot agree on output format.
 # ---------------------------------------------------------------------------
 
+from soupy_logging import ColoredFormatter
 
-class _WebFormatter(logging.Formatter):
-    COLORS = {
-        "DEBUG": "\033[95m",
-        "INFO": "\033[92m",
-        "WARNING": "\033[93m",
-        "ERROR": "\033[91m",
-        "CRITICAL": "\033[41m",
-    }
-    RESET = "\033[0m"
-    TS = "\033[36m"  # cyan timestamp
-    NAME = "\033[94m"  # blue logger name
-    ARROW = "\033[90m"  # grey arrow
-
-    def format(self, record):
-        ts = self.formatTime(record, self.datefmt)
-        lc = self.COLORS.get(record.levelname, "")
-        return (
-            f"{self.TS}[{ts}]{self.RESET} "
-            f"{lc}({record.levelname}){self.RESET} "
-            f"{self.NAME}{record.name}{self.RESET} "
-            f"{self.ARROW}=>{self.RESET} "
-            f"{record.getMessage()}" + (f"\n{self.formatException(record.exc_info)}" if record.exc_info else "")
-        )
-
-    def formatTime(self, record, datefmt=None):
-        ct = self.converter(record.created)
-        msec = int((record.created - int(record.created)) * 1000)
-        s = _time.strftime("%Y-%m-%d %H:%M:%S", ct)
-        return f"{s},{msec:03d}"
-
-
-_web_fmt = _WebFormatter()
+_web_fmt = ColoredFormatter(datefmt="%Y-%m-%d %H:%M:%S,f")
 
 # Plain-text formatter for file (no ANSI colors)
 _file_fmt = logging.Formatter(
