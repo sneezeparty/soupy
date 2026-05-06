@@ -22,6 +22,7 @@ import re
 from urllib.parse import urlparse
 
 import soupy_prompts
+from soupy_settings import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -57,14 +58,12 @@ _DEFAULT_BLOCKED_DOMAINS = (
 
 
 def _build_blocked_domains() -> set:
-    """Default blocklist + any additions from SEARCH_BLOCKED_DOMAINS env var."""
+    """Default blocklist + any additions from settings.search_blocked_domains."""
     blocked = {d.lower() for d in _DEFAULT_BLOCKED_DOMAINS}
-    extra = os.getenv("SEARCH_BLOCKED_DOMAINS", "").strip()
-    if extra:
-        for d in extra.split(","):
-            d = d.strip().lower().lstrip(".")
-            if d:
-                blocked.add(d)
+    for d in settings.search_blocked_domains:
+        d = d.strip().lower().lstrip(".")
+        if d:
+            blocked.add(d)
     return blocked
 
 
@@ -87,7 +86,7 @@ def _is_blocked_url(url: str, blocked: set) -> bool:
 
 
 # Initialize OpenAI client
-client = OpenAI(base_url=os.getenv("OPENAI_BASE_URL"), api_key=os.getenv("OPENAI_API_KEY", "lm-studio"))
+client = OpenAI(base_url=settings.openai_base_url, api_key=settings.openai_api_key)
 
 
 async def async_chat_completion(*args, **kwargs):
@@ -237,7 +236,7 @@ class SearchCog(commands.Cog):
                 prompt += f"Preview: {result['preview']}\n\n"
 
             response = await async_chat_completion(
-                model=os.getenv("LOCAL_CHAT"),
+                model=settings.local_chat,
                 messages=[
                     {
                         "role": "system",
@@ -245,7 +244,7 @@ class SearchCog(commands.Cog):
                     },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=float(os.getenv("SEARCH_SELECT_TEMPERATURE", 0.3)),
+                temperature=settings.search_select_temperature,
                 max_tokens=50,
             )
 
@@ -337,12 +336,12 @@ class SearchCog(commands.Cog):
             # Generate response with chunked content if needed
             try:
                 response = await async_chat_completion(
-                    model=os.getenv("LOCAL_CHAT"),
+                    model=settings.local_chat,
                     messages=[
                         {"role": "system", "content": system_message},
                         {"role": "user", "content": content_prompt},
                     ],
-                    temperature=float(os.getenv("SEARCH_SUMMARY_TEMPERATURE", 0.7)),
+                    temperature=settings.search_summary_temperature,
                     max_tokens=1500,
                 )
 
@@ -385,12 +384,12 @@ class SearchCog(commands.Cog):
                     )
 
                     response = await async_chat_completion(
-                        model=os.getenv("LOCAL_CHAT"),
+                        model=settings.local_chat,
                         messages=[
                             {"role": "system", "content": system_message},
                             {"role": "user", "content": content_prompt},
                         ],
-                        temperature=float(os.getenv("SEARCH_SUMMARY_TEMPERATURE", 0.7)),
+                        temperature=settings.search_summary_temperature,
                         max_tokens=1000,
                     )
 

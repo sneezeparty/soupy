@@ -183,6 +183,22 @@ class Settings:
     def max_tokens(self) -> int:
         return _env_int("MAX_TOKENS", 4096)
 
+    # ----- Search --------------------------------------------------------
+
+    @cached_property
+    def search_blocked_domains(self) -> List[str]:
+        """Extra hosts to filter from /soupysearch results (additive to the
+        built-in dictionary blocklist)."""
+        return _env_str_list("SEARCH_BLOCKED_DOMAINS")
+
+    @cached_property
+    def search_select_temperature(self) -> float:
+        return _env_float("SEARCH_SELECT_TEMPERATURE", 0.3)
+
+    @cached_property
+    def search_summary_temperature(self) -> float:
+        return _env_float("SEARCH_SUMMARY_TEMPERATURE", 0.7)
+
     @cached_property
     def recent_message_limit(self) -> int:
         return _env_int("RECENT_MESSAGE_LIMIT", 15)
@@ -315,21 +331,37 @@ class Settings:
 
     # ----- Musings -------------------------------------------------------
 
+    # Note: musing inline defaults below intentionally differ from the
+    # values in .env-stable.example. The example ships the *recommended*
+    # values; the inline defaults match what the bot's existing
+    # os.getenv("MUSING_*", "...") calls used so behaviour is preserved
+    # for installs that don't set these explicitly.
+
     @cached_property
     def musing_enabled(self) -> bool:
-        return _env_bool("MUSING_ENABLED", default=True)
+        return _env_bool("MUSING_ENABLED", default=False)
 
     @cached_property
     def musing_chance(self) -> float:
-        return _env_float("MUSING_CHANCE", 0.175)
+        return _env_float("MUSING_CHANCE", 0.10)
 
     @cached_property
     def musing_poll_minutes_min(self) -> int:
-        return _env_int("MUSING_POLL_MINUTES_MIN", 30)
+        return _env_int("MUSING_POLL_MINUTES_MIN", 10)
 
     @cached_property
     def musing_poll_minutes_max(self) -> int:
-        return _env_int("MUSING_POLL_MINUTES_MAX", 60)
+        return _env_int("MUSING_POLL_MINUTES_MAX", 20)
+
+    @cached_property
+    def musing_channel_id(self) -> Optional[int]:
+        raw = _env_str("MUSING_CHANNEL_ID")
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
 
     # ----- URL processing ------------------------------------------------
 

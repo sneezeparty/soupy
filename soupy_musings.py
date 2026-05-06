@@ -25,6 +25,7 @@ from discord.ext import commands, tasks
 from openai import OpenAI
 
 from soupy_database.database import get_db_path
+from soupy_settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -74,15 +75,15 @@ def _save_musing(thought: str, mode: str, guild_id: int) -> None:
 
 
 client = OpenAI(
-    base_url=os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1"),
-    api_key=os.getenv("OPENAI_API_KEY", "lm-studio"),
+    base_url=settings.openai_base_url,
+    api_key=settings.openai_api_key,
 )
 
 
 async def _llm_call(system: str, user: str, temperature: float = 0.7, max_tokens: int = 200) -> str:
     def _sync():
         return client.chat.completions.create(
-            model=os.getenv("LOCAL_CHAT", "local-model"),
+            model=settings.local_chat or "local-model",
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -118,7 +119,10 @@ class MusingsCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self.timezone = pytz.timezone(os.getenv("TIMEZONE", "UTC"))
+        # `or "UTC"` covers the "TIMEZONE unset" case; settings.timezone defaults
+        # to America/Los_Angeles per .env-stable.example, but a brand-new install
+        # could have it blank.
+        self.timezone = pytz.timezone(settings.timezone or "UTC")
         self._loop.start()
 
     def cog_unload(self) -> None:
@@ -129,31 +133,17 @@ class MusingsCog(commands.Cog):
     # ------------------------------------------------------------------
 
     def _is_enabled(self) -> bool:
-        return os.getenv("MUSING_ENABLED", "false").lower() in ("true", "1", "yes")
+        return settings.musing_enabled
 
     def _channel_id(self) -> Optional[int]:
-        raw = os.getenv("MUSING_CHANNEL_ID", "").strip()
-        try:
-            return int(raw) if raw else None
-        except ValueError:
-            return None
+        return settings.musing_channel_id
 
     def _poll_range(self) -> Tuple[int, int]:
-        try:
-            lo = int(os.getenv("MUSING_POLL_MINUTES_MIN", "10"))
-        except ValueError:
-            lo = 10
-        try:
-            hi = int(os.getenv("MUSING_POLL_MINUTES_MAX", "20"))
-        except ValueError:
-            hi = 20
+        lo, hi = settings.musing_poll_minutes_min, settings.musing_poll_minutes_max
         return max(1, lo), max(lo + 1, hi)
 
     def _chance(self) -> float:
-        try:
-            return float(os.getenv("MUSING_CHANCE", "0.10"))
-        except ValueError:
-            return 0.10
+        return settings.musing_chance
 
     # ------------------------------------------------------------------
     # Background loop
@@ -548,12 +538,7 @@ class MusingsCog(commands.Cog):
         description="Force Soupy to think out loud right now",
     )
     async def soupymuse(self, interaction: discord.Interaction) -> None:
-        owner_ids = set()
-        try:
-            raw = os.getenv("OWNER_IDS", "")
-            owner_ids = {int(x.strip()) for x in raw.split(",") if x.strip()}
-        except Exception:
-            pass
+        owner_ids = set(settings.owner_ids)
         if interaction.user.id not in owner_ids:
             await interaction.response.send_message("not for you.", ephemeral=True)
             return
