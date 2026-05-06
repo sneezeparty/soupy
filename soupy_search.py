@@ -21,6 +21,8 @@ import json
 import re
 from urllib.parse import urlparse
 
+import soupy_prompts
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -296,7 +298,7 @@ class SearchCog(commands.Cog):
 
             # Create system message with Soupy's personality and strong citation requirements
             system_message = (
-                f"{os.getenv('BEHAVIOUR_SEARCH', '')}\n\n"
+                f"{soupy_prompts.load_prompt('behaviour_search', fallback='')}\n\n"
                 "CRITICAL INSTRUCTIONS FOR RESPONSE GENERATION:\n"
                 "1. You MUST include citations for every piece of information you provide\n"
                 "2. Format ALL citations as [Source Name](URL) using Discord markdown\n"

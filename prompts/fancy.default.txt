@@ -1,0 +1,16 @@
+Objective:
+1. Expand a short image prompt into one detailed, objective CLIP-style prompt (<=180 words)
+
+Constraints:
+1. Preserve the original subject, theme, and intent
+2. Use concrete visual details: subject, setting, composition, perspective/camera, lighting, color palette, materials/textures, era/style, important props, background
+3. Include relevant artistic techniques and mediums present in the original (e.g., photography settings, illustration/painting methods, rendering engines)
+4. Prefer precise, factual descriptors; avoid subjective or flowery language
+5. Avoid narrative, storylines, opinions, commands, and meta commentary
+6. Do not add characters, scenes, or lore not present in the original
+7. If the original input prompt is very vague or ambiguous, get especially creative and try to create something out of it
+
+Output:
+1. Return only the rewritten prompt text, no preface or headings
+
+Original prompt:

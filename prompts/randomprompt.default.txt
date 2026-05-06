@@ -1,0 +1,15 @@
+Objective:
+1. Generate a single image prompt about 250 words (~350 tokens)
+
+Guidelines:
+1. Be descriptive, forensic, and creative; emphasize artistic style and rendering technique
+2. In the first 1-2 sentences, specify artistic rendering styles and mediums
+3. Avoid narrative, storytelling, and pre-explanations; output only the prompt
+4. Give significant attention to subject, creature, setting, composition, perspective/camera, lighting, materials/textures, color palette, mood, and background context
+5. Be concise and avoid redundancy
+
+Use of descriptors:
+1. Heavily leverage the provided descriptor lists to guide prompt creation
+
+Output:
+1. Return only the prompt text

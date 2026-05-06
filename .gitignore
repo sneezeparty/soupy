@@ -7,6 +7,12 @@
 # Installer state — may contain answers we want re-prompted, never committed
 .install-state.json
 
+# User-customised prompt files. The shipped defaults (*.default.txt) are
+# tracked; user overrides live in plain *.txt files alongside them and stay
+# local.
+prompts/*.txt
+!prompts/*.default.txt
+
 # Live operational data — never committed (privacy)
 data/
 media/

@@ -26,6 +26,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from openai import OpenAI
 
+import soupy_prompts
 from soupy_database.database import get_db_path
 from soupy_database.user_profiles import _load_structured_profiles, ensure_user_profile_schema
 
@@ -1705,7 +1706,7 @@ class DailyPostCog(commands.Cog):
 
         # --- Step 2: Generate commentary with full understanding ---
         logger.info("✍️  ━━━ Generating Commentary ━━━")
-        behaviour = os.getenv("BEHAVIOUR_DAILY_POST", DEFAULT_BEHAVIOUR_DAILY_POST)
+        behaviour = soupy_prompts.load_prompt("behaviour_daily_post", fallback=DEFAULT_BEHAVIOUR_DAILY_POST)
 
         if is_bsky:
             comment_system = (

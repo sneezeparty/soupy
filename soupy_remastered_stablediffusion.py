@@ -65,6 +65,7 @@ from logging.handlers import RotatingFileHandler
 import html2text
 import trafilatura
 from PIL import Image, ImageDraw
+import soupy_prompts
 import soupy_search
 import soupy_imagesearch
 import aiohttp
@@ -98,7 +99,7 @@ colorama.init(autoreset=True)
 
 # URL processing cache and constants
 url_cache: Dict[str, Tuple[Optional[str], float]] = {}
-URL_CACHE_TTL = 3600  # 1 hour in seconds
+URL_CACHE_TTL = int(os.getenv("URL_CACHE_TTL_SECONDS", "3600"))  # default 1 hour
 
 # URL processing environment variables:
 # MAX_URLS_PER_MESSAGE - Maximum number of URLs to process per message (default: 3)
@@ -189,8 +190,8 @@ log_filename = "soupy.log"
 log_filepath = log_dir / log_filename
 
 # Constants for log rotation
-MAX_LOG_SIZE = 5 * 1024 * 1024  # 5 MB in bytes
-BACKUP_COUNT = 5  # Keep up to 5 backup files
+MAX_LOG_SIZE = int(os.getenv("SOUPY_LOG_MAX_BYTES", str(5 * 1024 * 1024)))
+BACKUP_COUNT = int(os.getenv("SOUPY_LOG_BACKUP_COUNT", "5"))
 
 # ---------------------------------------------------------------------------
 # Logging policy
@@ -265,7 +266,7 @@ OWNER_IDS = [int(id.strip()) for id in os.getenv("OWNER_IDS", "").split(",") if 
 if not OWNER_IDS:
     logger.warning("No OWNER_IDS specified. Reload functionality will be disabled.")
 
-RANDOMPROMPT = os.getenv("RANDOMPROMPT", "")
+RANDOMPROMPT = soupy_prompts.load_prompt("randomprompt", fallback="")
 if not RANDOMPROMPT:
     logger.warning("No RANDOMPROMPT prompt found. Random functionality will be disabled.")
 
@@ -289,7 +290,7 @@ ARTISTIC_RENDERING_STYLES = load_text_file_from_env("ARTISTIC_RENDERING_STYLES")
 SD_KEYWORDS_LIST = load_text_file_from_env("SD_KEYWORDS")
 
 
-chatgpt_behaviour = os.getenv("BEHAVIOUR", "You're a stupid bot.")
+chatgpt_behaviour = soupy_prompts.load_prompt("behaviour", fallback="You're a stupid bot.")
 max_tokens_default = int(os.getenv("MAX_TOKENS", "800"))
 
 # Stable Diffusion-specific environment vars
@@ -369,7 +370,7 @@ async def get_guild_behaviour(guild_id: str) -> str:
     """Get the behaviour prompt. Single behaviour for all guilds.
     Reads the BEHAVIOUR env var from .env-stable.
     """
-    return os.getenv("BEHAVIOUR", "You're a stupid bot.")
+    return soupy_prompts.load_prompt("behaviour", fallback="You're a stupid bot.")
 
 
 def format_error_message(error):
@@ -1977,7 +1978,7 @@ async def img2img_cmd(
         form = aiohttp.FormData()
         form.add_field("image", img_bytes, filename="source.jpg", content_type="image/jpeg")
         form.add_field("prompt", enhanced_prompt)
-        form.add_field("negative_prompt", os.getenv("SD_NEGATIVE_PROMPT", "") or "")
+        form.add_field("negative_prompt", soupy_prompts.load_prompt("sd_negative_prompt", fallback=""))
         form.add_field("steps", str(steps))
         form.add_field("guidance_scale", str(guidance))
         form.add_field("width", str(src_w))
@@ -1999,7 +2000,7 @@ async def img2img_cmd(
             form2 = aiohttp.FormData()
             form2.add_field("image", img_bytes, filename="source.jpg", content_type="image/jpeg")
             form2.add_field("prompt", enhanced_prompt)
-            form2.add_field("negative_prompt", os.getenv("SD_NEGATIVE_PROMPT", "") or "")
+            form2.add_field("negative_prompt", soupy_prompts.load_prompt("sd_negative_prompt", fallback=""))
             form2.add_field("steps", str(steps))
             form2.add_field("guidance_scale", str(guidance))
             form2.add_field("width", str(src_w))
@@ -2069,7 +2070,7 @@ async def inpaint_cmd(
         form.add_field("image", image_bytes, filename="base.jpg", content_type="image/jpeg")
         form.add_field("mask", mask_bytes, filename="mask.png", content_type="image/png")
         form.add_field("prompt", prompt)
-        form.add_field("negative_prompt", os.getenv("SD_NEGATIVE_PROMPT", "") or "")
+        form.add_field("negative_prompt", soupy_prompts.load_prompt("sd_negative_prompt", fallback=""))
         form.add_field("steps", str(steps))
         form.add_field("guidance_scale", str(guidance))
         # Use source image dimensions
@@ -2098,7 +2099,7 @@ async def inpaint_cmd(
             form2.add_field("image", image_bytes, filename="base.jpg", content_type="image/jpeg")
             form2.add_field("mask", mask_bytes, filename="mask.png", content_type="image/png")
             form2.add_field("prompt", prompt)
-            form2.add_field("negative_prompt", os.getenv("SD_NEGATIVE_PROMPT", "") or "")
+            form2.add_field("negative_prompt", soupy_prompts.load_prompt("sd_negative_prompt", fallback=""))
             form2.add_field("steps", str(steps))
             form2.add_field("guidance_scale", str(guidance))
             form2.add_field("width", str(src_w))
@@ -2837,7 +2838,9 @@ async def eight_ball_command(interaction: discord.Interaction, question: str):
 async def nine_ball_command(interaction: discord.Interaction, question: str):
     logger.info(f"Command '9ball' invoked by {interaction.user} with question: '{question}'")
 
-    nineball_behaviour = os.getenv("9BALL", "You are a mystical 9-ball that provides enigmatic answers.")
+    nineball_behaviour = soupy_prompts.load_prompt(
+        "nineball", fallback="You are a mystical 9-ball that provides enigmatic answers."
+    )
 
     # Compose system and user prompts
     system_prompt = {"role": "system", "content": nineball_behaviour}
@@ -3651,7 +3654,7 @@ async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail
 
                 regenerate_payload = {
                     "prompt": prompt,
-                    "negative_prompt": os.getenv("SD_NEGATIVE_PROMPT", "") or "",
+                    "negative_prompt": soupy_prompts.load_prompt("sd_negative_prompt", fallback=""),
                     "steps": str(int(os.getenv("SD_STEPS", 20))),  # Deprecated in new flow; kept for compatibility
                     "guidance_scale": str(float(os.getenv("SD_GUIDANCE", 7.5))),
                     "width": str(thumbnail_data["width"]),
@@ -3967,7 +3970,7 @@ async def handle_outpaint(
                     form.add_field("image", padded_raw, filename="padded.png", content_type="image/png")
                     form.add_field("mask", mask_raw, filename="mask.png", content_type="image/png")
                     form.add_field("prompt", enhanced_prompt)
-                    form.add_field("negative_prompt", os.getenv("SD_NEGATIVE_PROMPT", "") or "")
+                    form.add_field("negative_prompt", soupy_prompts.load_prompt("sd_negative_prompt", fallback=""))
                     # Use actual function parameters instead of env vars
                     form.add_field("steps", str(actual_steps))
                     form.add_field("guidance_scale", str(actual_guidance))
@@ -3998,7 +4001,7 @@ async def handle_outpaint(
                     form.add_field("image", padded_raw, filename="padded.png", content_type="image/png")
                     form.add_field("mask", mask_raw, filename="mask.png", content_type="image/png")
                     form.add_field("prompt", enhanced_prompt)
-                    form.add_field("negative_prompt", os.getenv("SD_NEGATIVE_PROMPT", "") or "")
+                    form.add_field("negative_prompt", soupy_prompts.load_prompt("sd_negative_prompt", fallback=""))
                     form.add_field("steps", str(actual_steps))
                     form.add_field("guidance_scale", str(actual_guidance))
                     form.add_field("width", str(new_width))
@@ -4148,7 +4151,7 @@ async def handle_2x2_grid(interaction, prompt, width, height, seed, queue_size):
         # Use 10 steps for the candidate images
         num_steps = 10
         guidance = float(os.getenv("SD_GUIDANCE", 7.5))
-        negative_prompt = os.getenv("SD_NEGATIVE_PROMPT", "") or ""
+        negative_prompt = soupy_prompts.load_prompt("sd_negative_prompt", fallback="")
 
         async with interaction.channel.typing():
             connector = aiohttp.TCPConnector(
@@ -4259,7 +4262,7 @@ async def handle_2x2_grid(interaction, prompt, width, height, seed, queue_size):
             await interaction.followup.send(f"❌ Error generating 2x2 grid: {e}", ephemeral=True)
 
 
-fancy_instructions = os.getenv("FANCY", "")
+fancy_instructions = soupy_prompts.load_prompt("fancy", fallback="")
 
 
 async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
@@ -4272,7 +4275,7 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             await interaction.response.defer()  # Remove thinking=True to make it visible to channel
 
         # Get the fancy instructions
-        fancy_instructions = os.getenv("FANCY", "")
+        fancy_instructions = soupy_prompts.load_prompt("fancy", fallback="")
         logger.debug(f"📜 Retrieved 'FANCY' instructions: {fancy_instructions}")
 
         # Combine instructions with prompt
@@ -4793,7 +4796,7 @@ async def generate_sd_image(
         sd_server_url = SD_SERVER_URL.rstrip("/")  # Ensure no trailing slash
         num_steps = int(os.getenv("SD_STEPS", 20))
         guidance = float(os.getenv("SD_GUIDANCE", 7.5))
-        negative_prompt = os.getenv("SD_NEGATIVE_PROMPT", "") or ""
+        negative_prompt = soupy_prompts.load_prompt("sd_negative_prompt", fallback="")
         payload = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,

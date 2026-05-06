@@ -1,6 +1,11 @@
 # Pre-commit hooks for Soupy.
 # Activate locally with `pre-commit install` after cloning.
 # Runs automatically on `git commit`; bypass only if you understand why with `git commit --no-verify`.
+#
+# Locally we keep this small — gitleaks (so secrets never escape) plus
+# basic safety hooks. The strict lint/format gate runs in CI
+# (.github/workflows/ci.yml) where it can see the full repo at once and
+# isn't fighting with the developer's in-flight hunks.
 
 repos:
   - repo: https://github.com/gitleaks/gitleaks
@@ -12,26 +17,8 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
-      - id: trailing-whitespace
-        exclude: '\.md$|web/static/dashboard/dashboard-app\.js$'
-      - id: end-of-file-fixer
-        exclude: 'web/static/dashboard/dashboard-app\.js$'
-      - id: check-yaml
-      - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=500"]
       - id: detect-private-key
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
-    hooks:
-      - id: ruff
-        args: [--fix]
-
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
-    hooks:
-      - id: black
-        # Until the codebase is fully formatted, run black in check-only mode
-        # so existing files aren't reformatted on every touched-line commit.
-        args: [--check]
+      - id: check-yaml
+      - id: check-toml

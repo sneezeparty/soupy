@@ -1680,7 +1680,8 @@ class BlueskyEngageCog(commands.Cog):
     async def _like_good_comments(self, thread: Dict, max_likes: int = 3) -> int:
         """Like a few interesting comments in the thread."""
         _reset_daily_if_needed(self.history)
-        likes_left = 10 - len(self.history.get("likes_today", []))
+        max_per_day = int(os.getenv("BLUESKY_MAX_LIKES_PER_DAY", "10"))
+        likes_left = max_per_day - len(self.history.get("likes_today", []))
         if likes_left <= 0:
             logger.info("🦋 Daily like limit reached, skipping")
             return 0
@@ -1729,9 +1730,10 @@ class BlueskyEngageCog(commands.Cog):
     async def _maybe_follow(self, post: Dict) -> bool:
         """Consider following the post author if they're interesting."""
         _reset_daily_if_needed(self.history)
+        max_per_day = int(os.getenv("BLUESKY_MAX_FOLLOWS_PER_DAY", "2"))
         follows_today = self.history.get("follows_today", [])
-        if len(follows_today) >= 2:
-            logger.info("🦋 Already followed 2 people today, skipping")
+        if len(follows_today) >= max_per_day:
+            logger.info("🦋 Already followed %d people today, skipping", max_per_day)
             return False
 
         author = post.get("author", {})
@@ -2211,7 +2213,8 @@ class BlueskyEngageCog(commands.Cog):
             if age is None:
                 logger.info("🦋   [%d] ⏭ No date found, rejecting: %s", idx, title[:60])
                 continue
-            if age > 14:
+            freshness_days = int(os.getenv("BLUESKY_ARTICLE_FRESHNESS_DAYS", "14"))
+            if age > freshness_days:
                 logger.info("🦋   [%d] ⏭ Too old (~%d days): %s", idx, age, title[:60])
                 continue
             fetched.append({"url": a_url, "title": title, "snippet": a_snippet, "content": content})
@@ -2597,10 +2600,11 @@ class BlueskyEngageCog(commands.Cog):
         # Sort by time
         events.sort(key=lambda e: e[0])
 
-        # Enforce minimum 45-minute gap
+        # Enforce minimum gap between actions (env-tunable; default 45 min).
+        min_gap_seconds = int(os.getenv("BLUESKY_MIN_GAP_MINUTES", "45")) * 60
         spaced: List[Tuple[datetime, str]] = []
         for t, action in events:
-            if not spaced or (t - spaced[-1][0]).total_seconds() >= 2700:
+            if not spaced or (t - spaced[-1][0]).total_seconds() >= min_gap_seconds:
                 spaced.append((t, action))
 
         # Drop past times
