@@ -1164,7 +1164,13 @@ def summarize_messages_for_llm_log(messages: list, preview_chars: int = 120) -> 
         label = "rag_context" if is_rag else role
         prev = content.replace("\n", " ").strip()
         if len(prev) > preview_chars:
-            prev = prev[:preview_chars] + "…"
+            # Show head and tail so the trigger message at the END of the
+            # merged user blob is also visible — the RESPOND TO marker
+            # block tucked in just before the trigger is the bit you want
+            # to confirm when debugging "why did Soupy answer something
+            # weird" — it lives at the tail of this content.
+            tail_chars = max(80, preview_chars // 2)
+            prev = prev[:preview_chars] + " … " + prev[-tail_chars:]
         lines.append(f"  [{i}] {label}: {len(content)} chars | {prev}")
     return "\n".join(lines)
 
