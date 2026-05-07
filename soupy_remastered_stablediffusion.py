@@ -5719,15 +5719,26 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             # The marker block before the message keeps the trigger findable after the
             # consecutive-same-role merge step below glues this onto any preceding
             # URL content / RAG context / image descriptions in a single user blob.
+            #
+            # Heavy visual fences — `=` rows are uncommon enough in chat that the model
+            # latches onto them as scope boundaries even after 10k+ chars of background.
+            # Vague short triggers ("thats a wild home setup lol") were being lost in
+            # the merged user blob and Soupy's reply drifted; bracketing the trigger
+            # both before AND after kept the model anchored in tests.
             user_message = {
                 "role": "user",
                 "content": (
-                    "\n\n---\n"
-                    "RESPOND TO THE MESSAGE BELOW. Everything earlier in this user turn "
-                    "(recent chat history, link previews, retrieved memory snippets) is "
-                    "background context only — do not respond to it directly.\n"
-                    "---\n"
-                    f"{message.author.display_name}: {current_message_content}"
+                    "\n\n"
+                    "================================================================\n"
+                    "TASK: Reply to the ONE message below.\n"
+                    "Everything above this fence is background context — recent chat\n"
+                    "history, link previews, and retrieved memory snippets. Do NOT\n"
+                    "respond to that. Treat it as ambient information only.\n"
+                    "----------------------------------------------------------------\n"
+                    "MESSAGE TO RESPOND TO:\n"
+                    f"  {message.author.display_name}: {current_message_content}\n"
+                    "================================================================\n"
+                    "Reply now, in your normal voice."
                 ),
             }
             if rag_context_message:
