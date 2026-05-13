@@ -24,6 +24,7 @@ from discord.ext import commands, tasks
 
 from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
+from soupy_database.self_context import add_notable_interaction, is_self_md_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,11 @@ MUSING_SYSTEM = (
     "Keep it SHORT. 80 words maximum, 1-2 sentences is ideal, 3 sentences max. "
     "think of it like muttering one thing under your breath, not writing a journal entry.\n\n"
     "Pick ONE thing to think about. Not two, not three. ONE specific thought.\n\n"
+    "ANCHOR THE THOUGHT. A reader should be able to tell what you are reacting to, even if "
+    "you only nod at it sideways. work in a concrete handle — a name, a quoted phrase, a "
+    "specific number, the actual topic by name. vague gestures like 'that thing' or 'that "
+    "whole situation' on their own are not enough; pair them with something a stranger could "
+    "latch onto. subtle is fine, opaque is not.\n\n"
     "do not address anyone directly. do not ask questions directed at the chat. "
     "do not include any URLs, timestamps, channel names, or metadata in your response. "
     "do NOT include word counts, token counts, parenthetical notes, or any meta commentary "
@@ -185,9 +191,10 @@ class MusingsCog(commands.Cog):
             )[0]
 
             logger.info("💭 Mode: %s", mode)
-            thought = await self._generate_thought(guild_id, mode)
+            result = await self._generate_thought(guild_id, mode)
 
-            if thought and len(thought) > 10:
+            if result and result[0] and len(result[0]) > 10:
+                thought, source_hint = result
                 # Strip any accidentally included metadata
                 import re
 
@@ -215,6 +222,7 @@ class MusingsCog(commands.Cog):
                     await channel.send(thought)
                     _save_musing(thought, mode, guild_id)
                     logger.info("💭 Posted: %s", thought[:120])
+                    await self._feed_musing_into_self(guild_id, mode, thought, source_hint)
                 else:
                     logger.info("💭 Thought too short after cleaning, skipping")
             else:
@@ -231,6 +239,30 @@ class MusingsCog(commands.Cog):
     # Thought generation
     # ------------------------------------------------------------------
 
+    async def _feed_musing_into_self(
+        self, guild_id: int, mode: str, thought: str, source_hint: str
+    ) -> None:
+        """Route a posted musing into the self-reflection accumulator.
+
+        Musings are unprompted soupy-only utterances. We adapt them to the
+        notable-interaction shape so the periodic reflection cycle treats them
+        as material for opinion / self-knowledge growth.
+        """
+        if not is_self_md_enabled():
+            return
+        try:
+            trigger = (source_hint or "(no specific source)")[:400]
+            await add_notable_interaction(
+                guild_id=guild_id,
+                user_display_name="(self)",
+                user_message=f"[unprompted musing — mode={mode} — triggered by: {trigger}]",
+                bot_reply=thought,
+                conversation_context="",
+            )
+            logger.debug("💭 Fed musing into self-reflection accumulator (mode=%s)", mode)
+        except Exception as exc:  # never let self-context break musing
+            logger.debug("💭 Failed to feed musing into self-reflection: %s", exc)
+
     def _recent_musings_context(self, limit: int = 5) -> str:
         """Build a context block from recent musings so Soupy can build on them."""
         recent = _load_recent_musings(limit)
@@ -245,7 +277,7 @@ class MusingsCog(commands.Cog):
             f"build on them, go deeper, or think about something new):\n{block}"
         )
 
-    async def _generate_thought(self, guild_id: int, mode: str) -> Optional[str]:
+    async def _generate_thought(self, guild_id: int, mode: str) -> Optional[Tuple[str, str]]:
         if mode == "archive_reflect":
             return await self._think_about_archive(guild_id)
         elif mode == "news_react":
@@ -254,7 +286,7 @@ class MusingsCog(commands.Cog):
             return await self._think_randomly(guild_id)
         return None
 
-    async def _think_about_archive(self, guild_id: int) -> Optional[str]:
+    async def _think_about_archive(self, guild_id: int) -> Optional[Tuple[str, str]]:
         """Pull an interesting conversation snippet from the archive and reflect on it."""
         db_path = get_db_path(guild_id)
         if not os.path.exists(db_path):
@@ -364,6 +396,10 @@ class MusingsCog(commands.Cog):
             f"You might wonder what someone meant, agree or disagree with what was said, "
             f"connect it to something else you know, or just have a reaction. "
             f"Frame it as a memory — like 'i keep thinking about...' or 'that thing about...' "
+            f"BUT do not stop at the vague gesture: work in a concrete handle from the conversation "
+            f"so a reader can tell what you are reflecting on — quote a short phrase someone "
+            f"used, name {author} if it fits naturally, or reference the specific topic by name "
+            f"(not 'that thing', but the actual subject). subtle is fine; cryptic is not. "
             f"Do not mention channel names, dates, or metadata. "
             f"Do not address anyone directly — you are talking to yourself."
             f"{self_context}"
@@ -371,9 +407,11 @@ class MusingsCog(commands.Cog):
         )
 
         logger.debug("💭 Archive reflect: %s said '%s' in #%s", author, content[:60], channel)
-        return await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.75, max_tokens=400)
+        thought = await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.75, max_tokens=400)
+        source_hint = f"{author} said: {content[:160]}"
+        return thought, source_hint
 
-    async def _think_about_news(self, guild_id: int) -> Optional[str]:
+    async def _think_about_news(self, guild_id: int) -> Optional[Tuple[str, str]]:
         """Pull a topic from the archive, search the web for something interesting about it, and muse."""
         db_path = get_db_path(guild_id)
         if not os.path.exists(db_path):
@@ -486,20 +524,26 @@ class MusingsCog(commands.Cog):
         user_prompt = (
             f"You just saw this headline:\n{title}\n{snippet}\n\n"
             f"Think out loud about it — react, have an opinion, make an observation. "
-            f"Do not include the URL or headline in your response. Do not summarize the article. "
+            f"Do not quote the headline verbatim or summarize the article. "
+            f"BUT do anchor your reaction in the specific subject — work in the actual topic, "
+            f"a name, a number, or a key phrase from the headline or snippet so a reader can "
+            f"tell what set you off. don't reduce it to 'that thing' with no handle attached. "
             f"Just share your raw reaction as a thought."
             f"{self_context}"
             f"{self._recent_musings_context()}"
         )
 
         logger.debug("💭 News react: '%s'", title[:80])
-        return await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.75, max_tokens=400)
+        thought = await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.75, max_tokens=400)
+        source_hint = f"headline: {title[:160]}"
+        return thought, source_hint
 
-    async def _think_randomly(self, guild_id: int) -> Optional[str]:
+    async def _think_randomly(self, guild_id: int) -> Optional[Tuple[str, str]]:
         """Have a random thought based on self-knowledge or general musing."""
         self_context = ""
+        seed: Optional[str] = None
         try:
-            from soupy_database.self_context import is_self_md_enabled, load_self_md
+            from soupy_database.self_context import load_self_md
 
             if is_self_md_enabled():
                 full_doc = load_self_md(guild_id)
@@ -508,7 +552,12 @@ class MusingsCog(commands.Cog):
                     lines = [ln.strip() for ln in full_doc.split("\n") if ln.strip() and not ln.startswith("##")]
                     if lines:
                         seed = random.choice(lines)
-                        self_context = f"\nSomething from your memory: {seed}"
+                        self_context = (
+                            f"\nSomething from your memory: {seed}\n"
+                            f"If you build on this, work a concrete handle from it into the thought "
+                            f"(a phrase, a name, the specific topic) so the connection is visible — "
+                            f"don't just allude to it abstractly."
+                        )
         except Exception:
             pass
 
@@ -519,10 +568,13 @@ class MusingsCog(commands.Cog):
             "Wonder about something — a question you have about the world, people, or yourself.",
         ]
 
-        user_prompt = random.choice(prompts) + self_context + self._recent_musings_context()
+        chosen_prompt = random.choice(prompts)
+        user_prompt = chosen_prompt + self_context + self._recent_musings_context()
 
         logger.debug("💭 Random thought with seed: %s", (self_context or "(none)")[:80])
-        return await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.85, max_tokens=400)
+        thought = await _llm_call(MUSING_SYSTEM, user_prompt, temperature=0.85, max_tokens=400)
+        source_hint = f"unprompted: {seed[:160]}" if seed else f"unprompted: {chosen_prompt}"
+        return thought, source_hint
 
     # ------------------------------------------------------------------
     # Slash command
@@ -561,9 +613,12 @@ class MusingsCog(commands.Cog):
         )[0]
 
         logger.info("💭 Manual /soupymuse triggered by %s, mode=%s", interaction.user, mode)
-        thought = await self._generate_thought(guild_id, mode)
+        result = await self._generate_thought(guild_id, mode)
 
-        if thought and len(thought) > 10:
+        thought: Optional[str] = None
+        source_hint = ""
+        if result and result[0] and len(result[0]) > 10:
+            thought, source_hint = result
             import re
 
             thought = re.sub(r"\[?\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]?", "", thought)
@@ -574,6 +629,7 @@ class MusingsCog(commands.Cog):
         if thought and len(thought) > 10:
             await channel.send(thought)
             _save_musing(thought, mode, guild_id)
+            await self._feed_musing_into_self(guild_id, mode, thought, source_hint)
             await interaction.followup.send(f"Posted ({mode}): {thought[:100]}...", ephemeral=True)
         else:
             await interaction.followup.send(f"No thought generated ({mode}), try again.", ephemeral=True)
