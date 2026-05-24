@@ -29,6 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 - Musings were repeating the same topic 3–4 times in a row. Root cause was the LLM "don't repeat these topics" hint being soft text the model ignored, combined with a wide-window random source pick that kept re-surfacing the same hot conversation. Hard-filter at the candidate-selection stage (keywords + embeddings) replaces the soft prompt hint.
 
+### Docs
+- **Tier 1 commenting pass (bot core + cogs).** Added a comprehensive architectural docstring at the top of `soupy_remastered_stablediffusion.py` covering the three-tier architecture, cross-module imports, key invariants, and gotchas. Added eight sub-section banners within the 1500-line "Helper Functions" chapter and four within the SD chapter to make the 6K-line main file navigable. Added `# WHY:` comments at the `intents` block (privileged intent requirement) and `user_stats_lock` (JSON I/O serialization). Expanded the one-line module docstrings on `soupy/cogs/musings.py`, `dailypost.py`, `bluesky.py`, `search.py`, and `imagesearch.py` to capture cross-cog imports (the bluesky ↔ dailypost cycle) and per-cog gotchas. Added a `# WHY:` to `soupy/triggers.py` explaining the per-call env read (intentional, for runtime keyword changes).
+
 ## [1.1.1] - 2026-04-30
 
 ### Added

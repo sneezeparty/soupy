@@ -3,6 +3,35 @@ Daily Post cog for Soupy Bot.
 
 Spontaneously posts one interesting news article per day to configured channels,
 informed by channel audience analysis via user profiles and recent messages.
+
+Flow:
+
+1. For each configured channel, build an "audience brief" from the channel's
+   recent messages + top posters' structured profiles.
+2. Run a few candidate news queries through DuckDuckGo, pick the article most
+   likely to land with that audience.
+3. Fetch and summarize the article. Post to Discord; optionally cross-post the
+   URL to Bluesky via ``soupy.cogs.bluesky._post_url``.
+
+Cross-module:
+
+* Imports ``ensure_user_profile_schema`` and ``_load_structured_profiles`` from
+  ``soupy_database.user_profiles`` to read top-poster interests.
+* Imports ``_post_url`` and ``_fetch_og_image`` from ``soupy.cogs.bluesky`` for
+  the optional cross-post step.
+* ``_extract_date_from_html`` is *exported* (imported by ``soupy.cogs.bluesky``
+  for article freshness checks). Keep the signature stable — see comment there.
+
+Gotchas:
+
+* ``_read_env_value`` reads ``.env-stable`` on *every* call (not cached) so
+  dashboard toggles like ``DAILY_POST_ENABLED`` take effect without a bot
+  restart. Falls back to ``os.getenv`` if the file read fails.
+* Per-channel post history lives in ``data/daily_post_history.json`` so the
+  bot doesn't post the same article twice. Capped at
+  ``MAX_HISTORY_PER_CHANNEL`` entries.
+* The daily schedule is randomized per channel; ``data/daily_post_schedule.json``
+  persists the next-fire time so a restart doesn't double-fire.
 """
 
 from __future__ import annotations

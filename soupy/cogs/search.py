@@ -1,6 +1,26 @@
 """
-Search functionality for Soupy Bot
-Provides DuckDuckGo search capabilities with rate limiting and result processing
+Search cog — ``/soupysearch``.
+
+Runs a DuckDuckGo text query, drops dictionary/definition sites, asks the LLM
+to pick the 5 best results, fetches each article via trafilatura (with a
+BeautifulSoup fallback), and returns a Soupy-voiced summary with inline
+citations.
+
+Cross-module:
+
+* Reuses the LM Studio client via ``soupy.settings.openai_client``.
+* Loads the search persona via ``soupy.prompts.load_prompt("behaviour_search")``.
+
+Gotchas:
+
+* Dictionary/glossary sites are hard-filtered (see ``_DEFAULT_BLOCKED_DOMAINS``).
+  They pollute summaries; ``SEARCH_BLOCKED_DOMAINS`` extends the list.
+* Per-user rate limit is 10 searches/min, tracked in-memory in the cog (lost
+  on bot restart, which is fine — it's a soft anti-abuse measure, not security).
+* DuckDuckGo backend rotates (api → html → lite → default) with a 12s timeout
+  per attempt, because the public backends vary in reliability.
+* Context-length overflow falls back to a 300-char excerpt per article rather
+  than failing outright — small local models hit this often.
 """
 
 import asyncio

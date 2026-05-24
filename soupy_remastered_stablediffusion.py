@@ -1,5 +1,60 @@
 """
-Soupy - A Discord bot that does chat and images.
+Soupy — main Discord bot entrypoint.
+
+Owns chat handling, image generation (``SDQueue``), event handlers, and the
+core slash commands. The five feature cogs (search, imagesearch, dailypost,
+musings, bluesky) are loaded at ``on_ready`` via :func:`load_extensions` —
+editing a cog requires a bot restart, not a web-panel restart.
+
+Three-tier architecture (see ``CLAUDE.md`` for the full picture):
+
+1. **This file** — Discord-facing process: chat path, image pipeline,
+   slash commands, autonomous loops, event handlers.
+2. **Web panel** (``web/``) — FastAPI app that manages *this process* as a
+   subprocess via PTY. Env edits in the panel rewrite ``.env-stable``,
+   which is re-parsed on bot restart.
+3. **External services** — LM Studio (chat + embeddings, OpenAI-compatible),
+   Stable Diffusion FastAPI backend, DuckDuckGo, Bluesky AT Protocol.
+
+Cross-module imports worth knowing:
+
+* ``soupy_database.rag`` — RAG retrieval (``build_rag_retrieval_query``,
+  ``fetch_rag_context_for_query``, gate-word stripping).
+* ``soupy_database.self_context`` — self-knowledge document; ``add_notable_interaction``
+  is called from chat path to seed the next reflection cycle.
+* ``soupy_database.runtime_flags`` — ``is_rag_enabled``, command-disable
+  toggles. mtime-cached; updates from the web panel are picked up without
+  a bot restart.
+* ``soupy.triggers`` — keyword-trigger predicate (extracted from this file
+  for testability).
+* ``soupy.settings`` / ``soupy.prompts`` — typed env access + prompt loader
+  with legacy-env fallback chain.
+
+Key invariants:
+
+* The bot fails fast if ``DISCORD_TOKEN``, ``SD_SERVER_URL``, or
+  ``REMOVE_BG_API_URL`` are missing — see the top of the env-loading section.
+* All Discord I/O is async. Anything that blocks the event loop (PIL,
+  numpy, sync HTTP) goes through ``asyncio.to_thread`` or runs in a
+  worker (see ``async_chat_completion``).
+* Fire-and-forget tasks must go through :func:`_spawn_task` so the
+  asyncio GC doesn't drop them mid-await (see comment at ``_background_tasks``).
+* User-stats I/O is serialized by ``user_stats_lock``; never touch
+  ``user_stats.json`` directly.
+
+Gotchas:
+
+* Slash commands sync once at ``on_ready``. Guild-scoped sync (when
+  ``GUILD_ID`` is set) is near-instant; global sync can take up to an hour.
+  Never sync both — that duplicates commands.
+* ``intents.message_content`` is required for the bot to read message
+  contents at all. It must also be toggled in the Discord Developer Portal.
+* Multi-guild: each Discord server gets its own SQLite database and
+  self-knowledge document. Code that touches storage must thread a
+  ``guild_id`` through.
+
+---
+
 Repository: https://github.com/sneezeparty/soupy
 Licensed under the MIT License.
 
@@ -555,6 +610,12 @@ class SDQueue:
 
 
 # Then your bot initialization can use the SoupyBot class
+# WHY: `message_content` is a privileged intent. Without it Discord delivers
+# `message.content` as an empty string in every on_message, silently breaking
+# every chat trigger and the keyword listener. It must also be toggled ON in
+# the Discord Developer Portal — local True is not enough.
+# WHY: `members` is required so member-join / role lookups resolve without an
+# extra REST round-trip; the cooldown exempt-roles check depends on it.
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
@@ -589,6 +650,11 @@ Helper Functions
 """
 
 USER_STATS_FILE = Path("user_stats.json")
+# WHY: every read/write to user_stats.json goes through this lock. Concurrent
+# slash commands all increment user counters, and the file is a full rewrite
+# (no partial updates), so two unsynchronised writers race and one wins,
+# losing the other's increment. Always use `read_user_stats` / `write_user_stats`
+# — never touch the file directly.
 user_stats_lock = asyncio.Lock()
 
 
@@ -628,6 +694,11 @@ async def write_user_stats(data):
             USER_STATS_FILE.write_text(json.dumps(data, indent=4))
         except Exception as e:
             logger.error(f"Error writing to 'user_stats.json': {e}")
+
+
+# ---------------------------------------------------------------------------
+# Per-user cooldown decorator
+# ---------------------------------------------------------------------------
 
 
 def universal_cooldown_check():
@@ -687,6 +758,11 @@ def universal_cooldown_check():
         return wrapper
 
     return decorator
+
+
+# ---------------------------------------------------------------------------
+# Shutdown & signal handling
+# ---------------------------------------------------------------------------
 
 
 # Update the shutdown function
@@ -761,6 +837,15 @@ def handle_signal(signum, frame):
     except Exception as e:
         logger.error(f"❌ Error in signal handler: {e}")
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Random image prompt generation
+#
+# `/sd` with no prompt assembles a prompt from soupy_themes.txt + soupy_characters.txt
+# + soupy_styles.txt + sd_keywords.txt, then runs it through the LLM with the
+# RANDOMPROMPT system message. ~10^16 keyword combinations possible.
+# ---------------------------------------------------------------------------
 
 
 def get_random_terms():
@@ -926,6 +1011,11 @@ if not USER_STATS_FILE.exists():
     logger.info("Created 'user_stats.json' for tracking user statistics.")
 
 
+# ---------------------------------------------------------------------------
+# User stat increment + uptime formatting
+# ---------------------------------------------------------------------------
+
+
 async def increment_user_stat(user_id: int, stat: str, server_id: Optional[int] = None):
     """
     Increments a specific statistic for a user, optionally for a specific server.
@@ -1045,6 +1135,11 @@ timer_state = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Service health checks + offline notifications
+# ---------------------------------------------------------------------------
+
+
 # Verify chat functionality by performing test completion
 async def check_chat_functions():
     global chat_functions_online
@@ -1138,6 +1233,11 @@ async def on_close():
 RAG_CONTEXT_MESSAGE_SENTINEL = "Below are snippets from earlier messages in this server"
 
 
+# ---------------------------------------------------------------------------
+# Message formatting, token estimation, history trimming
+# ---------------------------------------------------------------------------
+
+
 # Format message history for logging
 def format_messages(messages):
     formatted = ""
@@ -1218,6 +1318,15 @@ def should_bot_respond_to_message(message):
             return True
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# LLM completion + best-of-N candidate pipeline
+#
+# `generate_parallel_candidates` runs N completions in parallel (where N comes
+# from CHAT_NUM_CANDIDATES) and `judge_best_of_candidates` asks the LLM to
+# pick the strongest reply. Default is N=1 so the judge step is skipped.
+# ---------------------------------------------------------------------------
 
 
 # Wrap LLM calls in an asyncio thread for concurrency
@@ -1470,6 +1579,11 @@ async def judge_best_of_candidates(messages_context: list, candidates: list, mod
     except Exception as e:
         logger.error(f"❌ Error during judge selection: {format_error_message(e)}")
         return 0
+
+
+# ---------------------------------------------------------------------------
+# Img2img prompt enhancement + recent-message fetch
+# ---------------------------------------------------------------------------
 
 
 def enhance_img2img_prompt(prompt: str, strength: float) -> str:
@@ -2398,6 +2512,12 @@ async def soupyself_command(
         save_self_core(guild_id, "")
         await interaction.response.send_message("self-document and core cleared.", ephemeral=True)
         logger.info("SELF.MD reset by %s for guild %s", interaction.user, guild_id)
+
+
+# ---------------------------------------------------------------------------
+# User-facing commands: /helpsoupy, /soupystats, /status, /8ball, /9ball,
+# /testurl, /whattime, /weather
+# ---------------------------------------------------------------------------
 
 
 @bot.tree.command(name="helpsoupy", description="Displays all available commands.")
@@ -3488,6 +3608,11 @@ def archive_vision_image(
         return None
 
 
+# ---------------------------------------------------------------------------
+# /sd — the main image generation command
+# ---------------------------------------------------------------------------
+
+
 @bot.tree.command(name="sd", description="Generates an image using Stable Diffusion.")
 @app_commands.describe(
     description="Description of the image to generate", size="Size of the image", seed="Seed for random generation"
@@ -4307,6 +4432,11 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
             await interaction.followup.send(error_msg, ephemeral=True)
 
 
+# ---------------------------------------------------------------------------
+# Discord UI components: thumbnail selection grid, edit modal, remix buttons
+# ---------------------------------------------------------------------------
+
+
 class ThumbnailSelectionView(View):
     def __init__(self, prompt: str, width: int, height: int, thumbnail_data: List[Dict]):
         super().__init__(timeout=None)
@@ -4745,6 +4875,12 @@ class SDRemixView(View):
             await interaction.followup.send("❌ Error extending image in all directions.", ephemeral=True)
 
 
+# ---------------------------------------------------------------------------
+# Image generation pipeline — sends prompts to the SD backend, fetches the
+# result, archives it, and posts the 2x2 thumbnail grid back to Discord.
+# ---------------------------------------------------------------------------
+
+
 async def generate_sd_image(
     interaction,
     prompt,
@@ -5132,6 +5268,17 @@ async def on_ready():
     logger.info(f"Bot start time set to {bot_start_time} UTC")
 
 
+# ---------------------------------------------------------------------------
+# Background loops — all spawned by on_ready, each runs forever until shutdown
+#
+# `_dashboard_status_writer` writes bot status JSON for the web panel.
+# `scan_trigger_loop` watches for /soupyscan-triggered files.
+# `archive_auto_scan_loop` periodically backfills new messages into SQLite.
+# `rag_reindex_loop` re-embeds messages whose embedding model changed.
+# `_self_md_reflection_loop` runs the self-knowledge reflection cycle.
+# ---------------------------------------------------------------------------
+
+
 async def _dashboard_status_writer(bot_instance):
     """Write bot status to data/bot_dashboard.json every 15 seconds for the web panel."""
     await bot_instance.wait_until_ready()
@@ -5401,6 +5548,17 @@ def split_message(msg: str, max_len=1500):
         msg = msg[idx:].strip()
     parts.append(msg)
     return parts
+
+
+# ---------------------------------------------------------------------------
+# Chat reply pipeline — the main response path
+#
+# `on_message` is the Discord event entry. It decides whether to respond
+# (via `should_bot_respond_to_message`), processes image attachments through
+# the vision model, queues the message onto `bot.sd_queue`, and
+# `process_chat_message` runs the full chat→LLM→reply flow with RAG, history,
+# self-knowledge, user profiles, and best-of-N candidate selection.
+# ---------------------------------------------------------------------------
 
 
 async def process_chat_message(message: discord.Message, image_descriptions: list):

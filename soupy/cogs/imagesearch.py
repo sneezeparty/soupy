@@ -1,6 +1,18 @@
 """
-Image search functionality for Soupy Bot
-Provides DuckDuckGo image search capabilities with rate limiting and result processing
+Image search cog — ``/soupyimage``.
+
+Runs a DuckDuckGo image query, picks one image at random from the top 300
+results, fetches the bytes, and posts it back as a Discord attachment with
+the source URL embedded.
+
+Gotchas:
+
+* Per-user rate limit is 10 searches/min (same shape as ``/soupysearch``).
+* The image is downloaded server-side and re-posted as an attachment rather
+  than embedded by URL — direct embeds fail often because hotlink protection
+  / referrer rules block Discord's preview fetcher.
+* The DuckDuckGo client is context-managed per call so socket leaks don't
+  accumulate over the bot's lifetime.
 """
 
 import asyncio

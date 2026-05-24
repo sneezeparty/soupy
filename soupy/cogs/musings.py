@@ -3,6 +3,35 @@ Musings cog for Soupy Bot.
 
 Soupy occasionally "thinks out loud" in a configured channel — reflecting on
 things from the server archive, reacting to news, or musing about conversations.
+
+Modes (weights in ``_MODE_WEIGHTS``):
+
+* ``archive_reflect`` — picks one message from a time-bucketed sample of the
+  guild archive and writes a reaction to it.
+* ``news_react`` — fetches a recent headline via DuckDuckGo and reacts.
+* ``random_thought`` — opens with a recent self-knowledge fragment.
+* ``synthesis`` — finds a pattern across multiple recent messages.
+
+Cross-module:
+
+* Reads message archive via ``soupy_database.database.get_db_path`` (SQLite).
+* When ``SELF_MD_ENABLED`` is set, calls
+  ``soupy_database.self_context.add_notable_interaction`` to feed *synthesis*
+  musings (only) into the reflection accumulator. See ``_SELF_FEEDBACK_MODES``.
+* When ``RAG_EMBEDDING_MODEL`` is set, uses
+  ``soupy_database.rag.embed_texts_lm_studio`` for similarity dedupe.
+
+Gotchas:
+
+* The archive file (``data/musings_archive.jsonl``) is the source of truth for
+  "what have we already said?" — both keyword and embedding dedupe read from it.
+* ``self._post_lock`` serializes the entire post-and-persist pipeline so
+  warmup, scheduled tick, and ``/soupymuse`` can't race on the JSONL.
+* Legacy entries (single ``topic`` field) are migrated to the
+  ``topic_subject`` / ``topic_mentions`` split on first load via one batched
+  LLM call — see the warmup task.
+* Topic extraction runs *after* ``channel.send()`` so a slow LLM doesn't delay
+  the user-visible post; the topic only needs to exist by the next tick.
 """
 
 from __future__ import annotations

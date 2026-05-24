@@ -6,6 +6,33 @@ comment thread, and leaves a relevant reply in Soupy's voice.  Can also
 like good comments and follow interesting accounts (max 1-2/day).
 
 Posts a link to the comment in the musing channel on Discord.
+
+Actions:
+
+* ``reply`` — picks a popular post from the feed, drafts a reply in Soupy's
+  voice, posts to Bluesky, mirrors a link to Discord.
+* ``repost`` / ``quote`` — re-shares a Bluesky post (optionally with comment).
+* ``post`` — original article post; sourcing logic mirrors the dailypost cog.
+
+Cross-module:
+
+* Imports ``_extract_date_from_html`` and ``_estimate_article_age_days`` from
+  ``soupy.cogs.dailypost`` for article freshness checks (avoids reposting stale
+  links).
+* ``_post_url`` and ``_fetch_og_image`` are *exported* and imported by
+  ``soupy.cogs.dailypost`` for its Bluesky cross-post step.
+
+Gotchas:
+
+* Bluesky session credentials are negotiated on demand and cached. A 401 from
+  the AT Protocol can mean either an expired session or a rate-limit lockout
+  — the error handler distinguishes by inspecting the response body.
+* The cog persists engagement history (``data/bluesky_engage_history.json``)
+  to avoid following the same account twice or replying to the same thread.
+* Owner-only by default; gated on ``BLUESKY_AUTO_REPLY`` for the autonomous
+  loop, on ``OWNER_IDS`` for the manual slash command.
+* og:image fetching honours its own UA list and recompresses oversized
+  thumbnails — see the per-image WARNING-level logs for fetch failures.
 """
 
 from __future__ import annotations

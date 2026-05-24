@@ -21,6 +21,10 @@ DEFAULT_TRIGGER_KEYWORDS = ["soup", "gumbo"]
 
 def get_trigger_keywords() -> list[str]:
     """Return literal chat keywords that trigger a reply outside allowed channels."""
+    # WHY: env is read on every call (not cached) so the dashboard's
+    # SOUPY_TRIGGER_KEYWORDS edit takes effect without a bot restart.
+    # The function is called per-message, but is cheap (one os.getenv +
+    # a comma split) so the missed cache is not worth re-architecting.
     raw = os.getenv("SOUPY_TRIGGER_KEYWORDS", ",".join(DEFAULT_TRIGGER_KEYWORDS))
     keywords = [kw.strip() for kw in raw.split(",") if kw.strip()]
     return keywords or DEFAULT_TRIGGER_KEYWORDS
