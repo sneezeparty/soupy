@@ -212,7 +212,7 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     dot = 0.0
     na = 0.0
     nb = 0.0
-    for x, y in zip(a, b):
+    for x, y in zip(a, b, strict=False):
         dot += x * y
         na += x * x
         nb += y * y
@@ -571,7 +571,7 @@ class MusingsCog(commands.Cog):
         if not needed:
             return
         vecs = await self._embed_texts([t for _, t in needed])
-        for (ts, _text), vec in zip(needed, vecs):
+        for (ts, _text), vec in zip(needed, vecs, strict=False):
             if vec is not None:
                 self._musing_embeddings[ts] = vec
         # Trim the cache to the recent window so it doesn't grow unbounded.
@@ -620,7 +620,7 @@ class MusingsCog(commands.Cog):
             texts = [recent[i].get("text", "") for i in missing_local_idx]
             new_topics = await _batch_extract_topics(texts)
             anything_set = False
-            for local_idx, (subj, ment) in zip(missing_local_idx, new_topics):
+            for local_idx, (subj, ment) in zip(missing_local_idx, new_topics, strict=False):
                 if subj or ment:
                     recent[local_idx]["topic_subject"] = subj
                     recent[local_idx]["topic_mentions"] = ment
