@@ -1,6 +1,37 @@
 """
-Database module for Soupy message scanning.
-Handles per-server SQLite databases for message storage.
+Per-guild SQLite message archive — schema, scan logic, file-based triggers.
+
+Every Discord server the bot is in gets its own SQLite file under
+``soupy_database/databases/guild_<id>.db``. This module owns:
+
+* **Schema creation + idempotent upgrades.** :func:`init_database` is
+  safe to call repeatedly; it creates tables on first call and is a no-op
+  otherwise. :func:`ensure_rag_schema` does the same for the RAG chunks.
+* **The /soupyscan command + the auto-scan loop.** Archiving pulls
+  Discord message history into the local DB. Limits and lookback are
+  controlled via env vars (see ``soupy.settings``).
+* **Scan trigger files.** The web UI writes JSON trigger files into
+  ``soupy_database/databases/scan_triggers/`` so the bot can pick up a
+  manual scan request without an in-process call. :func:`process_scan_triggers`
+  drains them on every tick of the trigger loop.
+
+Cross-module:
+
+* :func:`get_db_path` is the canonical way to resolve a guild's DB file —
+  used by ``rag.py``, ``user_profiles.py``, ``self_context.py``, and the
+  cogs. Never construct the path inline.
+* The DB directory is settings-configurable via ``SOUPY_DB_DIR``.
+
+Gotchas:
+
+* ``active_scans`` is a module-level dict keyed by guild_id; it tracks
+  in-flight scan tasks so a second ``/soupyscan`` for the same guild is
+  rejected instead of starting a parallel scan that would race the DB.
+* SQLite connections are *not* shared across threads here. Every call
+  opens a fresh connection and closes it. ``check_same_thread=False`` is
+  used for the cases where async work crosses thread boundaries.
+* The scan-trigger directory is created at runtime and gitignored. Don't
+  expect it to exist in a fresh clone.
 """
 
 import asyncio
@@ -23,8 +54,10 @@ from .helpers import describe_image, extract_url_content, extract_urls
 
 logger = logging.getLogger(__name__)
 
-# Track active scans to prevent concurrent scans on the same server
-# Key: guild_id, Value: asyncio.Task
+# WHY: tracks in-flight scan tasks per guild. A second `/soupyscan` for the
+# same guild while one is running would race on the same SQLite file and
+# duplicate rows; the lookup here is how the scan command rejects the
+# duplicate up front. Entries are removed when the task completes.
 active_scans: Dict[int, asyncio.Task] = {}
 
 # Database directory - can be configured via environment variable

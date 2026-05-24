@@ -1,5 +1,35 @@
 """
-Background profile batch jobs: logging, pause/resume state in SQLite, worker loop.
+Background profile batch jobs: logging, pause/resume state in SQLite,
+worker loop.
+
+User profile refresh is potentially long-running (hundreds of members ×
+LLM call per member). This module owns the supervisor side so the web UI
+can start/pause/resume/cancel a job and stream its log.
+
+State lives in two SQLite tables (per guild):
+
+* ``profile_jobs`` — one row per job: state (running/paused/done/cancelled),
+  progress counters, started_at.
+* ``profile_job_log_lines`` — append-only log lines, capped at
+  ``PROFILE_JOB_LOG_MAX_LINES`` so a long job doesn't grow without bound.
+
+Cross-module:
+
+* :func:`spawn_profile_worker` is called from the web UI's
+  ``POST /api/profiles/batch/start/{guild_id}`` endpoint.
+* The worker calls into :mod:`soupy_database.user_profiles` to do the
+  actual LLM-driven profile generation.
+
+Gotchas:
+
+* ``_PROFILE_TASKS`` is module-level and tracks the asyncio.Task for
+  each guild's worker. Pause/resume flips a SQLite flag that the worker
+  loop polls; cancel actually cancels the task. Both states have to be
+  reconciled on bot restart (the worker loop reads its initial state
+  from SQLite on start).
+* Log lines are mirrored to the Python logger *and* the SQLite table —
+  the SQLite copy is what the web UI streams; the logger copy is for
+  ``logs/soupy.log``.
 """
 
 from __future__ import annotations

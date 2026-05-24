@@ -1,7 +1,38 @@
 """
 Server-local member sketches from archived messages (SQLite).
 
-Structured JSON + plain summary for RAG. Message excerpts remain authoritative for quotes and facts.
+Structured JSON + plain summary for RAG. Message excerpts remain authoritative
+for quotes and facts.
+
+For each member the bot has seen, a row in ``user_profile_summaries``
+captures:
+
+* ``summary`` — a paragraph-length English sketch (used as RAG context
+  in chat replies).
+* ``structured_json`` — a parsed JSON object with hobbies, opinions,
+  relationships, tone descriptors (used by dailypost for audience analysis
+  and by chat for short-form profile lookups).
+* ``source_max_message_id`` — the highest message ID seen when this
+  profile was last refreshed; the next batch job continues from here.
+
+Cross-module:
+
+* :func:`ensure_user_profile_schema` and :func:`_load_structured_profiles`
+  are imported by ``soupy.cogs.dailypost`` for top-poster audience briefs.
+* Batch refresh worker lives in :mod:`soupy_database.profile_batch`; this
+  module exposes the per-profile generation + the schema helpers.
+
+Gotchas:
+
+* :func:`_migrate_profile_columns` silently ALTERs the table to add
+  ``structured_json`` on first access — old DBs upgrade in-place without
+  an explicit migration step. Removing this without a real migration
+  would break every existing install.
+* The structured-vs-summary split means the LLM can be wrong about one
+  layer without poisoning the other. Updates rewrite both in one
+  transaction so they stay consistent.
+* Per-guild SQLite path is resolved via ``soupy_database.database.get_db_path``
+  — never hard-code paths here; the directory is settings-configurable.
 """
 
 from __future__ import annotations
@@ -35,6 +66,11 @@ logger = logging.getLogger(__name__)
 
 
 def _migrate_profile_columns(conn: sqlite3.Connection) -> None:
+    # WHY: silent in-place schema migration. Old installs only had `summary`;
+    # `structured_json` was added later. Rather than ship a one-shot migration
+    # script, every connection runs PRAGMA on connect and ALTERs if the
+    # column is missing. The ALTER is cheap on a non-existent column and
+    # idempotent if the column already exists.
     cur = conn.cursor()
     cur.execute("PRAGMA table_info(user_profile_summaries)")
     cols = {row[1] for row in cur.fetchall()}

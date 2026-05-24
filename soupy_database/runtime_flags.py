@@ -1,6 +1,30 @@
 """
 Runtime toggles shared by the web UI and the Discord bot (no restart required).
-Stored as JSON next to the project under data/runtime_flags.json.
+Stored as JSON next to the project under ``data/runtime_flags.json``.
+
+This is the bot ↔ web IPC channel for live toggles — anything you want to
+flip without restarting the bot belongs here, not in ``.env-stable``.
+
+How it works:
+
+* The **web** writes the file via ``POST /api/runtime-flags``.
+* The **bot** reads the file via :func:`is_command_disabled` and
+  :func:`is_rag_enabled` on the chat hot path, *every message*. To make
+  that cheap, the bot caches the parsed JSON keyed on file mtime — only
+  re-parses when the file actually changes.
+* :func:`write_runtime_flags` resets the cache on the write side so a
+  panel-driven toggle takes effect on the next bot read without waiting
+  for the mtime check to notice (still works either way; the reset is a
+  belt-and-suspenders speedup).
+
+Schema (defaults in ``_DEFAULTS``):
+
+* ``rag_enabled`` (bool) — global on/off for RAG retrieval.
+* ``disabled_commands`` (list[str]) — slash command names the bot will
+  refuse via the global interaction check.
+
+Gotcha: the cache is per-process. If you ever read this from a third
+process (e.g. a CLI tool), you'll get whatever's on disk, which is fine.
 """
 
 from __future__ import annotations

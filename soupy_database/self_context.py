@@ -156,6 +156,13 @@ def append_to_archive(guild_id: int, pruned_text: str) -> None:
 # Notable interaction accumulator  (disk-backed — survives restarts)
 # ---------------------------------------------------------------------------
 
+# WHY: this in-memory accumulator is the in-flight queue for "notable
+# interactions" that the next reflection cycle will fold into the self-doc.
+# It is loaded from `accumulator.jsonl` on startup and rewritten on every
+# add — disk-backed so a bot restart doesn't lose unreflected interactions.
+# `_acc_lock` serializes the load/append/rewrite cycle so concurrent chat
+# replies don't race the JSONL write. `_MAX_ACCUMULATED` is the soft cap;
+# older entries are dropped before write so the file stays bounded.
 _accumulator: Dict[int, List[Tuple[float, str]]] = defaultdict(list)
 _acc_lock = asyncio.Lock()
 _MAX_ACCUMULATED = int(os.getenv("SELF_MD_MAX_ACCUMULATED", "60"))

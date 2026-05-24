@@ -1,5 +1,43 @@
 """
-Local RAG over per-guild scanned messages: chunking, LM Studio embeddings, SQLite storage, similarity search.
+Local RAG over per-guild scanned messages: chunking, LM Studio embeddings,
+SQLite storage, similarity search.
+
+Flow:
+
+1. **Index**: messages are batched into chunks (~N messages per chunk),
+   sent to LM Studio's ``/v1/embeddings`` endpoint, and the resulting
+   vectors are stored as ``BLOB`` (packed float32) in the
+   ``rag_chunks`` table of the guild's SQLite DB.
+2. **Reindex**: on a model or chunk-size change, the loop wipes and
+   re-embeds. Serialized per-guild via ``_reindex_locks`` so two reindex
+   triggers don't race on the same DB.
+3. **Retrieve**: at chat time, the user's message (or an LLM-rewritten
+   retrieval query) is embedded, then top-K most-similar chunks are
+   returned via cosine similarity scanned in Python (the row counts
+   are small enough that a SQLite-extension VSS is overkill).
+
+Cross-module:
+
+* :func:`build_rag_retrieval_query`, :func:`fetch_rag_context_for_query`,
+  :func:`strip_rag_gate_word`, :func:`strip_rag_query_invocations` are
+  the public surface used by the main bot's chat path.
+* :func:`embed_texts_lm_studio` is also called by the musings cog
+  for similarity dedupe between candidate musings and the recent window.
+* ``self_context`` has its own ``self_chunks`` RAG table but reuses
+  ``embed_texts_lm_studio`` here.
+
+Gotchas:
+
+* ``_embed_sem`` (semaphore) caps concurrent embedding calls to LM Studio
+  — without it, a reindex would block live chat RAG and saturate the
+  embedding endpoint. Default 2, tunable via ``RAG_EMBED_MAX_CONCURRENT``.
+* ``_reindex_locks`` (per-guild) serializes reindex operations on the
+  same guild's table — concurrent reindexers would corrupt the chunk set.
+* Embeddings are packed/unpacked with :func:`pack_embedding` /
+  :func:`unpack_embedding` (raw struct, not pickle). Changing the float
+  layout requires a reindex.
+* Cosine similarity is computed in pure Python (no numpy import here).
+  Slow but consistent; row counts are typically small (<10K per guild).
 """
 
 from __future__ import annotations
@@ -36,6 +74,10 @@ def _get_embed_sem() -> asyncio.Semaphore:
     return _embed_sem
 
 
+# WHY: per-guild reindex lock. The chat-time RAG retrieval is concurrent-safe
+# (read-only), but reindex writes — two reindexes for the same guild racing
+# on `rag_chunks` would produce dupes and torn rows. The lock is per-guild
+# so reindexing guild A does not block reading or reindexing guild B.
 _reindex_locks: Dict[int, asyncio.Lock] = {}
 
 

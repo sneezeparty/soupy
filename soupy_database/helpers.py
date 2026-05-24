@@ -1,5 +1,32 @@
 """
 Helper functions for processing images and URLs during scanning.
+
+This module sits below the cogs and the main bot in the dependency graph
+— it's allowed to import ``soupy.settings`` but not anything from the
+Discord bot proper. Lives in ``soupy_database`` rather than ``soupy``
+because URL/image extraction is invoked both during the live chat path
+and during background archive scans.
+
+Public surface:
+
+* :func:`extract_urls` — regex-based URL detection from message content,
+  capped at ``MAX_URLS_PER_MESSAGE``.
+* :func:`extract_url_content` — fetches a URL with realistic headers, runs
+  it through trafilatura, returns the cleaned text (or None on failure).
+  Result is cached at the call site (the bot's ``url_cache``).
+* :func:`describe_image` — sends a Discord attachment to LM Studio's
+  vision model and returns a short description string.
+
+Gotchas:
+
+* ``extract_url_content`` uses a Chrome User-Agent and full browser
+  Accept headers — many publishers serve a stub page or 403 to anything
+  that smells like a bot. Without these headers, success rate drops to
+  ~30%.
+* The fetch timeout is read from settings on every call (not cached) so
+  dashboard tuning takes effect without a bot restart.
+* ``describe_image`` requires ``ENABLE_VISION=true`` and a vision-capable
+  model loaded in LM Studio. Returns None silently when disabled.
 """
 
 import base64
