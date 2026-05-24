@@ -1,3 +1,36 @@
+"""
+Bot subprocess manager — spawns and supervises the Discord bot process.
+
+The web app holds a single :class:`BotRunner` instance. It:
+
+1. Resolves the bot entrypoint (``SOUPY_BOT_ENTRY`` env var, then
+   ``soupy_remastered_stablediffusion.py``, then legacy fallbacks).
+2. Builds the child env by overlaying ``.env-stable`` on top of the
+   parent process env — the file is the source of truth for runtime
+   configuration after any web-UI edit.
+3. Spawns the child under a PTY on POSIX so the bot's coloured log
+   output is preserved through the WebSocket fanout. Falls back to plain
+   pipes on Windows.
+4. Streams every output line through ``on_output`` (which the web app
+   wires to a ``WebsocketManager.broadcast_text``).
+
+Gotchas:
+
+* ``LOCAL_KEY`` is mapped to ``OPENAI_API_KEY`` *after* the env merge so
+  legacy installs that only set ``LOCAL_KEY`` still work. This shim must
+  stay in sync with the same fallback in :mod:`soupy.settings`.
+* ``FORCE_COLOR`` / ``CLICOLOR`` / ``CLICOLOR_FORCE`` / ``PY_COLORS`` /
+  ``TERM`` are all set so the child writes ANSI even though stdout is
+  a PTY/pipe (without these, ``colorama`` and downstream libs would
+  auto-disable colour). The fanout strips ANSI before broadcasting to
+  WebSocket clients.
+* Restarting the web process does *not* restart the bot. Use
+  ``POST /api/bot/restart`` or the dashboard restart button instead.
+* On Linux/macOS the PTY path is preferred because some libraries
+  (colorama, rich) detect a TTY and behave differently than under a
+  plain pipe. Output is read line-buffered through the master fd.
+"""
+
 from __future__ import annotations
 
 import asyncio

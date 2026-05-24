@@ -1,3 +1,49 @@
+"""
+FastAPI web control panel for Soupy.
+
+Owns the bot subprocess (via :class:`web.services.bot_runner.BotRunner`),
+streams its log over a WebSocket (via :class:`web.services.log_stream.WebsocketManager`),
+edits ``.env-stable`` (via :mod:`web.services.env_store`), and exposes
+archive/stats/runtime-flag JSON endpoints for the dashboard React app.
+
+How it fits together:
+
+* ``run_all.py`` launches uvicorn with ``SOUPY_AUTOSTART_BOT=1``. The
+  ``startup`` event below then calls ``BotRunner.start()``, which is the
+  *only* way the bot subprocess gets spawned in normal operation. Restarting
+  uvicorn alone won't restart the bot — use ``POST /api/bot/restart`` (or
+  the dashboard button) for that.
+* The web app and the bot read ``.env-stable`` independently. Edits via
+  ``POST /api/env/save`` rewrite the file and take effect on the next bot
+  restart. Runtime flags (RAG enabled, command disables) live in
+  ``data/runtime_flags.json`` and are mtime-cached on the bot side, so
+  those changes propagate without a restart.
+* Bot status JSON is written by the bot to ``data/bot_dashboard.json``
+  every ~15s; this app reads it for the dashboard. The web app is *not*
+  in-process with the bot — they only share files + the PTY.
+
+Cross-module:
+
+* ``soupy_database.database`` / ``soupy_database.rag`` /
+  ``soupy_database.user_profiles`` — read directly (per-guild SQLite) to
+  serve stats and trigger management actions.
+* ``soupy.settings`` — typed env access for web-only settings
+  (``web_control_panel_title``, ``timezone``, ``WEB_COLOR_*``).
+
+Gotchas:
+
+* The ``LOG_LEVEL`` env var only filters the *console* handler; the
+  rotating file handler always captures DEBUG. Web log lines, like bot
+  log lines, end up in ``logs/soupy.log``.
+* The ``SuppressNoisyAccess`` log filter inside ``create_app`` drops
+  thumb 304s and the dashboard's batch-status polling — without it,
+  uvicorn's access log is unreadable.
+* ANSI escape codes are stripped from bot output before it reaches the
+  WebSocket so the browser console isn't full of raw escape sequences.
+* All ``/api/*`` endpoints are unauthenticated — assume the panel runs
+  on a trusted LAN. Do *not* expose port 4941 to the public internet.
+"""
+
 from __future__ import annotations
 
 import json
@@ -393,6 +439,10 @@ def create_app() -> FastAPI:
             },
         )
 
+    # -----------------------------------------------------------------------
+    # Archive endpoints — image gallery + message viewer for /media archive
+    # -----------------------------------------------------------------------
+
     @app.get("/api/archive/images")
     async def api_archive_images(limit: int = 50, offset: int = 0, kind: str | None = None):
 
@@ -480,6 +530,10 @@ def create_app() -> FastAPI:
                 )
 
         return JSONResponse({"ok": False, "message": "No matching message found"}, status_code=404)
+
+    # -----------------------------------------------------------------------
+    # Stats endpoints — user_stats.json + per-guild SQLite roll-ups
+    # -----------------------------------------------------------------------
 
     @app.get("/api/stats/raw")
     async def api_stats_raw():
@@ -884,6 +938,12 @@ def create_app() -> FastAPI:
         return JSONResponse({"ok": True, "deleted": deleted})
 
     # Environment editor
+    # -----------------------------------------------------------------------
+    # Environment editor — reads/rewrites .env-stable via env_store
+    # WHY: takes effect on the NEXT bot restart (env is merged into the
+    # subprocess env at spawn time, not on every uvicorn reload).
+    # -----------------------------------------------------------------------
+
     @app.get("/env", response_class=HTMLResponse)
     async def env_page(request: Request):
         env_path = BASE_DIR / ".env-stable"
@@ -918,6 +978,12 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": True, "message": "Saved"})
         except Exception as exc:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+
+    # -----------------------------------------------------------------------
+    # LM Studio integration — list loaded models, hot-swap the chat model
+    # WHY: switching the model writes LOCAL_CHAT to .env-stable and triggers
+    # a bot restart so the new model is picked up by the next chat call.
+    # -----------------------------------------------------------------------
 
     @app.get("/api/lm-studio/models")
     async def api_lm_studio_models():
@@ -1152,6 +1218,11 @@ def create_app() -> FastAPI:
                 status_code=502,
             )
 
+    # -----------------------------------------------------------------------
+    # Bot status — reads data/bot_dashboard.json (written by the bot every
+    # ~15s) and exposes activity feeds for the dashboard.
+    # -----------------------------------------------------------------------
+
     @app.get("/api/bot/dashboard-status")
     async def api_bot_dashboard_status():
         """Extended status for the dashboard Bot Operations panel.
@@ -1277,6 +1348,12 @@ def create_app() -> FastAPI:
 
         return JSONResponse(result)
 
+    # -----------------------------------------------------------------------
+    # Runtime flags — the bot↔web IPC channel for live toggles.
+    # WHY: stored in data/runtime_flags.json; bot reads via mtime-cached
+    # lookup so changes propagate without a bot restart.
+    # -----------------------------------------------------------------------
+
     @app.get("/api/runtime-flags")
     async def api_runtime_flags_get():
         from soupy_database.runtime_flags import read_runtime_flags
@@ -1334,6 +1411,11 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": False, "message": "No supported keys"}, status_code=400)
         merged = write_runtime_flags(updates)
         return JSONResponse({"ok": True, **merged})
+
+    # -----------------------------------------------------------------------
+    # RAG + user profile management — trigger reindex, rebuild, batch jobs.
+    # All operations are per-guild.
+    # -----------------------------------------------------------------------
 
     @app.get("/api/rag/status/{guild_id}")
     async def api_rag_status(guild_id: str):
@@ -1673,6 +1755,12 @@ def create_app() -> FastAPI:
             conn.close()
 
     # Bot control APIs
+    # -----------------------------------------------------------------------
+    # Bot lifecycle — start, stop, restart the bot subprocess.
+    # WHY: restart is the only way to pick up .env-stable edits or new code.
+    # The bot's stdout/stderr stream through a PTY into the WebSocket fanout.
+    # -----------------------------------------------------------------------
+
     @app.get("/api/bot/status")
     async def api_status():
         return JSONResponse(await bot_runner.status())
@@ -1694,6 +1782,11 @@ def create_app() -> FastAPI:
         return JSONResponse({"ok": ok, "message": message, **(await bot_runner.status())})
 
     # Database scan APIs
+    # -----------------------------------------------------------------------
+    # Database management — per-guild stats, scan triggers, schedule,
+    # archive table browsing for the Database tab in the dashboard.
+    # -----------------------------------------------------------------------
+
     @app.get("/api/database/status")
     async def api_database_status():
         """Get active scans and overall database status."""

@@ -1,3 +1,32 @@
+"""
+Comment-preserving ``.env-stable`` parser + rewriter.
+
+The web Environment Editor uses this to read the file, present its key-value
+pairs to the user, and write back changes without losing comments, blank
+lines, ordering, or multi-line quoted values.
+
+Invariants kept by :func:`write_env`:
+
+* Comments (``# ...``) and blank lines are preserved verbatim.
+* Keys retain their original order; new keys are appended under an
+  "Added by web UI" banner.
+* If a key's value is unchanged, its line is written byte-for-byte —
+  no requoting, no escape-sequence normalisation. This matters because
+  some values (BEHAVIOUR especially) contain hand-tuned formatting and
+  a round-trip through naïve quoting would mangle them.
+* Multi-line quoted values (BEHAVIOUR, BEHAVIOUR_SEARCH) are joined on
+  parse and re-escaped with ``\\n`` on write so they round-trip through
+  the single-line ``KEY="…"`` shape the parser uses on next read.
+* Every save creates a timestamped backup
+  (``.env-stable.bak.YYYYMMDD-HHMMSS``). Old backups accumulate in the
+  repo root and are safe to delete.
+
+Gotcha: prompt values like ``BEHAVIOUR`` are several KB long and contain
+quotes, newlines, and special characters. Editing them through the web
+form *will* truncate or corrupt them — edit ``.env-stable`` directly for
+those. The CLAUDE.md file documents this restriction.
+"""
+
 from __future__ import annotations
 
 import codecs

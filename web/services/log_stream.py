@@ -1,3 +1,15 @@
+"""
+WebSocket fan-out for live log streaming.
+
+The web app holds one :class:`WebsocketManager`. Every bot output line
+arrives via ``BotRunner``'s ``on_output`` callback (set to
+``ws_manager.broadcast_text`` in ``create_app``), gets stripped of ANSI
+escapes, and is broadcast to every connected client.
+
+Failed sends drop the client from the set on the next iteration — there
+is no explicit unhealthy-connection sweep beyond send-failure pruning.
+"""
+
 from __future__ import annotations
 
 import asyncio
