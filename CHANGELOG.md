@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Archive writes use atomic `tmp + os.replace` instead of in-place rewrites, so a crash mid-write can't truncate the JSONL.
 
 ### Fixed
+- Ignore messages from other bots in `on_message`. Soupy was reacting to Dyno-style announcement bots (and would have replied to any other bot whose post hit a `CHANNEL_IDS` channel or contained a trigger keyword), producing bot-on-bot reply chains. The Discord-standard `message.author.bot` guard now short-circuits those before LLM work or `channel.send` runs.
 - Musings were repeating the same topic 3–4 times in a row. Root cause was the LLM "don't repeat these topics" hint being soft text the model ignored, combined with a wide-window random source pick that kept re-surfacing the same hot conversation. Hard-filter at the candidate-selection stage (keywords + embeddings) replaces the soft prompt hint.
 
 ### Docs

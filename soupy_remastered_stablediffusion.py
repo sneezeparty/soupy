@@ -6134,6 +6134,13 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    # WHY: ignore messages from any other bot too. Without this, announcement
+    # bots like Dyno, MEE6, statbots, etc. drag Soupy into bot-on-bot reply
+    # chains whenever their posts land in a CHANNEL_IDS channel or happen to
+    # contain a trigger keyword. The Discord-standard guard is author.bot.
+    if message.author.bot:
+        return
+
     # Process commands first
     ctx = await bot.get_context(message)
     if ctx.valid:
