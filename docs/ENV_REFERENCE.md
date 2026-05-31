@@ -74,6 +74,7 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`CHAT_FREQUENCY_PENALTY`** — `0.6` — Frequency penalty passed to LM Studio (range -2.0 to 2.0).
 - **`CHAT_PRESENCE_PENALTY`** — `0.3` — Presence penalty passed to LM Studio (range -2.0 to 2.0).
 - **`SOUPY_TRIGGER_KEYWORDS`** — `soup,gumbo` — Comma-separated literal keywords that trigger replies outside `CHANNEL_IDS`. Case-insensitive; `soup` also matches `soupy`.
+- **`RANDOM_RESPONSE_RATE`** — `0.05` — Probability (0–1) that Soupy spontaneously replies to a non-triggering message. Read per message so it can be tuned live.
 - **`MAX_TOKENS`** — `4096` — LLM response length limit.
 - **`RECENT_MESSAGE_LIMIT`** — `15` — How many recent messages to pull for chat context.
 - **`UPDATE_INTERVAL_MINUTES`** — `61` — Periodic background-update interval, in minutes.
@@ -155,7 +156,12 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 ## RAG (Retrieval-Augmented Generation)
 
 - **`RAG_EMBEDDING_MODEL`** — `text-embedding-qwen3-embedding-0.6b` — Exact embedding-model id loaded in LM Studio. Rebuild the RAG index after changing this.
-- **`RAG_LOG_FULL_CONTENT`** — `1` — Verbose RAG debug logging — every keyword row and vector chunk retrieved.
+- **`RAG_REINDEX_INTERVAL_HOURS`** — `6` — How often the background loop consolidates and re-embeds RAG chunks.
+- **`RAG_EMBED_MAX_CONCURRENT`** — `2` — Max concurrent embedding requests to LM Studio (a global semaphore — keeps reindex from starving live chat RAG).
+- **`RAG_EMBED_BATCH_SIZE`** — `8` — Number of texts sent per embedding HTTP call.
+- **`RAG_MAX_CHARS_PER_LINE`** — `800` — Per-message character cap when building a RAG chunk.
+- **`RAG_LOG_FULL_CONTENT`** — `0` — Deep RAG debug: dump full retrieved chunk/profile content. Off by default.
+- **`RAG_LOG_VERBOSE`** — `1` — Per-hit RAG details on INFO. Set to `0` for one-line retrieval summaries.
 
 ## Self-Context (`self.md`)
 
@@ -169,6 +175,9 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 
 - **`DAILY_POST_CHANNELS`** — `"{}"` — JSON map: channel ID → friendly slug used internally. Empty = no posts.
 - **`DAILY_POST_ENABLED`** — `false` — Master switch for the daily-post loop.
+- **`DAILY_POST_ACTIVE_START`** — `8` — Earliest hour (0–23) a daily post may fire.
+- **`DAILY_POST_ACTIVE_END`** — `18` — Latest hour (0–23) a daily post may fire.
+- **`DAILY_POST_INTERVAL_HOURS`** — `24` — Spacing target between posts, in hours.
 - **`DAILY_POST_MAX_AGE_DAYS`** — `21` — Reject articles older than this when picking dailies.
 - **`DAILY_POST_REJECT_NO_DATE`** — `false` — When `true`, reject any article whose publish date can't be extracted.
 - **`DAILY_POST_FALLBACK_TO_TOP_RATED`** — `true` — When the LLM judge says SKIP at the final pick, fall back to the top-rated candidate instead of giving up.
@@ -198,6 +207,9 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`URL_CACHE_TTL_SECONDS`** — `3600` — How long URL summaries are cached before being re-fetched. *Previously hardcoded.*
 - **`SOUPY_LOG_MAX_BYTES`** — `5242880` — Bot log file rotation threshold, in bytes. *Previously hardcoded.*
 - **`SOUPY_LOG_BACKUP_COUNT`** — `5` — How many old rotated log files to keep. *Previously hardcoded.*
+- **`SOUPY_DB_DIR`** — *(empty → `soupy_database/databases/`)* — Override the directory holding per-guild SQLite databases. Both the bot and web panel must agree on this.
+- **`CHANNEL_NAMES`** — *(empty)* — Optional channel-ID→name map for the stats panel as `"123:general,456:random"`. Falls back to names recorded in the archive.
+- **`CHANNEL_NAMES_JSON`** — *(empty)* — Same mapping as JSON, e.g. `'{"123":"general"}'`. Takes precedence over `CHANNEL_NAMES`.
 
 ## Web Panel / Launcher (set outside `.env-stable`)
 
