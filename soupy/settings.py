@@ -38,26 +38,43 @@ def _env_str(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
-def _env_int(name: str, default: int) -> int:
+def _env_int(name: str, default: int, *, minimum: Optional[int] = None, maximum: Optional[int] = None) -> int:
     raw = os.getenv(name, "")
     if not raw:
         return default
     try:
-        return int(raw)
+        val = int(raw)
     except ValueError:
         logger.warning("env var %s=%r is not an int; falling back to %d", name, raw, default)
         return default
+    # WHY fall back to default (not clamp) on out-of-range: a clamp silently
+    # changes the operator's intent; the default is a known-good value and the
+    # warning tells them what happened. Consistent with the malformed-value path.
+    if minimum is not None and val < minimum:
+        logger.warning("env var %s=%d is below minimum %d; falling back to %d", name, val, minimum, default)
+        return default
+    if maximum is not None and val > maximum:
+        logger.warning("env var %s=%d is above maximum %d; falling back to %d", name, val, maximum, default)
+        return default
+    return val
 
 
-def _env_float(name: str, default: float) -> float:
+def _env_float(name: str, default: float, *, minimum: Optional[float] = None, maximum: Optional[float] = None) -> float:
     raw = os.getenv(name, "")
     if not raw:
         return default
     try:
-        return float(raw)
+        val = float(raw)
     except ValueError:
         logger.warning("env var %s=%r is not a float; falling back to %f", name, raw, default)
         return default
+    if minimum is not None and val < minimum:
+        logger.warning("env var %s=%g is below minimum %g; falling back to %g", name, val, minimum, default)
+        return default
+    if maximum is not None and val > maximum:
+        logger.warning("env var %s=%g is above maximum %g; falling back to %g", name, val, maximum, default)
+        return default
+    return val
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -145,7 +162,7 @@ class Settings:
 
     @cached_property
     def random_response_rate(self) -> float:
-        return _env_float("RANDOM_RESPONSE_RATE", 0.05)
+        return _env_float("RANDOM_RESPONSE_RATE", 0.05, minimum=0.0, maximum=1.0)
 
     # ----- LLM -----------------------------------------------------------
 
@@ -168,7 +185,7 @@ class Settings:
 
     @cached_property
     def chat_num_candidates(self) -> int:
-        return _env_int("CHAT_NUM_CANDIDATES", 1)
+        return _env_int("CHAT_NUM_CANDIDATES", 1, minimum=1)
 
     @cached_property
     def chat_frequency_penalty(self) -> float:
@@ -180,7 +197,7 @@ class Settings:
 
     @cached_property
     def max_tokens(self) -> int:
-        return _env_int("MAX_TOKENS", 4096)
+        return _env_int("MAX_TOKENS", 4096, minimum=1)
 
     # ----- Search --------------------------------------------------------
 
@@ -200,11 +217,11 @@ class Settings:
 
     @cached_property
     def recent_message_limit(self) -> int:
-        return _env_int("RECENT_MESSAGE_LIMIT", 15)
+        return _env_int("RECENT_MESSAGE_LIMIT", 15, minimum=1)
 
     @cached_property
     def context_window_tokens(self) -> int:
-        return _env_int("CONTEXT_WINDOW_TOKENS", 16000)
+        return _env_int("CONTEXT_WINDOW_TOKENS", 16000, minimum=512)
 
     # ----- Vision --------------------------------------------------------
 
@@ -236,11 +253,11 @@ class Settings:
 
     @cached_property
     def rag_embed_max_concurrent(self) -> int:
-        return _env_int("RAG_EMBED_MAX_CONCURRENT", 2)
+        return _env_int("RAG_EMBED_MAX_CONCURRENT", 2, minimum=1)
 
     @cached_property
     def rag_reindex_interval_hours(self) -> int:
-        return _env_int("RAG_REINDEX_INTERVAL_HOURS", 6)
+        return _env_int("RAG_REINDEX_INTERVAL_HOURS", 6, minimum=1)
 
     # ----- Stable Diffusion ----------------------------------------------
 
@@ -262,7 +279,7 @@ class Settings:
 
     @cached_property
     def sd_steps(self) -> int:
-        return _env_int("SD_STEPS", 20)
+        return _env_int("SD_STEPS", 20, minimum=1)
 
     @cached_property
     def sd_guidance(self) -> float:
@@ -270,11 +287,11 @@ class Settings:
 
     @cached_property
     def sd_default_width(self) -> int:
-        return _env_int("SD_DEFAULT_WIDTH", 1024)
+        return _env_int("SD_DEFAULT_WIDTH", 1024, minimum=64)
 
     @cached_property
     def sd_default_height(self) -> int:
-        return _env_int("SD_DEFAULT_HEIGHT", 1024)
+        return _env_int("SD_DEFAULT_HEIGHT", 1024, minimum=64)
 
     # ----- Bluesky -------------------------------------------------------
 
@@ -339,19 +356,19 @@ class Settings:
 
     @cached_property
     def daily_post_active_start(self) -> int:
-        return _env_int("DAILY_POST_ACTIVE_START", 8)
+        return _env_int("DAILY_POST_ACTIVE_START", 8, minimum=0, maximum=23)
 
     @cached_property
     def daily_post_active_end(self) -> int:
-        return _env_int("DAILY_POST_ACTIVE_END", 18)
+        return _env_int("DAILY_POST_ACTIVE_END", 18, minimum=0, maximum=23)
 
     @cached_property
     def daily_post_interval_hours(self) -> int:
-        return _env_int("DAILY_POST_INTERVAL_HOURS", 24)
+        return _env_int("DAILY_POST_INTERVAL_HOURS", 24, minimum=1)
 
     @cached_property
     def daily_post_topic_dedup_sim(self) -> float:
-        return _env_float("DAILY_POST_TOPIC_DEDUP_SIM", 0.65)
+        return _env_float("DAILY_POST_TOPIC_DEDUP_SIM", 0.65, minimum=0.0, maximum=1.0)
 
     @cached_property
     def daily_post_topic_dedup_days(self) -> int:
@@ -379,15 +396,15 @@ class Settings:
 
     @cached_property
     def musing_chance(self) -> float:
-        return _env_float("MUSING_CHANCE", 0.10)
+        return _env_float("MUSING_CHANCE", 0.10, minimum=0.0, maximum=1.0)
 
     @cached_property
     def musing_poll_minutes_min(self) -> int:
-        return _env_int("MUSING_POLL_MINUTES_MIN", 10)
+        return _env_int("MUSING_POLL_MINUTES_MIN", 10, minimum=1)
 
     @cached_property
     def musing_poll_minutes_max(self) -> int:
-        return _env_int("MUSING_POLL_MINUTES_MAX", 20)
+        return _env_int("MUSING_POLL_MINUTES_MAX", 20, minimum=1)
 
     @cached_property
     def musing_channel_id(self) -> Optional[int]:

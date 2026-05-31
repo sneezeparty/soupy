@@ -131,6 +131,48 @@ def test_reload_drops_only_cached_properties(monkeypatch, fresh_settings):
     assert fresh_settings.some_random_attr == "should-survive"
 
 
+# ---------------------------------------------------------------------------
+# Bounds validation (minimum/maximum on numeric parsers)
+# ---------------------------------------------------------------------------
+
+
+def test_int_below_minimum_falls_back(monkeypatch, fresh_settings, caplog):
+    # SD_DEFAULT_WIDTH=0 would break generation; it should fall back to the default.
+    monkeypatch.setenv("SD_DEFAULT_WIDTH", "0")
+    with caplog.at_level("WARNING", logger="soupy.settings"):
+        v = fresh_settings.sd_default_width
+    assert v == 1024
+    assert any("below minimum" in r.message for r in caplog.records)
+
+
+def test_int_in_range_is_kept(monkeypatch, fresh_settings):
+    monkeypatch.setenv("SD_DEFAULT_WIDTH", "768")
+    assert fresh_settings.sd_default_width == 768
+
+
+def test_int_above_maximum_falls_back(monkeypatch, fresh_settings, caplog):
+    # Hour-of-day must be 0-23; 99 falls back to the default.
+    monkeypatch.setenv("DAILY_POST_ACTIVE_START", "99")
+    with caplog.at_level("WARNING", logger="soupy.settings"):
+        v = fresh_settings.daily_post_active_start
+    assert v == 8
+    assert any("above maximum" in r.message for r in caplog.records)
+
+
+def test_float_probability_clamped_to_default(monkeypatch, fresh_settings, caplog):
+    # A probability > 1 is nonsense; fall back rather than fire every time.
+    monkeypatch.setenv("MUSING_CHANCE", "5")
+    with caplog.at_level("WARNING", logger="soupy.settings"):
+        v = fresh_settings.musing_chance
+    assert v == pytest.approx(0.10)
+    assert any("above maximum" in r.message for r in caplog.records)
+
+
+def test_negative_int_falls_back(monkeypatch, fresh_settings):
+    monkeypatch.setenv("CHAT_NUM_CANDIDATES", "-3")
+    assert fresh_settings.chat_num_candidates == 1
+
+
 def test_singleton_exists():
     assert isinstance(soupy_settings.settings, soupy_settings.Settings)
 
