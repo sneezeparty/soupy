@@ -270,13 +270,15 @@ def _merge_sqlite_message_stats_for_summary(
                         ch_acc[cid]["name"] = cname
                         ch_acc[cid]["best_n"] = n
         except Exception:
+            # One guild DB being unreadable shouldn't sink the whole summary.
+            logger.debug("Skipped a guild DB while merging message stats", exc_info=True)
             continue
         finally:
             if conn is not None:
                 try:
                     conn.close()
                 except Exception:
-                    pass
+                    pass  # already failing; nothing useful to do
 
     if total_messages <= 0:
         return None
@@ -373,7 +375,8 @@ def create_app() -> FastAPI:
         (media_dir / "images").mkdir(parents=True, exist_ok=True)
         (media_dir / "thumbs").mkdir(parents=True, exist_ok=True)
     except Exception:
-        pass
+        # Not fatal, but the /media mount below will 404 — make the cause visible.
+        logger.warning("Could not create media directories under %s", media_dir, exc_info=True)
     app.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
 
     # Shared state
@@ -384,7 +387,7 @@ def create_app() -> FastAPI:
         try:
             print(message, flush=True)
         except Exception:
-            pass
+            pass  # console print is best-effort; logging here could recurse
         # Strip ANSI color codes for the web UI
         ansi_re = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
         clean = ansi_re.sub("", message)
@@ -406,6 +409,7 @@ def create_app() -> FastAPI:
                 try:
                     msg = record.getMessage()
                 except Exception:
+                    # Fail open: if we can't format the record, don't suppress it.
                     return True
                 if "/media/thumbs/" in msg and " 304 " in msg:
                     return False
@@ -415,7 +419,8 @@ def create_app() -> FastAPI:
 
         logging.getLogger("uvicorn.access").addFilter(SuppressNoisyAccess())
     except Exception:
-        pass
+        # Filter is a nicety; without it the access log is just noisier.
+        logger.debug("Could not install uvicorn access-log filter", exc_info=True)
 
     # Add strong caching for media/static to reduce revalidation requests
     @app.middleware("http")
@@ -455,9 +460,9 @@ def create_app() -> FastAPI:
                         try:
                             all_items.append(json.loads(line))
                         except Exception:
-                            continue
+                            continue  # skip a single malformed JSONL line
             except Exception:
-                pass
+                logger.warning("Failed to read image index %s", idx, exc_info=True)
         # Newest last → reverse for newest first
         all_items.reverse()
         k = (kind or "").strip().lower()
@@ -481,9 +486,9 @@ def create_app() -> FastAPI:
                         try:
                             all_items.append(json.loads(line))
                         except Exception:
-                            continue
+                            continue  # skip a single malformed JSONL line
             except Exception:
-                pass
+                logger.warning("Failed to read message archive %s", log, exc_info=True)
         all_items.reverse()
         total = len(all_items)
         items = all_items[offset : offset + limit]
@@ -638,7 +643,7 @@ def create_app() -> FastAPI:
                 # Use long-term totals for top.users_by_images
                 result["top"]["users_by_images"] = result["top_images"]
             except Exception:
-                pass
+                logger.debug("Failed to derive totals from user_stats", exc_info=True)
 
         # Optional channel name mapping
         channel_name_map: dict[str, str] = {}
@@ -648,7 +653,7 @@ def create_app() -> FastAPI:
             if ch_file.exists():
                 channel_name_map.update(json.loads(ch_file.read_text(encoding="utf-8")))
         except Exception:
-            pass
+            logger.warning("Could not parse channel_names.json", exc_info=True)
         try:
             # Env pair list: CHANNEL_NAMES = "123:general,456:random"
             raw_pairs = settings.channel_names_raw or None
@@ -661,14 +666,14 @@ def create_app() -> FastAPI:
                         cid, name = pair.split(":", 1)
                         channel_name_map[str(cid.strip())] = name.strip()
         except Exception:
-            pass
+            logger.warning("Could not parse CHANNEL_NAMES env var", exc_info=True)
         try:
             # Env JSON mapping: CHANNEL_NAMES_JSON = '{"123":"general"}'
             raw_json = settings.channel_names_json or None
             if raw_json:
                 channel_name_map.update(json.loads(raw_json))
         except Exception:
-            pass
+            logger.warning("Could not parse CHANNEL_NAMES_JSON env var", exc_info=True)
 
         # Scan messages.jsonl for last 24h count, 7d series and top users/channels
         user_msg_counter: Counter[str] = Counter()
@@ -752,7 +757,7 @@ def create_app() -> FastAPI:
                 result["hourly_24h"]["images_analyzed"] = hourly_vis
                 result["event_totals"] = dict(sorted(event_totals.items(), key=lambda kv: (-kv[1], kv[0])))
             except Exception:
-                pass
+                logger.warning("Failed while scanning %s for stats", media_messages, exc_info=True)
             # Set total messages after scan
             result["totals"]["messages"] = total_messages
         else:
@@ -786,7 +791,7 @@ def create_app() -> FastAPI:
                             user_images_index_counter[o.get("username") or "Unknown"] += 1
                             channel_images_index_counter[str(o.get("channel_id") or "unknown")] += 1
             except Exception:
-                pass
+                logger.warning("Failed to read image index %s for stats", images_index, exc_info=True)
 
         # If user_stats.json provided generated total, keep max of the two to avoid regressions
         result["totals"]["images_generated"] = max(result["totals"]["images_generated"], gen_total)
@@ -862,7 +867,7 @@ def create_app() -> FastAPI:
                 if result.get("last30d_messages", 0) < result.get("last7d_messages", 0):
                     result["last30d_messages"] = result["last7d_messages"]
         except Exception:
-            pass
+            logger.debug("Failed to derive period message counters", exc_info=True)
 
         # Tops
         if not used_sqlite_messages:
@@ -914,7 +919,7 @@ def create_app() -> FastAPI:
             if thumb_path.exists():
                 thumb_path.unlink()
         except Exception:
-            pass
+            logger.debug("Could not delete thumbnail %s", thumb_path, exc_info=True)
         # Rewrite index.jsonl excluding this filename
         try:
             if idx_path.exists():
@@ -934,7 +939,7 @@ def create_app() -> FastAPI:
                 # Replace atomically
                 Path(tmp.name).replace(idx_path)
         except Exception:
-            pass
+            logger.warning("Failed to rewrite image index after deleting %s", filename, exc_info=True)
         return JSONResponse({"ok": True, "deleted": deleted})
 
     # Environment editor
@@ -1245,7 +1250,7 @@ def create_app() -> FastAPI:
                 if isinstance(raw, dict):
                     data.update(raw)
         except Exception:
-            pass
+            logger.debug("Could not read bot_dashboard.json", exc_info=True)
 
         # Daily post history (file-based, readable from any process)
         try:
@@ -1262,7 +1267,7 @@ def create_app() -> FastAPI:
                             posted_today[ch_id] = entry.get("title", "")
                 data["daily_post_today"] = posted_today
         except Exception:
-            pass
+            logger.debug("Could not read daily_post_history.json for dashboard", exc_info=True)
 
         # Self-knowledge pending (accumulator file is on disk)
         try:
@@ -1275,7 +1280,7 @@ def create_app() -> FastAPI:
             _flags = read_runtime_flags()
             data["self_md_enabled"] = bool(settings.self_md_enabled)
         except Exception:
-            pass
+            logger.debug("Could not read self-knowledge accumulator for dashboard", exc_info=True)
 
         return JSONResponse(data)
 
@@ -1327,7 +1332,7 @@ def create_app() -> FastAPI:
                 result["bluesky"]["reposts"] = reposts[-50:]
                 result["bluesky"]["reposts_today"] = sum(1 for r in reposts if r.get("ts", "").startswith(today))
         except Exception:
-            pass
+            logger.debug("Could not read bluesky_engage_history.json", exc_info=True)
 
         # Daily post history
         try:
@@ -1344,7 +1349,7 @@ def create_app() -> FastAPI:
                 result["daily_posts"]["posts"] = all_posts[:50]
                 result["daily_posts"]["posts_today"] = sum(1 for p in all_posts if p.get("date") == today)
         except Exception:
-            pass
+            logger.debug("Could not read daily_post_history.json for activity", exc_info=True)
 
         return JSONResponse(result)
 

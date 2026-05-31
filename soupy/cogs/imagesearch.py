@@ -96,7 +96,18 @@ class ImageSearchCog(commands.Cog):
                 with DDGS() as ddg:
                     return list(ddg.images(query=q, max_results=300))
 
-            results = await asyncio.to_thread(_run_images, query)
+            # WHY: distinguish a DDG backend failure (network) from a completed
+            # search that genuinely returned nothing, so the user gets an accurate
+            # message instead of a raw exception string or a misleading "no images".
+            try:
+                results = await asyncio.to_thread(_run_images, query)
+            except Exception as e:
+                logger.warning(f"Image search backend failed for '{query}': {e}")
+                await interaction.followup.send(
+                    "❌ Image search failed — couldn't reach DuckDuckGo. Try again in a moment.",
+                    ephemeral=True,
+                )
+                return
 
             if not results:
                 await interaction.followup.send("❌ No images found.", ephemeral=True)

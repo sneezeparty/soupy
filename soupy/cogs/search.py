@@ -112,6 +112,15 @@ async def async_chat_completion(*args, **kwargs):
     return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
 
+class SearchBackendError(Exception):
+    """Raised when every DuckDuckGo search backend failed or timed out.
+
+    Distinct from an empty result list, which means the query genuinely had no
+    hits. Lets ``/soupysearch`` show a network-error message instead of "no
+    results found".
+    """
+
+
 class SearchCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -191,6 +200,11 @@ class SearchCog(commands.Cog):
             with DDGS() as ddg:
                 return list(ddg.text(**kwargs))
 
+        # WHY: track whether any backend actually *completed* (even with zero
+        # results) vs. all of them erroring/timing out. An empty return then means
+        # "genuinely no results"; total failure raises SearchBackendError so the
+        # command can tell the user it was a network problem, not an empty query.
+        any_completed = False
         for attempt in attempts:
             try:
                 logger.debug(f"Trying search backend: {attempt['label']}")
@@ -198,6 +212,7 @@ class SearchCog(commands.Cog):
                     asyncio.to_thread(_run_text, attempt["kwargs"]),
                     timeout=12,
                 )
+                any_completed = True
                 logger.info(
                     f"Search backend {attempt['label']} returned {len(results_list)} results in "
                     f"{round(time.time() - start, 2)}s"
@@ -208,6 +223,8 @@ class SearchCog(commands.Cog):
                 logger.warning(f"Search attempt timed out: {attempt['label']}")
             except Exception as e:
                 logger.error(f"Search attempt failed ({attempt['label']}): {e}")
+        if not any_completed:
+            raise SearchBackendError("all DuckDuckGo search backends failed or timed out")
         return []
 
     async def select_articles(self, search_results: List[Dict]) -> List[Dict]:
@@ -439,7 +456,14 @@ class SearchCog(commands.Cog):
 
         try:
             # Get initial search results (with resilient backends and timeout)
-            initial_results = await self.perform_text_search(query, max_results=10)
+            try:
+                initial_results = await self.perform_text_search(query, max_results=10)
+            except SearchBackendError:
+                await interaction.followup.send(
+                    "❌ Search failed — couldn't reach DuckDuckGo. Try again in a moment.",
+                    ephemeral=True,
+                )
+                return
             logger.info(f"Initial search results count: {len(initial_results)} for query='{query}'")
 
             if not initial_results:

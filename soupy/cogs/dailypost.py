@@ -297,6 +297,7 @@ async def _fetch_article_content(url: str, timeout: int = 10) -> Optional[Dict[s
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                 if resp.status != 200:
+                    logger.debug(f"Article fetch got HTTP {resp.status} for {url}")
                     return None
                 html = await resp.text()
 
@@ -320,9 +321,11 @@ async def _fetch_article_content(url: str, timeout: int = 10) -> Optional[Dict[s
 
         content, pub_date = await asyncio.to_thread(_extract)
         if not content:
+            logger.debug(f"Article fetch extracted no content from {url}")
             return None
         return {"content": content[:4000], "date": pub_date}
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Article fetch failed for {url}: {e}")
         return None
 
 

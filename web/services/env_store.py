@@ -30,6 +30,7 @@ those. The CLAUDE.md file documents this restriction.
 from __future__ import annotations
 
 import codecs
+import os
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -184,4 +185,10 @@ def write_env(path: Path, updates: Dict[str, str]) -> None:
             else:
                 out_lines.append(f"{k}={v}")
 
-    path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    # WHY: write to a sibling temp file then os.replace it into place, so a crash
+    # mid-write can't truncate the live .env-stable. os.replace is atomic on the
+    # same filesystem. Mirrors the tmp+os.replace pattern used for data/ state
+    # files (e.g. soupy/cogs/musings.py).
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
