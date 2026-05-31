@@ -37,7 +37,7 @@ Editable from the web Environment Editor (Bluesky Integration tab):
 - **`BLUESKY_MAX_FOLLOWS_PER_DAY`** (default `2`) — Daily cap on follows.
 - **`BLUESKY_ARTICLE_FRESHNESS_DAYS`** (default `14`) — Reject articles older than this when picking originals.
 
-The last four used to be hardcoded in `soupy_bluesky.py` and were lifted into env vars during M2 work — they are now tunable from the panel without code changes. Defaults match the historical hardcoded values.
+The last four used to be hardcoded in `soupy/cogs/bluesky.py` and were lifted into env vars during M2 work — they are now tunable from the panel without code changes. Defaults match the historical hardcoded values.
 
 ## Manual control (`/soupysky`)
 

@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Soupy** is a fully-local Discord bot combining AI chat, image generation, web search, autonomous Discord posts, and an autonomous Bluesky presence. It runs entirely on-premises against LM Studio (or any OpenAI-compatible LLM server) and a Stable Diffusion backend. A FastAPI web control panel manages the bot process, streams logs, and edits configuration.
 
+**Maintainer docs:** [ARCHITECTURE.md](ARCHITECTURE.md) (system design, invariants, IPC), [CONTRIBUTING.md](CONTRIBUTING.md) (conventions + how to extend), and [ROADMAP.md](ROADMAP.md) (prioritized backlog). This file is the quick-reference; those go deeper.
+
 ---
 
 ## Installer
@@ -54,20 +56,20 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 
 **Three tiers:**
 
-1. **Discord bot** — `soupy_remastered_stablediffusion.py` is the entrypoint and owns chat handling, image generation (`SDQueue`), event handlers, and most slash commands. At `on_ready` it loads five discord.py extensions:
-   - `soupy_search` — `/soupysearch`
-   - `soupy_imagesearch` — `/soupyimage`
-   - `soupy_dailypost` — `/soupypost` + autonomous daily article posts
-   - `soupy_musings` — `/soupymuse` + periodic "thinking out loud"
-   - `soupy_bluesky` — `/soupysky` + autonomous Bluesky activity
+1. **Discord bot** — `soupy_remastered_stablediffusion.py` is the entrypoint and owns chat handling, image generation (`SDQueue`), event handlers, and most slash commands. At `on_ready` it loads five discord.py extensions from the `soupy/cogs/` package:
+   - `soupy.cogs.search` — `/soupysearch`
+   - `soupy.cogs.imagesearch` — `/soupyimage`
+   - `soupy.cogs.dailypost` — `/soupypost` + autonomous daily article posts
+   - `soupy.cogs.musings` — `/soupymuse` + periodic "thinking out loud"
+   - `soupy.cogs.bluesky` — `/soupysky` + autonomous Bluesky activity
 
 2. **Web control panel** (`web/`) — FastAPI app that manages the bot subprocess (`web/services/bot_runner.py`), streams its log via WebSocket (`web/services/log_stream.py`), reads/writes `.env-stable` (`web/services/env_store.py`), and exposes archive/stats/runtime-flag endpoints.
 
 3. **External services** — LM Studio (chat + embeddings, OpenAI-compatible), Stable Diffusion FastAPI backend (image gen), DuckDuckGo (search), Bluesky AT Protocol (autonomous posts), and per-guild SQLite databases for message archive + RAG.
 
 **Cross-module imports to be aware of:**
-- `soupy_dailypost.py` imports `_fetch_og_image` and `_post_url` from `soupy_bluesky` for cross-posting articles to Bluesky.
-- `soupy_bluesky.py` imports `_extract_date_from_html` and `_estimate_article_age_days` from `soupy_dailypost` for article freshness checks.
+- `soupy/cogs/dailypost.py` imports `_fetch_og_image` and `_post_url` from `soupy/cogs/bluesky.py` for cross-posting articles to Bluesky.
+- `soupy/cogs/bluesky.py` imports `_extract_date_from_html` and `_estimate_article_age_days` from `soupy/cogs/dailypost.py` for article freshness checks.
 - All cogs share the same `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `LOCAL_CHAT` env vars and instantiate their own `OpenAI` client.
 
 ---
@@ -77,11 +79,14 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | File | Purpose |
 |------|---------|
 | [soupy_remastered_stablediffusion.py](soupy_remastered_stablediffusion.py) | Main bot — chat, image gen, core slash commands, event loop |
-| [soupy_search.py](soupy_search.py) | Cog — DuckDuckGo web search + LLM summary |
-| [soupy_imagesearch.py](soupy_imagesearch.py) | Cog — DuckDuckGo image search |
-| [soupy_dailypost.py](soupy_dailypost.py) | Cog — autonomous daily article posts to Discord (+ optional Bluesky cross-post) |
-| [soupy_musings.py](soupy_musings.py) | Cog — periodic reflective musings in a configured channel |
-| [soupy_bluesky.py](soupy_bluesky.py) | Cog — autonomous Bluesky replies, quote-posts, original posts |
+| [soupy/cogs/search.py](soupy/cogs/search.py) | Cog — DuckDuckGo web search + LLM summary |
+| [soupy/cogs/imagesearch.py](soupy/cogs/imagesearch.py) | Cog — DuckDuckGo image search |
+| [soupy/cogs/dailypost.py](soupy/cogs/dailypost.py) | Cog — autonomous daily article posts to Discord (+ optional Bluesky cross-post) |
+| [soupy/cogs/musings.py](soupy/cogs/musings.py) | Cog — periodic reflective musings in a configured channel |
+| [soupy/cogs/bluesky.py](soupy/cogs/bluesky.py) | Cog — autonomous Bluesky replies, quote-posts, original posts |
+| [soupy/settings.py](soupy/settings.py) | Typed, cached config accessors over `.env-stable` |
+| [soupy/prompts.py](soupy/prompts.py) | Prompt loader (env → custom file → default → fallback) |
+| [soupy/triggers.py](soupy/triggers.py) | Pure respond/don't-respond predicates |
 | [run_all.py](run_all.py) | Launcher: starts uvicorn with `SOUPY_AUTOSTART_BOT=1` |
 | [web/app.py](web/app.py) | FastAPI app — routes, WebSocket, archive/stats endpoints |
 | [web/services/bot_runner.py](web/services/bot_runner.py) | Spawns and manages the bot subprocess via PTY |
@@ -168,11 +173,11 @@ See [requirements.txt](requirements.txt) for the full dependency list. Vision (`
 | `/img2img` | main | Transform an image with a prompt |
 | `/inpaint` | main | Inpaint an image with a mask + prompt |
 | `/outpaint <prompt> <direction>` | main | Extend image by ~25% |
-| `/soupysearch <query>` | soupy_search | Web search + LLM summary |
-| `/soupyimage <query>` | soupy_imagesearch | DuckDuckGo image search |
-| `/soupypost` | soupy_dailypost | Force daily article post (owner) |
-| `/soupymuse` | soupy_musings | Trigger a musing (owner) |
-| `/soupysky [action] [url]` | soupy_bluesky | Bluesky reply/repost/post (owner) |
+| `/soupysearch <query>` | soupy.cogs.search | Web search + LLM summary |
+| `/soupyimage <query>` | soupy.cogs.imagesearch | DuckDuckGo image search |
+| `/soupypost` | soupy.cogs.dailypost | Force daily article post (owner) |
+| `/soupymuse` | soupy.cogs.musings | Trigger a musing (owner) |
+| `/soupysky [action] [url]` | soupy.cogs.bluesky | Bluesky reply/repost/post (owner) |
 | `/soupyself [action]` | main | View/manage self-knowledge document (owner) |
 | `/soupyscan` | main | Archive messages to database (owner) |
 | `/soupystats` | main | Server and bot statistics |

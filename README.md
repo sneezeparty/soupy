@@ -62,6 +62,14 @@ After the bot is running, run `/soupyscan` once per guild as an owner to archive
 
 ## Documentation
 
+For contributors and maintainers:
+
+- `ARCHITECTURE.md` — how the two processes, cogs, and database tier fit together
+- `CONTRIBUTING.md` — dev setup, conventions, and how to add a cog / config var / prompt
+- `ROADMAP.md` — prioritized backlog of planned upgrades and polish
+
+For operators:
+
 - `docs/SETUP.md` — full first-run walkthrough, archive scan tuning, RAG verification
 - `docs/WEB_PANEL.md` — web control panel deep dive
 - `docs/ENV_REFERENCE.md` — every variable in `.env-stable`
