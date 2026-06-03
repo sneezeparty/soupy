@@ -259,6 +259,12 @@ class Settings:
     def rag_reindex_interval_hours(self) -> int:
         return _env_int("RAG_REINDEX_INTERVAL_HOURS", 6, minimum=1)
 
+    @cached_property
+    def rag_min_sim(self) -> float:
+        # Cosine-similarity floor for vector RAG chunks; matches below this are
+        # dropped rather than padded into the prompt. 0 disables the floor.
+        return _env_float("RAG_MIN_SIM", 0.45, minimum=0.0, maximum=1.0)
+
     # ----- Stable Diffusion ----------------------------------------------
 
     @cached_property

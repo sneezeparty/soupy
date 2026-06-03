@@ -1591,6 +1591,18 @@ async def fetch_rag_context_for_query(
             prefer_user_id=_boost_uid,
             user_boost_multiplier=ubm,
         )
+        # Relevance floor: drop low-similarity chunks entirely instead of padding
+        # the prompt out to top_k with off-topic matches. Mirrors the
+        # self-knowledge threshold below (RAG_SELF_KNOWLEDGE_MIN_SIM).
+        try:
+            _min_sim = float(os.getenv("RAG_MIN_SIM", "0.45"))
+        except ValueError:
+            _min_sim = 0.45
+        if _min_sim > 0 and hits:
+            _pre = len(hits)
+            hits = [h for h in hits if h[0] >= _min_sim]
+            if _pre != len(hits):
+                logger.info("  vectors  : dropped %d below sim %.2f", _pre - len(hits), _min_sim)
         _mode_tag = "first-person" if fp else ("subject" if _subject_uid else "third-person")
         logger.info(
             "  vectors  : %d hits | boost=%.1fx | mode=%s | tokens=%s",
