@@ -6,6 +6,33 @@
     return Number(v || 0).toLocaleString();
   }
 
+  /**
+   * Friendly labels for an image-archive row, keyed off `row.source` (newer
+   * entries) with a legacy fallback for rows written before the tag existed.
+   * Vision rows are recognised by `event_type === "vision"` regardless of source.
+   */
+  function imageSourceLabel(row) {
+    if (!row) return { badge: "?", badgeClass: "", pill: "Unknown", title: "Unknown" };
+    if (row.event_type === "vision") {
+      return { badge: "V", badgeClass: "", pill: "Vision", title: "Vision (image analyzed by the bot)" };
+    }
+    const src = (row.source || "").toLowerCase();
+    switch (src) {
+      case "flux":
+        return { badge: "Flux", badgeClass: "archive-img-badge--flux", pill: "Flux", title: "Flux (local mflux, text-to-image)" };
+      case "flux-img2img":
+        return { badge: "Flux i2i", badgeClass: "archive-img-badge--flux", pill: "Flux i2i", title: "Flux (noise-mix image-to-image)" };
+      case "flux-edit":
+        return { badge: "Flux ✎", badgeClass: "archive-img-badge--flux-edit", pill: "Flux Edit", title: "Flux Klein-Edit (reference-image conditioning)" };
+      case "sd":
+      case "":
+      default:
+        // Legacy rows have no `source` field — assume SD (the only engine that
+        // existed when those rows were written).
+        return { badge: "SD", badgeClass: "archive-img-badge--gen", pill: "Stable Diffusion", title: "Stable Diffusion (remote GPU)" };
+    }
+  }
+
   /** One line in the profile-batch activity console (timestamp split for readability). */
   function profileBatchLogLineRow(line, idx) {
     var s = String(line || "");
@@ -999,8 +1026,8 @@
             ? e("p", { className: "muted" }, "No images in the index yet.")
             : imgItems.map(function (row, i) {
                 var fn = row.filename || "";
-                var isVis = row.event_type === "vision";
                 var sel = rowSelected(row);
+                var label = imageSourceLabel(row);
                 return e(
                   "div",
                   {
@@ -1032,9 +1059,14 @@
                         ev.target.src = "/media/images/" + encodeURIComponent(fn);
                       },
                     }),
-                    isVis
-                      ? e("span", { className: "archive-img-badge" }, "V")
-                      : e("span", { className: "archive-img-badge archive-img-badge--gen" }, "SD")
+                    e(
+                      "span",
+                      {
+                        className: ("archive-img-badge " + (label.badgeClass || "")).trim(),
+                        title: label.title,
+                      },
+                      label.badge
+                    )
                   )
                 );
               })
@@ -1068,7 +1100,10 @@
                     e(
                       "div",
                       { className: "archive-caption-meta" },
-                      e("span", { className: "pill" }, detail.event_type === "vision" ? "Vision" : "Generated"),
+                      (function () {
+                        var lbl = imageSourceLabel(detail.row || detail);
+                        return e("span", { className: "pill", title: lbl.title }, lbl.pill);
+                      })(),
                       e("strong", { className: "archive-caption-user" }, detail.username || "—"),
                       e("span", { className: "muted mono archive-caption-ts" }, (detail.ts || "").replace("T", " ").slice(0, 19)),
                       detail.meta &&

@@ -170,6 +170,7 @@ See [requirements.txt](requirements.txt) for the full dependency list. Vision (`
 | Command | Cog | Description |
 |---------|-----|-------------|
 | `/sd <prompt>` | main | Generate image via Stable Diffusion |
+| `/flux <description> [image]` | soupy.cogs.flux | Generate image **locally** via Flux/mflux (text2img, or img2img when an image is attached) — backed by `flux_server.py` |
 | `/img2img` | main | Transform an image with a prompt |
 | `/inpaint` | main | Inpaint an image with a mask + prompt |
 | `/outpaint <prompt> <direction>` | main | Extend image by ~25% |

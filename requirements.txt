@@ -38,3 +38,10 @@ timezonefinder>=6.4.1
 # PyTorch (CUDA 11.8) — install separately:
 # pip install torch==2.4.0+cu118 torchvision==0.19.0+cu118 torchaudio==2.4.0+cu118 \
 #     --extra-index-url https://download.pytorch.org/whl/cu118
+
+# Local Flux backend (flux_server.py) — install ONLY on the Apple Silicon Mac
+# that runs the model; not needed on a bot-only host. Install into the SAME venv
+# as the bot (activate .venv first, or use .venv/bin/python -m pip):
+#   pip install mflux python-multipart
+# Pulls torch/mlx/transformers for Apple Silicon. fastapi, uvicorn and pillow are
+# already pulled in above. Verified against mflux 0.17.5.

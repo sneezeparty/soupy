@@ -738,6 +738,18 @@ textarea.personality-editor {
   color: #0d1608;
 }
 
+/* Flux text2img / noise-mix img2img — cool blue to distinguish from SD green. */
+.archive-img-badge--flux {
+  background: color-mix(in srgb, #7aa2f7 88%, black 12%);
+  color: #0a1426;
+}
+
+/* Flux Klein-Edit — warmer accent so edits stand apart from plain Flux runs. */
+.archive-img-badge--flux-edit {
+  background: color-mix(in srgb, #e0af68 88%, black 12%);
+  color: #1a1208;
+}
+
 .archive-img-caption {
   font-size: 0.65rem;
   padding: 0.3rem 0.45rem 0;

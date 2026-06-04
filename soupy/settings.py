@@ -299,6 +299,81 @@ class Settings:
     def sd_default_height(self) -> int:
         return _env_int("SD_DEFAULT_HEIGHT", 1024, minimum=64)
 
+    # ----- Flux (local mflux backend) ------------------------------------
+    # A second, *local* image backend running on the Mac via mflux (MLX). Unlike
+    # the remote SD server, flux_server.py runs on the same host. Model is chosen
+    # by FLUX_MODEL so swapping FLUX.1 schnell -> FLUX.2 klein is config-only.
+
+    @cached_property
+    def flux_enabled(self) -> bool:
+        return _env_bool("FLUX_ENABLED", default=False)
+
+    @cached_property
+    def flux_server_url(self) -> str:
+        # Base URL of the local mflux HTTP server (e.g. http://127.0.0.1:4942).
+        return _env_str("FLUX_SERVER_URL")
+
+    @cached_property
+    def flux_img2img_url(self) -> str:
+        # Optional explicit img2img endpoint; cog falls back to {server}/flux_img2img.
+        return _env_str("FLUX_IMG2IMG_URL")
+
+    @cached_property
+    def flux_model(self) -> str:
+        # mflux model name: "schnell" / "dev" (FLUX.1) or a FLUX.2 klein/dev id.
+        return _env_str("FLUX_MODEL", "schnell")
+
+    @cached_property
+    def flux_quantize(self) -> int:
+        # Quantization bits for mflux (4 or 8). 4-bit keeps schnell ~8-12GB.
+        return _env_int("FLUX_QUANTIZE", 4)
+
+    @cached_property
+    def flux_steps(self) -> int:
+        # schnell is step-distilled (2-4 steps); dev/klein want more.
+        return _env_int("FLUX_STEPS", 4, minimum=1)
+
+    @cached_property
+    def flux_guidance(self) -> float:
+        # schnell is guidance-distilled, so 0.0 is correct; dev wants ~3.5.
+        return _env_float("FLUX_GUIDANCE", 0.0)
+
+    @cached_property
+    def flux_default_strength(self) -> float:
+        # Default img2img strength when /flux is given an input image.
+        return _env_float("FLUX_DEFAULT_STRENGTH", 0.35, minimum=0.0, maximum=1.0)
+
+    # ----- Flux edit pipeline (FLUX.2-Klein only) -----------------------
+    # When enabled, /flux with an attached image routes to flux_server.py's
+    # /flux_edit endpoint, which uses Flux2KleinEdit (reference-image-token
+    # conditioning) instead of the noise-mix /flux_img2img path. Much better
+    # prompt following for "make this anime" / "set background on fire" edits.
+    # Costs ~5-8 GB additional RAM on the flux_server host once loaded.
+
+    @cached_property
+    def flux_edit_enabled(self) -> bool:
+        return _env_bool("FLUX_EDIT_ENABLED", default=False)
+
+    @cached_property
+    def flux_edit_url(self) -> str:
+        # Optional explicit edit endpoint; cog falls back to {server}/flux_edit.
+        return _env_str("FLUX_EDIT_URL")
+
+    @cached_property
+    def flux_edit_model(self) -> str:
+        # FLUX.2 klein variant for the edit pipeline (4b/9b, base or distilled).
+        return _env_str("FLUX_EDIT_MODEL", "flux2-klein-4b")
+
+    @cached_property
+    def flux_edit_steps(self) -> int:
+        # Distilled klein-edit runs in 4 steps; base variants want more.
+        return _env_int("FLUX_EDIT_STEPS", 4, minimum=1)
+
+    @cached_property
+    def flux_edit_guidance(self) -> float:
+        # Distilled klein-edit requires 1.0; base variants accept >1.0.
+        return _env_float("FLUX_EDIT_GUIDANCE", 1.0, minimum=0.0)
+
     # ----- Bluesky -------------------------------------------------------
 
     @cached_property

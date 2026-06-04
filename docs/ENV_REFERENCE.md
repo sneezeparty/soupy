@@ -104,6 +104,40 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`SD_TALL_WIDTH`** — `1024` — Width preset for tall-aspect generation.
 - **`SD_TALL_HEIGHT`** — `1440` — Height preset for tall-aspect generation.
 
+## Flux (Local) Configuration
+
+The `/flux` command's local mflux/MLX backend. Unlike SD (remote GPU host), the
+Flux model runs on the same Mac as the bot via `flux_server.py`. The bot only
+talks to it over HTTP, exactly like SD.
+
+- **`FLUX_ENABLED`** — `false` — Soft toggle for the Flux feature (the cog also no-ops if `FLUX_SERVER_URL` is unset).
+- **`FLUX_SERVER_URL`** — `http://127.0.0.1:4942` — Base URL of the local `flux_server.py` mflux backend.
+- **`FLUX_IMG2IMG_URL`** — *(empty)* — Optional explicit img2img endpoint; defaults to `{FLUX_SERVER_URL}/flux_img2img`.
+- **`FLUX_MODEL`** — `schnell` — mflux model: `schnell`/`dev` (FLUX.1), or a FLUX.2 klein/dev id later. Server-side; swapping models needs no code change.
+- **`FLUX_QUANTIZE`** — `4` — Quantization bits (4 or 8). 4-bit keeps FLUX.1 schnell ~8-12GB.
+- **`FLUX_LOW_RAM`** — `0` — Release text encoders between runs to save RAM (needed for tight memory / FLUX.2).
+- **`FLUX_STEPS`** — `4` — Inference steps. schnell is step-distilled (2-4); dev/klein want more.
+- **`FLUX_GUIDANCE`** — `0.0` — Guidance scale. schnell is guidance-distilled (0); klein/dev want `1.0+`. `flux_server.py` auto-substitutes `1.0` when this is left at `0.0` on a guided model.
+- **`FLUX_DEFAULT_STRENGTH`** — `0.35` — Default img2img strength when `/flux` is given an input image.
+- **`FLUX_SERVER_HOST`** — `127.0.0.1` — Bind host for `flux_server.py`.
+- **`FLUX_SERVER_PORT`** — `4942` — Bind port for `flux_server.py`.
+
+### Flux Klein-Edit Pipeline (FLUX.2 only)
+
+When enabled, `/flux` with an attached image routes to `flux_server.py`'s
+`/flux_edit` endpoint, which uses `Flux2KleinEdit`. Reference-image latent
+tokens are concatenated with the noise latents inside the transformer — much
+stronger prompt-driven editing than the noise-mix `/flux_img2img` path.
+Strength is intentionally ignored here. First request loads klein weights
+(~5 GB at `FLUX_QUANTIZE=4`, ~15 GB unquantized) and adds ~5-8 GB peak RAM
+alongside the `FLUX_MODEL` already loaded.
+
+- **`FLUX_EDIT_ENABLED`** — `false` — Auto-route `/flux <prompt> <image>` to `/flux_edit` instead of `/flux_img2img`.
+- **`FLUX_EDIT_URL`** — *(empty)* — Optional explicit edit endpoint; defaults to `{FLUX_SERVER_URL}/flux_edit`.
+- **`FLUX_EDIT_MODEL`** — `flux2-klein-4b` — FLUX.2 klein variant for editing (`flux2-klein-4b`/`9b`, plus `*-base-*` non-distilled variants).
+- **`FLUX_EDIT_STEPS`** — `4` — Distilled klein-edit is step-distilled; base variants want more.
+- **`FLUX_EDIT_GUIDANCE`** — `1.0` — Distilled FLUX.2-klein requires `1.0`; base variants accept `>1.0`.
+
 ## Rate Limiting & Permissions
 
 - **`MAX_INTERACTIONS_PER_MINUTE`** — `4` — Per-user rate limit for interactive commands.

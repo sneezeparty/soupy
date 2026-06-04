@@ -454,6 +454,12 @@ class SDQueue:
 
                 if item["type"] == "sd":
                     await _sd.process_sd_image(item["interaction"], item["description"], item["size"], item["seed"])
+                elif item["type"] == "flux":
+                    # Local mflux backend; the cog interprets the whole item
+                    # (slash command carries a size, remix/edit carry dims).
+                    from soupy.cogs import flux as _flux
+
+                    await _flux.process_flux_image(item)
                 elif item["type"] == "outpaint":
                     await _sd.handle_outpaint(
                         item["interaction"],
@@ -3128,6 +3134,13 @@ async def load_extensions():
         logger.info("🎨 Loaded sd (image generation) extension")
     except Exception as e:
         logger.error(f"❌ Failed to load sd extension: {e}")
+
+    # flux after sd: it reuses soupy.cogs.sd.archive_image_bytes, so sd must load first.
+    try:
+        await bot.load_extension("soupy.cogs.flux")
+        logger.info("⚡ Loaded flux (local Flux image generation) extension")
+    except Exception as e:
+        logger.error(f"❌ Failed to load flux extension: {e}")
 
     try:
         await bot.load_extension("soupy.cogs.search")

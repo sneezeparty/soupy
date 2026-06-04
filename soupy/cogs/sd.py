@@ -240,6 +240,87 @@ async def handle_random(interaction, width, height, queue_size, direct_prompt=No
         else:
             await interaction.followup.send(f"❌ Error generating random prompt: {e}", ephemeral=True)
 
+async def build_random_prompt(direct_prompt: Optional[str] = None):
+    """Build a random image prompt. Returns ``(prompt, selected_terms_str, duration)``.
+
+    Shared by ``handle_random`` (the SD R-Fancy / R-Keyword buttons) and the Flux
+    cog's equivalents. With ``direct_prompt`` set it's terms-only (R-Keyword);
+    otherwise it asks the LLM to elaborate random terms (R-Fancy). Raises
+    ``RuntimeError`` when no ``RANDOMPROMPT`` is configured (non-direct path).
+    Mirror of the inline logic in ``handle_random`` — keep the two in sync.
+    """
+    start = time.perf_counter()
+    if direct_prompt:
+        return direct_prompt, direct_prompt, time.perf_counter() - start
+
+    if not RANDOMPROMPT:
+        raise RuntimeError("No RANDOMPROMPT found in .env.")
+
+    random_terms = get_random_terms()
+    art_style = random_terms.get("Artistic Rendering Style", "")
+    other_terms = [term for category, term in random_terms.items() if category != "Artistic Rendering Style"]
+    style_emphasis = (
+        f"The image should be rendered combining these artistic styles: {art_style}. "
+        f"These artistic styles should be the dominant visual characteristics, "
+        f"blended together, with the following elements incorporated within these styles: {', '.join(other_terms)}"
+    )
+    sd_hint = ""
+    if "SD Keywords" in random_terms:
+        sd_hint = f"\nFocus on these rendering/photographic cues as global style constraints: {random_terms['SD Keywords']}."
+    combined_prompt = f"{RANDOMPROMPT} {style_emphasis}{sd_hint}"
+
+    messages_for_llm = [
+        {
+            "role": "system",
+            "content": "You are an assistant that creates image prompts with strong emphasis on artistic style. "
+            "The artistic rendering style should be prominently featured in your prompt, affecting every element described.",
+        },
+        {"role": "user", "content": combined_prompt},
+    ]
+    response = await async_chat_completion(
+        model=os.getenv("LOCAL_CHAT"),
+        messages=messages_for_llm,
+        temperature=float(os.getenv("RANDOM_PROMPT_TEMPERATURE", 0.8)),
+        max_tokens=325,
+    )
+    random_prompt = response.choices[0].message.content.strip()
+
+    selected_terms_list = []
+    for _category, terms in random_terms.items():
+        selected_terms_list.extend([term.strip() for term in terms.split(",")])
+    selected_terms_str = ", ".join(selected_terms_list)
+    return random_prompt, selected_terms_str, time.perf_counter() - start
+
+
+async def build_fancy_prompt(prompt: str):
+    """LLM-rewrite ``prompt`` into a more elaborate "fancy" version.
+
+    Returns ``(cleaned_prompt, duration)``. Shared by the SD and Flux Fancy
+    buttons. Mirror of the inline logic in ``handle_fancy`` — keep in sync.
+    """
+    fancy_instructions = soupy_prompts.load_prompt("fancy", fallback="")
+    combined_instructions = f"{fancy_instructions}\n\nThe prompt you are elaborating on is: {prompt}"
+    start = time.perf_counter()
+    messages = [
+        {"role": "system", "content": combined_instructions},
+        {"role": "user", "content": "Please rewrite the above prompt accordingly."},
+    ]
+    response = await async_chat_completion(
+        model=os.getenv("LOCAL_CHAT"),
+        messages=messages,
+        temperature=float(os.getenv("FANCY_PROMPT_TEMPERATURE", 0.7)),
+        max_tokens=int(os.getenv("FANCY_MAX_TOKENS", 150)),
+    )
+    fancy_prompt = response.choices[0].message.content.strip()
+    duration = time.perf_counter() - start
+    cleaned_prompt = fancy_prompt.strip()
+    while (cleaned_prompt.startswith('"') and cleaned_prompt.endswith('"')) or (
+        cleaned_prompt.startswith("'") and cleaned_prompt.endswith("'")
+    ):
+        cleaned_prompt = cleaned_prompt[1:-1].strip()
+    return cleaned_prompt, duration
+
+
 def enhance_img2img_prompt(prompt: str, strength: float) -> str:
     """Enhance img2img prompts based on strength for better results."""
     # Base quality enhancers
@@ -554,6 +635,7 @@ def archive_image_bytes(
     seed: int,
     guild_id: int | None,
     channel_id: int | None,
+    source: str = "sd",
 ) -> None:
     try:
         import json
@@ -591,6 +673,7 @@ def archive_image_bytes(
             "seed": seed,
             "guild_id": guild_id,
             "channel_id": channel_id,
+            "source": source,
         }
         index_path = media / "images" / "index.jsonl"
         with open(index_path, "a", encoding="utf-8") as idx:

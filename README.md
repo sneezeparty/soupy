@@ -22,6 +22,7 @@ Soupy runs entirely on your own hardware against [LM Studio](https://lmstudio.ai
 - Periodic "thinking out loud" musings in a configured channel.
 - DuckDuckGo web and image search with LLM-summarized results.
 - Stable Diffusion image generation with remix, outpaint, edit, and random-prompt buttons.
+- Local Flux image generation via mflux/MLX on Apple Silicon (`/flux`) — text-to-image, image-to-image, and FLUX.2 Klein-Edit for genuine prompt-driven image editing.
 - Optional vision: routes Discord image attachments through a vision-capable LLM.
 - FastAPI web control panel for process control, live logs, env editing, stats, theming, and per-loop toggles.
 
