@@ -48,6 +48,31 @@
     return e("div", { key: "pbl-" + idx, className: "profile-batch-log-row profile-batch-log-row-raw" }, s);
   }
 
+  /**
+   * Shared panel state — uniform loading/error/empty/info presentation.
+   * Usage: PanelState({ kind: "loading"|"error"|"empty"|"info", message: "...", inline: true })
+   */
+  function PanelState(opts) {
+    var o = opts || {};
+    var kind = o.kind || "info";
+    var msg = o.message || "";
+    var children = o.children;
+    var inline = !!o.inline;
+    var cls = "panel-state panel-state--" + kind + (inline ? " panel-state--inline" : "");
+    var icon = null;
+    if (kind === "loading") icon = e("span", { className: "panel-state-spinner", "aria-hidden": "true" });
+    else if (kind === "error") icon = e("span", { className: "panel-state-glyph", "aria-hidden": "true" }, "!");
+    else if (kind === "empty") icon = e("span", { className: "panel-state-glyph", "aria-hidden": "true" }, "∅");
+    else if (kind === "info") icon = e("span", { className: "panel-state-glyph", "aria-hidden": "true" }, "i");
+    return e(
+      "div",
+      { className: cls, role: kind === "error" ? "alert" : "status", "aria-live": "polite" },
+      icon,
+      e("span", { className: "panel-state-text" }, msg),
+      children ? e("span", { className: "panel-state-extra" }, children) : null
+    );
+  }
+
   function previewText(text, maxLen) {
     var s = String(text || "").replace(/\s+/g, " ").trim();
     if (s.length <= maxLen) return s;
@@ -1256,6 +1281,10 @@
     const [logs, setLogs] = useState(["[loading logs...]"]);
     const [autoscroll, setAutoscroll] = useState(true);
     const [pauseLogs, setPauseLogs] = useState(false);
+    const [logsConnState, setLogsConnState] = useState("connecting");
+    const [logsRetryIn, setLogsRetryIn] = useState(0);
+    const [logFilter, setLogFilter] = useState("");
+    const [logLevels, setLogLevels] = useState({ DEBUG: true, INFO: true, WARNING: true, ERROR: true });
     const [dbStatus, setDbStatus] = useState({ databases: [] });
     const [dbGuild, setDbGuild] = useState("");
     const [dbTable, setDbTable] = useState("messages");
@@ -1294,6 +1323,9 @@
     const [overviewKnobs, setOverviewKnobs] = useState({ commands: false, rag: false });
     const logRef = useRef(null);
     const profBatchLogRef = useRef(null);
+    const logsAttemptRef = useRef(0);
+    const logsReconnectTimerRef = useRef(null);
+    const logsCountdownTimerRef = useRef(null);
     /** Last "next_index:profile_row_count" — refresh when either changes */
     const profBatchPickerSyncRef = useRef(null);
 
@@ -1329,6 +1361,49 @@
         return opts;
       },
       [envVars]
+    );
+
+    const displayNameById = useMemo(
+      function () {
+        const map = {};
+        function add(u) {
+          if (!u || u.user_id == null) return;
+          const id = String(u.user_id);
+          if (map[id]) return;
+          const label = String(u.label || u.nickname_hint || "").trim();
+          if (label) map[id] = label;
+        }
+        (dbPickerUsers || []).forEach(add);
+        (profPickerUsers || []).forEach(add);
+        return map;
+      },
+      [dbPickerUsers, profPickerUsers]
+    );
+
+    function displayNameFor(userId, fallback) {
+      if (userId == null) return fallback || "";
+      const id = String(userId);
+      const name = displayNameById[id];
+      if (name) return name;
+      return fallback || "";
+    }
+
+    const filteredLogs = useMemo(
+      function () {
+        const q = logFilter.trim().toLowerCase();
+        const allLevelsOn = logLevels.DEBUG && logLevels.INFO && logLevels.WARNING && logLevels.ERROR;
+        if (!q && allLevelsOn) return logs;
+        const re = /\b(DEBUG|INFO|WARNING|WARN|ERROR)\b/i;
+        return logs.filter(function (line) {
+          if (q && line.toLowerCase().indexOf(q) === -1) return false;
+          const m = line.match(re);
+          if (!m) return true; // lines without a recognizable level are always shown
+          var lvl = m[1].toUpperCase();
+          if (lvl === "WARN") lvl = "WARNING";
+          return logLevels[lvl] !== false;
+        });
+      },
+      [logs, logFilter, logLevels]
     );
 
     useEffect(function () {
@@ -1521,8 +1596,32 @@
           logRef.current.scrollTop = logRef.current.scrollHeight;
         }
       },
-      [logs, autoscroll]
+      [filteredLogs, autoscroll]
     );
+
+    async function copyVisibleLogs() {
+      const text = filteredLogs.join("\n");
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.setAttribute("readonly", "");
+          ta.style.position = "absolute";
+          ta.style.left = "-9999px";
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+        }
+        setNotice("Copied " + filteredLogs.length + " log line(s) to clipboard.");
+        setNoticeError(false);
+      } catch (err) {
+        setNotice("Copy failed: " + err.message);
+        setNoticeError(true);
+      }
+    }
 
     const loadSummary = useCallback(async function () {
       try {
@@ -1615,19 +1714,55 @@
     }
 
     function connectLogs() {
+      if (logsReconnectTimerRef.current) {
+        clearTimeout(logsReconnectTimerRef.current);
+        logsReconnectTimerRef.current = null;
+      }
+      if (logsCountdownTimerRef.current) {
+        clearInterval(logsCountdownTimerRef.current);
+        logsCountdownTimerRef.current = null;
+      }
+      setLogsRetryIn(0);
+      setLogsConnState("connecting");
       try {
         const proto = window.location.protocol === "https:" ? "wss" : "ws";
         const ws = new WebSocket(proto + "://" + window.location.host + "/ws/logs");
         ws.onopen = function () {
+          logsAttemptRef.current = 0;
+          setLogsConnState("connected");
           pushLog("[logs connected]");
         };
         ws.onmessage = function (ev) {
           if (!pauseLogs) pushLog(String(ev.data || ""));
         };
+        ws.onerror = function () {
+          try { ws.close(); } catch (_) {}
+        };
         ws.onclose = function () {
-          pushLog("[logs disconnected]");
+          const attempt = logsAttemptRef.current + 1;
+          logsAttemptRef.current = attempt;
+          // 1s, 2s, 4s, 8s, 16s, 30s, 30s, …
+          const delay = Math.min(30, Math.pow(2, Math.min(attempt - 1, 5)));
+          setLogsConnState("reconnecting");
+          setLogsRetryIn(delay);
+          pushLog("[logs disconnected — reconnecting in " + delay + "s]");
+          logsCountdownTimerRef.current = setInterval(function () {
+            setLogsRetryIn(function (curr) {
+              if (curr <= 1) {
+                clearInterval(logsCountdownTimerRef.current);
+                logsCountdownTimerRef.current = null;
+                return 0;
+              }
+              return curr - 1;
+            });
+          }, 1000);
+          logsReconnectTimerRef.current = setTimeout(function () {
+            logsReconnectTimerRef.current = null;
+            connectLogs();
+          }, delay * 1000);
         };
       } catch (_err) {
+        setLogsConnState("unavailable");
         pushLog("[logs unavailable]");
       }
     }
@@ -2016,11 +2151,13 @@
     }
 
     const tabButton = function (id, label) {
+      const isActive = tab === id;
       return e(
         "button",
         {
           type: "button",
-          className: tab === id ? "" : "secondary",
+          className: "dash-tab" + (isActive ? " dash-tab--active" : ""),
+          "aria-current": isActive ? "page" : null,
           onClick: function () {
             setTab(id);
           },
@@ -2049,7 +2186,7 @@
           tabButton("stats", "Stats Studio"),
           tabButton("archive", "Media & log"),
           tabButton("database", "Database Explorer"),
-          e("a", { role: "button", className: "secondary", href: "/env" }, "Environment Editor")
+          e("a", { role: "button", className: "dash-tab dash-tab--link", href: "/env" }, "Environment Editor")
         )
       ),
       e("div", { className: noticeError ? "dash-message error" : "dash-message" }, notice),
@@ -2206,15 +2343,71 @@
           "div",
           { className: "dash-band-live" },
           e("article", null,
-            e("h4", { style: { marginTop: 0 } }, "Live Activity"),
-            e("div", { className: "dash-controls", style: { marginBottom: "0.55rem" } },
+            e("div", { className: "logs-header" },
+              e("h4", { style: { marginTop: 0, marginBottom: 0 } }, "Live Activity"),
+              (function () {
+                var label, mod;
+                if (logsConnState === "connected") { label = "live"; mod = "logs-conn--on"; }
+                else if (logsConnState === "reconnecting") {
+                  label = logsRetryIn > 0 ? "reconnecting in " + logsRetryIn + "s" : "reconnecting…";
+                  mod = "logs-conn--retry";
+                }
+                else if (logsConnState === "unavailable") { label = "unavailable"; mod = "logs-conn--off"; }
+                else { label = "connecting…"; mod = "logs-conn--retry"; }
+                return e("span", { className: "logs-conn " + mod, role: "status", "aria-live": "polite" },
+                  e("span", { className: "logs-conn-dot" }), label,
+                  logsConnState === "reconnecting" || logsConnState === "unavailable"
+                    ? e("button", {
+                        className: "secondary logs-conn-retry",
+                        onClick: function () { logsAttemptRef.current = 0; connectLogs(); }
+                      }, "Reconnect now")
+                    : null
+                );
+              })()
+            ),
+            e("div", { className: "dash-controls logs-controls", style: { marginBottom: "0.4rem" } },
               e("button", { className: "secondary", onClick: function () { setPauseLogs(!pauseLogs); } },
                 pauseLogs ? "Resume stream" : "Pause stream"),
               e("button", { className: "secondary", onClick: function () { setAutoscroll(!autoscroll); } },
                 autoscroll ? "Auto-scroll on" : "Auto-scroll off"),
-              e("button", { className: "secondary", onClick: function () { setLogs([]); } }, "Clear")
+              e("button", { className: "secondary", onClick: function () { setLogs([]); } }, "Clear"),
+              e("button", {
+                className: "secondary",
+                onClick: copyVisibleLogs,
+                title: "Copy visible (filtered) log lines to clipboard"
+              }, "Copy"),
+              e("input", {
+                type: "search",
+                className: "logs-grep",
+                placeholder: "Filter (substring)…",
+                value: logFilter,
+                onChange: function (ev) { setLogFilter(ev.target.value); }
+              }),
+              e("span", { className: "logs-level-set" },
+                ["DEBUG", "INFO", "WARNING", "ERROR"].map(function (lvl) {
+                  return e("label", { key: lvl, className: "logs-level logs-level--" + lvl.toLowerCase() },
+                    e("input", {
+                      type: "checkbox",
+                      checked: logLevels[lvl] !== false,
+                      onChange: function (ev) {
+                        var v = ev.target.checked;
+                        setLogLevels(function (curr) {
+                          var next = Object.assign({}, curr);
+                          next[lvl] = v;
+                          return next;
+                        });
+                      }
+                    }),
+                    lvl
+                  );
+                })
+              )
             ),
-            e("div", { className: "dash-log mono", ref: logRef }, logs.join("\n"))
+            (logFilter || !logLevels.DEBUG || !logLevels.INFO || !logLevels.WARNING || !logLevels.ERROR)
+              ? e("div", { className: "logs-filter-summary muted" },
+                  "Showing " + filteredLogs.length + " of " + logs.length + " line(s)")
+              : null,
+            e("div", { className: "dash-log mono", ref: logRef }, filteredLogs.join("\n"))
           ),
           e("article", { className: "dash-quick-card" },
             e("h4", null, "Quick Actions"),
@@ -2470,7 +2663,7 @@
               },
               soupysearch: {
                 desc: "Web search via DuckDuckGo + LLM summary",
-                keys: ["BEHAVIOUR_SEARCH", "SEARCH_SELECT_TEMPERATURE", "SEARCH_SUMMARY_TEMPERATURE", "LOCAL_CHAT"],
+                keys: ["BEHAVIOUR_SEARCH", "SEARCH_SELECT_TEMPERATURE", "SEARCH_SUMMARY_TEMPERATURE", "SEARCH_BACKEND_TIMEOUT_SECONDS", "SEARCH_RESULTS_PER_QUERY", "SEARCH_BACKENDS", "URL_FETCH_TIMEOUT", "URL_MAX_CONTENT_LENGTH", "URL_CACHE_TTL_SECONDS", "LOCAL_CHAT"],
               },
               soupyimage: {
                 desc: "DuckDuckGo image search",
@@ -2547,6 +2740,9 @@
               LOCAL_CHAT: "(required)",
               SEARCH_SELECT_TEMPERATURE: "0.3",
               SEARCH_SUMMARY_TEMPERATURE: "0.7",
+              SEARCH_BACKEND_TIMEOUT_SECONDS: "12",
+              SEARCH_RESULTS_PER_QUERY: "5",
+              SEARCH_BACKENDS: "brave,duckduckgo,mojeek,yahoo,yandex",
               BEHAVIOUR_SEARCH: "(built-in search persona)",
               NINE_BALL_TEMPERATURE: "0.9",
               "9BALL": "(built-in 9-ball prompt)",
@@ -3520,7 +3716,16 @@
             ),
             e("button", { className: "secondary", disabled: !dbGuild, onClick: saveArchiveSchedule }, "Save schedule")
           ),
-          e("p", { className: "muted", style: { marginTop: "0.5rem" } }, dbInfo),
+          (function () {
+            var msg = String(dbInfo || "");
+            var kind = "info";
+            if (/^Loading/i.test(msg)) kind = "loading";
+            else if (/^Failed/i.test(msg)) kind = "error";
+            else if (/^No\s|^Showing\s0\b/i.test(msg)) kind = "empty";
+            return e("div", { style: { marginTop: "0.5rem" } },
+              PanelState({ kind: kind, message: msg, inline: true })
+            );
+          })(),
           e(
             "div",
             { className: "db-table-wrap" },
@@ -3552,7 +3757,9 @@
                     "tr",
                     { key: i, onClick: function () { setDbSelectedRow(r); } },
                     e("td", { className: "mono" }, (r.date || "") + " " + (r.time || "")),
-                    e("td", null, e("div", null, r.username || "Unknown"), e("div", { className: "muted mono" }, r.user_id || "")),
+                    e("td", null,
+                      e("div", null, r.username || displayNameFor(r.user_id, "Unknown")),
+                      e("div", { className: "muted mono" }, r.user_id || "")),
                     e("td", null, e("div", null, r.channel_name || "Unknown"), e("div", { className: "muted mono" }, r.channel_id || "")),
                     e("td", null, r.message_content || e("span", { className: "muted" }, "(empty)")),
                     e(
@@ -3716,7 +3923,16 @@
                 "Next"
               )
             ),
-            e("p", { className: "muted", style: { marginTop: "0.5rem" } }, profInfo),
+            (function () {
+              var msg = String(profInfo || "");
+              var kind = "info";
+              if (/^Loading/i.test(msg)) kind = "loading";
+              else if (/^Failed/i.test(msg)) kind = "error";
+              else if (/^No\s|^Showing\s0\b/i.test(msg)) kind = "empty";
+              return e("div", { style: { marginTop: "0.5rem" } },
+                PanelState({ kind: kind, message: msg, inline: true })
+              );
+            })(),
             e(
               "div",
               { className: "db-table-wrap" },
@@ -3745,8 +3961,11 @@
                         null,
                         e(
                           "td",
-                          { colSpan: 5, className: "muted" },
-                          dbGuild ? "No rows loaded. Click Load profiles." : "Select a server in Database Explorer first, or pick one above."
+                          { colSpan: 5 },
+                          PanelState({
+                            kind: "empty",
+                            message: dbGuild ? "No rows loaded. Click Load profiles." : "Select a server in Database Explorer first, or pick one above."
+                          })
                         )
                       )
                     : profRows.map(function (r, i) {
@@ -3758,7 +3977,15 @@
                               setProfSelected(r);
                             },
                           },
-                          e("td", { className: "mono" }, r.user_id != null ? String(r.user_id) : ""),
+                          e("td", null,
+                            (function () {
+                              var name = displayNameFor(r.user_id, "");
+                              return name
+                                ? [e("div", { key: "n" }, name),
+                                   e("div", { key: "i", className: "muted mono" }, String(r.user_id))]
+                                : e("span", { className: "mono" }, r.user_id != null ? String(r.user_id) : "");
+                            })()
+                          ),
                           e("td", null, r.nickname_hint || e("span", { className: "muted" }, "—")),
                           e("td", null, fmtNum(r.source_message_count)),
                           e("td", { className: "mono" }, r.updated_at || "—"),
@@ -3785,6 +4012,10 @@
                   },
                   "user_id ",
                   String(profSelected.user_id),
+                  (function () {
+                    var name = displayNameFor(profSelected.user_id, "");
+                    return name ? " (" + name + ")" : "";
+                  })(),
                   " · source_max_message_id ",
                   profSelected.source_max_message_id != null ? String(profSelected.source_max_message_id) : "—",
                   " · model ",

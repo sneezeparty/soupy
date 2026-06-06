@@ -121,7 +121,7 @@ Critical variables — the bot will not start without `DISCORD_TOKEN`:
 | `DAILY_POST_ENABLED` / `DAILY_POST_CHANNELS` | Autonomous Discord article posts |
 | `MUSING_ENABLED` / `MUSING_CHANNEL_ID` / `MUSING_CHANCE` | Autonomous musings |
 | `BLUESKY_HANDLE` / `BLUESKY_APP_PASSWORD` / `BLUESKY_AUTO_REPLY` | Bluesky integration |
-| `SELF_MD_ENABLED` / `SELF_MD_REFLECT_INTERVAL_HOURS` | Self-knowledge reflection |
+| `SELF_MD_ENABLED` / `SELF_MD_REFLECT_HOUR` | Self-knowledge reflection (runs once a day at the given local hour, default 3 AM) |
 | `SOUPY_WEB_HOST` / `SOUPY_WEB_PORT` | Web panel binding (default: `0.0.0.0:4941`) |
 | `SOUPY_AUTOSTART_BOT` | Set by `run_all.py`; `0` to launch the web panel without the bot |
 | `SOUPY_BOT_ENTRY` | Override bot entrypoint resolution |
@@ -189,7 +189,7 @@ See [requirements.txt](requirements.txt) for the full dependency list. Vision (`
 | `/8ball` / `/9ball` | main | Magic 8-ball (classic / LLM-powered) |
 | `/testurl` | main | Test URL extraction |
 
-Image generation posts a 2×2 thumbnail grid (`ThumbnailSelectionView`) with Remix, R-Fancy, R-Keyword, Fancy, Edit, and Outpaint buttons.
+Image generation posts the result with a `SDRemixView` control panel — Remix, R-Fancy, R-Keyword, Fancy, Edit, Wide, Tall, and Outpaint buttons.
 
 ---
 

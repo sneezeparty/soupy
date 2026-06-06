@@ -41,30 +41,28 @@ def test_flux_extension_loads_and_registers_command():
 
 def test_queue_dispatch_target_exists_on_cog():
     flux = _ensure_loaded()
-    for fn in ["process_flux_image", "generate_flux_image", "handle_flux_2x2_grid",
+    for fn in ["process_flux_image", "generate_flux_image",
                "_handle_flux_fancy", "_handle_flux_random"]:
         assert hasattr(flux, fn), f"missing {fn}"
 
 
 def test_views_and_modals_present():
     flux = _ensure_loaded()
-    for cls in ["FluxRemixView", "FluxEditModal", "FluxStrengthModal", "FluxThumbnailSelectionView"]:
+    for cls in ["FluxRemixView", "FluxEditModal", "FluxImg2ImgModal"]:
         assert hasattr(flux, cls), f"missing {cls}"
 
 
-def test_strength_button_only_on_img2img_views():
-    """The 🎚️ Strength button must appear only when a persisted source exists."""
+def test_img2img_button_requires_display_source():
+    """The 🖼️ img2img button appears only when a persisted display source exists."""
     flux = _ensure_loaded()
 
-    def has_strength(view):
-        return any(getattr(c, "custom_id", None) == "fluxgen_strength_button" for c in view.children)
+    def has_img2img(view):
+        return any(getattr(c, "custom_id", None) == "fluxgen_img2img_button" for c in view.children)
 
-    text2img = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1)
-    img2img = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1, is_img2img=True, source_file="abc.png")
-    edit_mode = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1, is_img2img=True, source_file="abc.png", is_edit_mode=True)
-    assert not has_strength(text2img), "text2img view should NOT have a Strength button"
-    assert has_strength(img2img), "img2img view SHOULD have a Strength button"
-    assert not has_strength(edit_mode), "klein-edit view must NOT show Strength (no such knob on the edit path)"
+    no_disp = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1)
+    with_disp = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1, display_source_file="out.png")
+    assert not has_img2img(no_disp), "view without a display source must NOT show img2img"
+    assert has_img2img(with_disp), "view with a display source SHOULD show img2img"
 
 
 def test_flux_edit_url_helper_derives_from_base():

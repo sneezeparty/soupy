@@ -528,15 +528,6 @@ class SDQueue:
                             item["seed"],
                             self.qsize(),
                         )
-                    elif item["action"] == "2x2_grid":
-                        await _sd.handle_2x2_grid(
-                            item["interaction"],
-                            item["prompt"],
-                            item["width"],
-                            item["height"],
-                            item["seed"],
-                            self.qsize(),
-                        )
                     elif item["action"] == "outpaint_horizontal":
                         await _sd.handle_outpaint(
                             item["interaction"],
@@ -575,26 +566,6 @@ class SDQueue:
                             item.get("strength", 0.8),
                             item.get("steps"),
                             item.get("guidance"),
-                        )
-                    elif item["action"] == "thumbnail_upscale":
-                        await _sd.handle_thumbnail_upscale(
-                            item["interaction"],
-                            item["prompt"],
-                            item["width"],
-                            item["height"],
-                            item["thumbnail_data"],
-                            self.qsize(),
-                            item["thumbnail_index"],
-                        )
-                    elif item["action"] == "regenerate_selected":
-                        await _sd.handle_regenerate_selected(
-                            item["interaction"],
-                            item["prompt"],
-                            item["width"],
-                            item["height"],
-                            item["seed"],
-                            self.qsize(),
-                            item["thumbnail_index"],
                         )
                     elif item["action"] == "outpaint":
                         await _sd.handle_outpaint(
@@ -3413,44 +3384,42 @@ async def rag_reindex_loop(bot):
 
 
 async def _self_md_reflection_loop(bot_instance):
-    """Periodically reflect on accumulated interactions and update per-guild SELF.MD files.
+    """Reflect on accumulated interactions and update per-guild SELF.MD files
+    once per day, at SELF_MD_REFLECT_HOUR local time (default 03:00).
 
-    Interval set by SELF_MD_REFLECT_INTERVAL_HOURS (default 3).
     Only triggers when at least SELF_MD_MIN_INTERACTIONS notable interactions have
     accumulated for a guild.
     """
     await bot_instance.wait_until_ready()
 
     try:
-        interval_hours = float(os.getenv("SELF_MD_REFLECT_INTERVAL_HOURS", "24"))
+        reflect_hour = int(os.getenv("SELF_MD_REFLECT_HOUR", "3"))
     except ValueError:
-        interval_hours = 3.0
+        reflect_hour = 3
+    reflect_hour = max(0, min(23, reflect_hour))
 
     try:
         min_interactions = int(os.getenv("SELF_MD_MIN_INTERACTIONS", "3"))
     except ValueError:
         min_interactions = 3
 
-    interval_sec = interval_hours * 3600
-    # Short initial delay (10 min) so the first reflection can happen soon after
-    # the bot has had a few conversations, then switch to the full interval.
-    first_delay = min(600, interval_sec)
-    timer_state["self_reflect"]["interval"] = f"{interval_hours}h"
+    timer_state["self_reflect"]["interval"] = f"daily at {reflect_hour:02d}:00 local"
     timer_state["self_reflect"]["enabled"] = True
-    timer_state["self_reflect"]["next_run"] = (datetime.now(timezone.utc) + timedelta(seconds=first_delay)).isoformat()
     logger.info(
-        "SELF.MD reflection loop started (first check in %.0fs, then every %.1fh, min %d interactions)",
-        first_delay,
-        interval_hours,
+        "SELF.MD reflection loop started (daily at %02d:00 local, min %d interactions)",
+        reflect_hour,
         min_interactions,
     )
 
-    await asyncio.sleep(first_delay)
-
     while not bot_instance.is_closed():
-        timer_state["self_reflect"]["next_run"] = (
-            datetime.now(timezone.utc) + timedelta(seconds=interval_sec)
-        ).isoformat()
+        now_local = datetime.now().astimezone()
+        next_local = now_local.replace(hour=reflect_hour, minute=0, second=0, microsecond=0)
+        if next_local <= now_local:
+            next_local = next_local + timedelta(days=1)
+        sleep_sec = (next_local - now_local).total_seconds()
+        timer_state["self_reflect"]["next_run"] = next_local.astimezone(timezone.utc).isoformat()
+        await asyncio.sleep(sleep_sec)
+
         for guild in list(bot_instance.guilds):
             gid = guild.id
             count = pending_interaction_count(gid)
@@ -3476,8 +3445,6 @@ async def _self_md_reflection_loop(bot_instance):
                     )
             except Exception as exc:
                 logger.warning("SELF.MD reflection failed guild=%s: %s", gid, exc)
-
-        await asyncio.sleep(interval_sec)
 
 
 # Regex to capture a bot-like name prefix at the start (short word/name followed by colon)

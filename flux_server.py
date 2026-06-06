@@ -35,16 +35,25 @@ on top of the txt2img model when both are loaded.
 
 Model selection is by env var, so swapping FLUX.1 schnell -> FLUX.2 klein is
 config + a weights download, not a code change:
-    FLUX_MODEL        mflux model name ("schnell" / "dev", or a FLUX.2 id)   [schnell]
-    FLUX_QUANTIZE     quantization bits, 4 or 8                              [4]
-    FLUX_LOW_RAM      "1"/"true" to release encoders between runs (tight RAM)[0]
-    FLUX_EDIT_MODEL   FLUX.2-Klein variant used by /flux_edit                [flux2-klein-4b]
-    FLUX_SERVER_HOST  bind host                                             [127.0.0.1]
-    FLUX_SERVER_PORT  bind port                                            [4942]
+    FLUX_MODEL             mflux model name ("schnell" / "dev", or a FLUX.2 id)  [schnell]
+    FLUX_QUANTIZE          quantization bits, 4 or 8                             [4]
+    FLUX_LOW_RAM           "1"/"true" to release encoders between runs           [0]
+    FLUX_EDIT_MODEL        FLUX.2-Klein variant used by /flux_edit               [flux2-klein-4b]
+    FLUX_EDIT_MAX_PIXELS   max area (W*H) the edit pipeline is allowed to run    [1048576]
+    FLUX_MAX_DIMENSION     max long side fed to mflux for img2img/edit           [1536]
+    FLUX_SERVER_HOST       bind host                                             [127.0.0.1]
+    FLUX_SERVER_PORT       bind port                                             [4942]
 
 The server also auto-bumps `guidance` to 1.0 when a caller passes the legacy
 `guidance_scale=0.0` to a guided model (klein / dev). Schnell stays at 0.0
 since it is CFG-distilled.
+
+Reference images for /flux_edit are resized (preserving aspect) to fit
+``FLUX_EDIT_MAX_PIXELS`` and ``FLUX_MAX_DIMENSION`` before mflux is called —
+Flux2KleinEdit concatenates VAE-encoded reference tokens with the output
+latents, so a large reference (a 12-megapixel phone photo) sends transformer
+attention into multi-gigabyte territory and trips Metal's max-buffer limit.
+The same cap is applied to ``/flux_img2img`` output dims for parity.
 
 NOTE: mflux's Python API has shifted across releases. This file targets the
 ``Flux1.from_name(...).generate_image(..., config=Config(...))`` surface and the
@@ -75,6 +84,7 @@ except Exception:
 import uvicorn
 from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
+from PIL import Image, ImageOps
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("flux_server")
@@ -88,6 +98,16 @@ FLUX_SERVER_PORT = int(os.getenv("FLUX_SERVER_PORT", "4942"))
 # Edit-mode model (FLUX.2-klein only). Loaded lazily on first /flux_edit request
 # and kept resident; runs alongside the txt2img/img2img model.
 FLUX_EDIT_MODEL = os.getenv("FLUX_EDIT_MODEL", "flux2-klein-4b")
+
+# Area cap (W*H) for the Klein-Edit pipeline. 1024*1024 = ~1M pixels is the
+# size klein was trained at; larger references trip Metal's buffer limit
+# because Flux2KleinEdit concatenates the reference tokens with the output
+# latents and attention scales quadratically with the total token count.
+FLUX_EDIT_MAX_PIXELS = int(os.getenv("FLUX_EDIT_MAX_PIXELS", str(1024 * 1024)))
+
+# Hard cap on the long side for any img2img/edit request. Bound separately
+# from area so a freakishly thin aspect (e.g. 4000x256) is also clamped.
+FLUX_MAX_DIMENSION = int(os.getenv("FLUX_MAX_DIMENSION", "1536"))
 
 app = FastAPI(title="Soupy Flux Server")
 
@@ -245,6 +265,58 @@ def _resolve_guidance(model, requested: float, *, default_for_guided: float = 1.
     return requested
 
 
+def _snap16_floor(v: int) -> int:
+    """Floor-snap to a positive multiple of 16 (the VAE patch size mflux uses).
+    Always rounds down so the result never exceeds the input — important when
+    enforcing an area cap."""
+    return max(16, (int(v) // 16) * 16)
+
+
+def _fit_within(w: int, h: int, *, max_pixels: int, max_dim: int) -> tuple[int, int]:
+    """Shrink (w, h) to satisfy both an area cap and a long-side cap, preserving
+    aspect. Output is floor-snapped to multiples of 16 so it never exceeds the
+    budget. Dims that already fit are still snapped (mflux requires /16)."""
+    if w <= 0 or h <= 0:
+        return 1024, 1024
+    scale = 1.0
+    long_side = max(w, h)
+    if long_side > max_dim:
+        scale = max_dim / long_side
+    pixels = (w * scale) * (h * scale)
+    if pixels > max_pixels:
+        scale *= (max_pixels / pixels) ** 0.5
+    return _snap16_floor(w * scale), _snap16_floor(h * scale)
+
+
+def _prepare_image_for_mflux(
+    raw: bytes,
+    *,
+    requested_w: int,
+    requested_h: int,
+    max_pixels: int,
+    max_dim: int = FLUX_MAX_DIMENSION,
+) -> tuple[str, int, int]:
+    """Decode, EXIF-rotate, and resize `raw` to a sane size for mflux. Returns
+    (tmp_path, target_w, target_h). The target matches the requested output
+    dims after clamping — feeding mflux a same-sized reference avoids any
+    internal resize and keeps the Klein-Edit token count predictable.
+    """
+    img = Image.open(io.BytesIO(raw))
+    img = ImageOps.exif_transpose(img)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    src_w, src_h = img.size
+    base_w = requested_w if requested_w > 0 else src_w
+    base_h = requested_h if requested_h > 0 else src_h
+    target_w, target_h = _fit_within(base_w, base_h, max_pixels=max_pixels, max_dim=max_dim)
+    if (img.width, img.height) != (target_w, target_h):
+        img = img.resize((target_w, target_h), Image.LANCZOS)
+    fd, out_path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    img.save(out_path, format="PNG")
+    return out_path, target_w, target_h
+
+
 def _to_png_bytes(result) -> bytes:
     """Extract PNG bytes from whatever mflux returns (GeneratedImage or PIL)."""
     pil = getattr(result, "image", result)  # GeneratedImage.image, else assume PIL
@@ -384,7 +456,6 @@ async def flux_img2img(
     import anyio
 
     raw = await image.read()
-    suffix = Path(image.filename or "source.png").suffix or ".png"
 
     # Translate the bot's standard Stable-Diffusion strength into mflux's INVERTED
     # image_strength. The bot (and the SD server this endpoint mirrors) treats
@@ -404,12 +475,17 @@ async def flux_img2img(
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(raw)
-            tmp_path = tmp.name
+        tmp_path, eff_w, eff_h = _prepare_image_for_mflux(
+            raw, requested_w=width, requested_h=height, max_pixels=FLUX_EDIT_MAX_PIXELS,
+        )
+        if (eff_w, eff_h) != (width, height):
+            logger.info(
+                f"img2img: clamped output {width}x{height} -> {eff_w}x{eff_h} "
+                f"(max_pixels={FLUX_EDIT_MAX_PIXELS}, max_dim={FLUX_MAX_DIMENSION})"
+            )
         png = await anyio.to_thread.run_sync(
             lambda: _generate(
-                prompt=prompt, width=width, height=height, steps=steps,
+                prompt=prompt, width=eff_w, height=eff_h, steps=steps,
                 guidance=guidance_scale, seed=seed,
                 init_image_path=tmp_path, strength=mflux_strength,
             )
@@ -445,16 +521,20 @@ async def flux_edit(
     import anyio
 
     raw = await image.read()
-    suffix = Path(image.filename or "source.png").suffix or ".png"
 
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(raw)
-            tmp_path = tmp.name
+        tmp_path, eff_w, eff_h = _prepare_image_for_mflux(
+            raw, requested_w=width, requested_h=height, max_pixels=FLUX_EDIT_MAX_PIXELS,
+        )
+        if (eff_w, eff_h) != (width, height):
+            logger.info(
+                f"flux_edit: clamped reference + output {width}x{height} -> {eff_w}x{eff_h} "
+                f"(max_pixels={FLUX_EDIT_MAX_PIXELS}, max_dim={FLUX_MAX_DIMENSION})"
+            )
         png = await anyio.to_thread.run_sync(
             lambda: _generate_edit(
-                prompt=prompt, width=width, height=height, steps=steps,
+                prompt=prompt, width=eff_w, height=eff_h, steps=steps,
                 guidance=guidance_scale, seed=seed, image_path=tmp_path,
             )
         )

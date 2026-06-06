@@ -2,14 +2,15 @@
 Search cog — ``/soupysearch``.
 
 Runs a DuckDuckGo text query, drops dictionary/definition sites, asks the LLM
-to pick the 5 best results, fetches each article via trafilatura (with a
-BeautifulSoup fallback), and returns a Soupy-voiced summary with inline
-citations.
+to pick the top results, fetches each article in parallel via the shared
+``soupy.url_fetch`` helper (cached, settings-aware), and returns a Soupy-voiced
+summary with inline citations.
 
 Cross-module:
 
 * Reuses the LM Studio client via ``soupy.settings.openai_client``.
 * Loads the search persona via ``soupy.prompts.load_prompt("behaviour_search")``.
+* Shares URL fetching + the 1hr TTL cache with future cogs via ``soupy.url_fetch``.
 
 Gotchas:
 
@@ -17,10 +18,12 @@ Gotchas:
   They pollute summaries; ``SEARCH_BLOCKED_DOMAINS`` extends the list.
 * Per-user rate limit is 10 searches/min, tracked in-memory in the cog (lost
   on bot restart, which is fine — it's a soft anti-abuse measure, not security).
-* DuckDuckGo backend rotates (api → html → lite → default) with a 12s timeout
-  per attempt, because the public backends vary in reliability.
-* Context-length overflow falls back to a 300-char excerpt per article rather
-  than failing outright — small local models hit this often.
+* DuckDuckGo backend rotates (api → html → lite → default) with a per-attempt
+  timeout from ``SEARCH_BACKEND_TIMEOUT_SECONDS`` — public backends vary.
+* Context-length overflow falls back to truncated excerpts AND flips a flag
+  so the embed shows a visible "based on excerpts" notice.
+* Article fetches run in parallel; the slowest source bounds wall-clock, not
+  the sum of all fetches.
 """
 
 import asyncio
@@ -28,22 +31,27 @@ import logging
 import re
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import aiohttp
 import discord
-import trafilatura
-from bs4 import BeautifulSoup
 from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands
 
 from soupy import prompts as soupy_prompts
 from soupy.settings import openai_client, settings
+from soupy.url_fetch import FetchResult, fetch_url
 
-# Configure logging
 logger = logging.getLogger(__name__)
+
+# ddgs warns on every call when a backend name is unknown, and falls back to
+# 'auto' anyway. We pass a curated comma list (settings.search_backends), so a
+# stray typo in env config shouldn't produce per-query log spam. Real engine
+# failures still raise + propagate via SearchBackendError below.
+logging.getLogger("ddgs.ddgs").setLevel(logging.ERROR)
 
 # Hosts we never want as sources in summarization-style search.
 # Dictionaries and definition / glossary sites pollute the LLM summary
@@ -74,6 +82,34 @@ _DEFAULT_BLOCKED_DOMAINS = (
     "powerthesaurus.org",
 )
 
+# Triggers a "prefer fresh sources" instruction in the selection + summary
+# prompts. Year tokens (2024-2030) are matched separately so the bot stays
+# recency-aware on queries like "biden 2026".
+_RECENCY_KEYWORDS = {
+    "news",
+    "latest",
+    "recent",
+    "today",
+    "tonight",
+    "now",
+    "current",
+    "currently",
+    "breaking",
+    "live",
+    "yesterday",
+    "this week",
+    "this month",
+    "this year",
+}
+_YEAR_RE = re.compile(r"\b20[2-3][0-9]\b")
+
+# Matches markdown links — used to verify the LLM actually included citations.
+_CITATION_RE = re.compile(r"\[[^\]]+\]\(https?://[^)]+\)")
+
+# Discord embed limits we rely on.
+_EMBED_DESC_MAX = 4000  # actual limit is 4096; keep slack for the degraded prefix
+_EMBED_FIELD_MAX = 1024
+
 
 def _build_blocked_domains() -> set:
     """Default blocklist + any additions from settings.search_blocked_domains."""
@@ -103,12 +139,42 @@ def _is_blocked_url(url: str, blocked: set) -> bool:
     return False
 
 
-# Initialize OpenAI client
+def _is_recency_query(query: str) -> bool:
+    """True if the query looks like it wants fresh information."""
+    if not query:
+        return False
+    q = query.lower()
+    if _YEAR_RE.search(q):
+        return True
+    for kw in _RECENCY_KEYWORDS:
+        # Word-boundary match so "newsletter" doesn't trigger on "news".
+        if re.search(rf"\b{re.escape(kw)}\b", q):
+            return True
+    return False
+
+
+def _channel_hint(interaction: discord.Interaction) -> Optional[str]:
+    """One-line channel context for the selection prompt. Returns None for DMs."""
+    ch = getattr(interaction, "channel", None)
+    if ch is None:
+        return None
+    name = getattr(ch, "name", None)
+    topic = getattr(ch, "topic", None)
+    if not name and not topic:
+        return None
+    parts = []
+    if name:
+        parts.append(f"#{name}")
+    if topic:
+        parts.append(topic.strip()[:160])
+    return " — ".join(parts) if parts else None
+
+
 client = openai_client()
 
 
 async def async_chat_completion(*args, **kwargs):
-    """Wraps the OpenAI chat completion in an async context"""
+    """Wraps the OpenAI chat completion in an async context."""
     return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
 
@@ -129,145 +195,116 @@ class SearchCog(commands.Cog):
         self.session = aiohttp.ClientSession()
 
     async def cog_unload(self):
-        """Cleanup when cog is unloaded"""
         if hasattr(self, "session"):
             await self.session.close()
 
     async def is_rate_limited(self, user_id: int) -> bool:
-        """Check if user has exceeded rate limits"""
         current_time = time.time()
         search_times = self.search_rate_limits.get(user_id, [])
-
-        # Clean up old timestamps
         search_times = [t for t in search_times if current_time - t < 60]
         self.search_rate_limits[user_id] = search_times
-
         if len(search_times) >= self.MAX_SEARCHES_PER_MINUTE:
             return True
-
         self.search_rate_limits[user_id].append(current_time)
         return False
 
-    async def fetch_article_content(self, url: str) -> Optional[str]:
-        """Fetch and extract the main content of an article with improved error handling"""
-        try:
-            async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    html = await response.text()
-
-                    # Try trafilatura first
-                    content = trafilatura.extract(html)
-                    if content:
-                        return content.strip()
-
-                    # Fallback to BeautifulSoup
-                    soup = BeautifulSoup(html, "html.parser")
-
-                    # Remove unwanted elements
-                    for element in soup(["script", "style", "nav", "header", "footer", "iframe"]):
-                        element.decompose()
-
-                    # Get main content
-                    main_content = (
-                        soup.find("main")
-                        or soup.find("article")
-                        or soup.find("div", class_=re.compile(r"content|article|post"))
-                    )
-                    if main_content:
-                        return main_content.get_text(strip=True, separator=" ")
-
-                    # Last resort: get body text
-                    body = soup.find("body")
-                    if body:
-                        return body.get_text(strip=True, separator=" ")
-
-                    return None
-        except Exception as e:
-            logger.error(f"Error fetching article content from {url}: {e}")
-            return None
-
     async def perform_text_search(self, query: str, max_results: int = 10) -> List[Dict]:
-        """Run DDG text search with fallbacks and timeouts, avoiding Bing backend."""
+        """Run a DDG text search via ``ddgs``, honouring ``SEARCH_BACKENDS``.
+
+        ddgs 9.x does its own multi-engine fan-out internally; the cog passes a
+        curated comma-list (defaults to ``brave,duckduckgo,mojeek,yahoo,yandex``)
+        so news-style queries skip the knowledge-base engines. Empty backend
+        config drops the kwarg and lets ddgs use its ``auto`` mode.
+        """
         start = time.time()
-        attempts = [
-            {"kwargs": {"query": query, "max_results": max_results, "backend": "api"}, "label": "ddgs-api"},
-            {"kwargs": {"query": query, "max_results": max_results, "backend": "html"}, "label": "ddgs-html"},
-            {"kwargs": {"query": query, "max_results": max_results, "backend": "lite"}, "label": "ddgs-lite"},
-            {"kwargs": {"query": query, "max_results": max_results}, "label": "ddgs-default"},
-        ]
+        timeout = settings.search_backend_timeout_seconds
+        backends = settings.search_backends
+        kwargs: Dict = {"query": query, "max_results": max_results}
+        if backends:
+            kwargs["backend"] = backends
+        label = backends or "auto"
 
-        def _run_text(kwargs: Dict) -> List[Dict]:
+        def _run_text(call_kwargs: Dict) -> List[Dict]:
             with DDGS() as ddg:
-                return list(ddg.text(**kwargs))
+                return list(ddg.text(**call_kwargs))
 
-        # WHY: track whether any backend actually *completed* (even with zero
-        # results) vs. all of them erroring/timing out. An empty return then means
-        # "genuinely no results"; total failure raises SearchBackendError so the
-        # command can tell the user it was a network problem, not an empty query.
-        any_completed = False
-        for attempt in attempts:
-            try:
-                logger.debug(f"Trying search backend: {attempt['label']}")
-                results_list = await asyncio.wait_for(
-                    asyncio.to_thread(_run_text, attempt["kwargs"]),
-                    timeout=12,
-                )
-                any_completed = True
-                logger.info(
-                    f"Search backend {attempt['label']} returned {len(results_list)} results in "
-                    f"{round(time.time() - start, 2)}s"
-                )
-                if results_list:
-                    return results_list
-            except asyncio.TimeoutError:
-                logger.warning(f"Search attempt timed out: {attempt['label']}")
-            except Exception as e:
-                logger.error(f"Search attempt failed ({attempt['label']}): {e}")
-        if not any_completed:
-            raise SearchBackendError("all DuckDuckGo search backends failed or timed out")
-        return []
-
-    async def select_articles(self, search_results: List[Dict]) -> List[Dict]:
-        """Select the 5 most relevant articles using improved selection criteria"""
         try:
-            if len(search_results) <= 5:
+            results_list = await asyncio.wait_for(
+                asyncio.to_thread(_run_text, kwargs),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as e:
+            logger.warning(f"Search timed out after {timeout}s (backends={label})")
+            raise SearchBackendError("DuckDuckGo search timed out") from e
+        except Exception as e:
+            logger.error(f"Search failed (backends={label}): {e}")
+            raise SearchBackendError(f"DuckDuckGo search failed: {e}") from e
+
+        logger.info(
+            f"Search (backends={label}) returned {len(results_list)} results in "
+            f"{round(time.time() - start, 2)}s"
+        )
+        return results_list
+
+    async def select_articles(
+        self,
+        search_results: List[Dict],
+        target_count: int,
+        recency_query: bool,
+        channel_hint: Optional[str],
+    ) -> List[Dict]:
+        """Select the most relevant articles using the LLM, with recency + channel hints."""
+        try:
+            if len(search_results) <= target_count:
                 return search_results
 
-            # Format articles for evaluation
-            # Keep mapping from formatted index -> original index
             formatted_results: List[Dict] = []
             index_mapping: List[int] = []
             for idx, result in enumerate(search_results):
-                # Skip results without required fields
                 if not all(key in result for key in ["title", "body", "href"]):
                     continue
-
                 formatted_results.append(
                     {
                         "title": result["title"],
-                        "preview": result.get("body", "")[:500],  # Limit preview length
+                        "preview": result.get("body", "")[:500],
                         "url": result["href"],
+                        # DDG sometimes returns "date" or "published" — surface either.
+                        "date": result.get("date") or result.get("published") or "",
                     }
                 )
                 index_mapping.append(idx)
 
             if not formatted_results:
-                return search_results[:5]
+                return search_results[:target_count]
 
-            # Create selection prompt
-            prompt = (
-                "Select the 5 most informative and relevant articles from these search results. "
-                "Consider:\n"
-                "1. Relevance to the topic\n"
-                "2. Information quality and depth\n"
-                "3. Source credibility\n"
-                "4. Content uniqueness\n\n"
-                "Respond ONLY with the numbers (0-based) of the 5 best articles, separated by spaces.\n\n"
+            criteria = [
+                "Relevance to the topic",
+                "Information quality and depth",
+                "Source credibility",
+                "Content uniqueness",
+            ]
+            if recency_query:
+                criteria.append("Freshness — prefer dated, recent articles over undated or old ones")
+
+            prompt_lines = [
+                f"Select the {target_count} most informative and relevant articles from these search results.",
+                "Consider:",
+            ]
+            for i, c in enumerate(criteria, 1):
+                prompt_lines.append(f"{i}. {c}")
+            if channel_hint:
+                prompt_lines.append(f"\nContext — the user is in this channel: {channel_hint}")
+            prompt_lines.append(
+                f"\nRespond ONLY with the numbers (0-based) of the {target_count} best articles, "
+                "separated by spaces.\n"
             )
+            prompt = "\n".join(prompt_lines) + "\n"
 
             for i, result in enumerate(formatted_results):
                 prompt += f"[{i}] {result['title']}\n"
                 prompt += f"URL: {result['url']}\n"
+                if result["date"]:
+                    prompt += f"Date: {result['date']}\n"
                 prompt += f"Preview: {result['preview']}\n\n"
 
             response = await async_chat_completion(
@@ -275,166 +312,271 @@ class SearchCog(commands.Cog):
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant that selects the most relevant and informative articles.",
+                        "content": (
+                            "You are a helpful assistant that selects the most relevant and informative "
+                            "articles for a search summary."
+                        ),
                     },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=settings.search_select_temperature,
-                max_tokens=50,
+                max_tokens=64,
             )
 
-            # Parse indices and validate
             try:
-                indices = [int(idx) for idx in response.choices[0].message.content.strip().split()]
-                # Map model-selected indices (based on formatted_results) back to original indices
+                raw = response.choices[0].message.content.strip()
+                indices = [int(tok) for tok in raw.split() if tok.lstrip("-").isdigit()]
                 valid_formatted = [i for i in indices if 0 <= i < len(formatted_results)]
                 mapped_indices = [index_mapping[i] for i in valid_formatted]
-                if len(mapped_indices) >= 5:
-                    return [search_results[i] for i in mapped_indices[:5]]
+                if len(mapped_indices) >= target_count:
+                    return [search_results[i] for i in mapped_indices[:target_count]]
             except Exception:
                 logger.warning("Failed to parse article selection response")
 
-            return search_results[:5]
+            return search_results[:target_count]
 
         except Exception as e:
             logger.error(f"Error selecting articles: {e}")
-            return search_results[:5]
+            return search_results[:target_count]
 
-    async def generate_final_response(self, query: str, articles: List[Dict]) -> str:
-        """Generate a conversational response with proper citations"""
+    async def fetch_articles_parallel(self, articles: List[Dict]) -> List[Tuple[Dict, FetchResult]]:
+        """Fetch every selected article in parallel, dropping failures.
+
+        Returns a list of ``(article_meta, FetchResult)`` pairs in the original
+        order so citation numbering stays stable.
+        """
+        async def _one(article: Dict) -> Optional[Tuple[Dict, FetchResult]]:
+            url = article.get("href", "")
+            res = await fetch_url(self.session, url)
+            if res is None:
+                return None
+            return (article, res)
+
+        results = await asyncio.gather(
+            *(_one(a) for a in articles),
+            return_exceptions=True,
+        )
+        out: List[Tuple[Dict, FetchResult]] = []
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning(f"Article fetch raised: {r}")
+                continue
+            if r is None:
+                continue
+            out.append(r)
+        cache_hits = sum(1 for _, fr in out if fr.from_cache)
+        if cache_hits:
+            logger.info(f"🔍 URL cache: {cache_hits}/{len(out)} hits")
+        return out
+
+    def _build_system_message(self, today_iso: str, recency_query: bool) -> str:
+        rules = (
+            f"Today's date is {today_iso}.\n\n"
+            "Citation rules:\n"
+            "1. Every significant claim must include a [Source Name](URL) citation in Discord markdown.\n"
+            "2. Naturally integrate citations into your prose — do not bolt them on at the end.\n"
+            "3. If sources disagree, say so and cite each side.\n"
+        )
+        if recency_query:
+            rules += (
+                "4. This question is time-sensitive. Prefer the freshest sources; if a source is older "
+                "than a few months, say so explicitly.\n"
+            )
+        return f"{soupy_prompts.load_prompt('behaviour_search', fallback='')}\n\n{rules}"
+
+    def _build_content_prompt(
+        self,
+        query: str,
+        articles: List[Tuple[Dict, FetchResult]],
+        per_article_limit: int,
+    ) -> str:
+        parts = [
+            f"Search Query: {query}",
+            "",
+            "Summarize these articles in Soupy's voice. Cite every significant point.",
+            "",
+        ]
+        for i, (meta, res) in enumerate(articles, 1):
+            title = meta.get("title") or res.title or "Untitled"
+            source = res.source or meta.get("source") or "Unknown Source"
+            url = meta.get("href", "")
+            date = res.published_at or meta.get("date") or "unknown"
+            body = (res.content or "")[:per_article_limit]
+            parts.append(f"Article {i}:")
+            parts.append(f"Title: {title}")
+            parts.append(f"Source: {source}")
+            parts.append(f"URL: {url}")
+            parts.append(f"Published: {date}")
+            parts.append(f"Content: {body}")
+            parts.append("")
+        return "\n".join(parts)
+
+    async def generate_final_response(
+        self,
+        query: str,
+        articles: List[Tuple[Dict, FetchResult]],
+        recency_query: bool,
+    ) -> Tuple[str, bool, bool]:
+        """Produce the Soupy-voiced summary.
+
+        Returns ``(text, degraded, citations_missing)``:
+          * ``degraded``  — True if we had to retry with shorter excerpts due to
+            context-length errors.
+          * ``citations_missing`` — True if the final text contains no markdown
+            links despite a citation retry.
+        """
+        today_iso = datetime.now().strftime("%Y-%m-%d")
+        system_message = self._build_system_message(today_iso, recency_query)
+
+        full_limit = settings.url_max_content_length
+        prompt = self._build_content_prompt(query, articles, full_limit)
+        degraded = False
+
         try:
-            if not articles:
-                return "❌ No articles found to analyze."
-
-            # Process articles and extract content
-            processed_articles = []
-            _total_tokens = 0
-            MAX_TOKENS_PER_ARTICLE = 1000  # Limit tokens per article
-
-            for article in articles:
-                content = await self.fetch_article_content(article.get("href", ""))
-                if not content:
-                    continue
-
-                # Truncate content to manage token count
-                content = content[:MAX_TOKENS_PER_ARTICLE]
-                processed_articles.append(
-                    {
-                        "title": article.get("title", "Untitled"),
-                        "source": article.get("source", "Unknown Source"),
-                        "url": article["href"],
-                        "content": content,
-                    }
-                )
-
-            if not processed_articles:
-                return "❌ Could not extract content from any articles."
-
-            # Create system message with Soupy's personality and strong citation requirements
-            system_message = (
-                f"{soupy_prompts.load_prompt('behaviour_search', fallback='')}\n\n"
-                "CRITICAL INSTRUCTIONS FOR RESPONSE GENERATION:\n"
-                "1. You MUST include citations for every piece of information you provide\n"
-                "2. Format ALL citations as [Source Name](URL) using Discord markdown\n"
-                "3. Citations MUST be naturally integrated into your response\n"
-                "4. EVERY paragraph or major point MUST have at least one citation\n"
-                "5. Be conversational and engaging while maintaining accuracy\n"
-                "6. Keep responses concise but informative\n"
-                "7. Use Soupy's sarcastic and witty personality\n"
-                "8. Organize the response in a clear, readable format\n"
-                "9. DO NOT generate a response without citations\n"
-                "10. If you reference multiple sources for a point, cite them all\n"
+            response = await async_chat_completion(
+                model=settings.local_chat,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=settings.search_summary_temperature,
+                max_tokens=1500,
             )
-
-            # Format content for LLM with emphasis on citation requirements
-            content_prompt = (
-                f"Search Query: {query}\n\n"
-                "IMPORTANT: Your response MUST include citations from the following articles. "
-                "Every significant piece of information MUST be backed by at least one citation. "
-                "Here are the articles to analyze and cite:\n\n"
-            )
-
-            for i, article in enumerate(processed_articles, 1):
-                content_prompt += (
-                    f"Article {i}:\n"
-                    f"Title: {article['title']}\n"
-                    f"Source: {article['source']}\n"
-                    f"URL: {article['url']}\n"
-                    f"Content: {article['content']}\n\n"
-                )
-
-            content_prompt += (
-                "REMINDER: Format your response as a natural conversation, but ensure EVERY "
-                "significant point has a citation in [Source Name](URL) format. DO NOT skip citations.\n\n"
-            )
-
-            # Generate response with chunked content if needed
-            try:
+            text = response.choices[0].message.content.strip()
+        except Exception as e:
+            if "context length" in str(e).lower():
+                logger.warning("Context length exceeded, retrying with shorter excerpts")
+                degraded = True
+                short_limit = max(200, full_limit // 4)
+                prompt = self._build_content_prompt(query, articles, short_limit)
                 response = await async_chat_completion(
                     model=settings.local_chat,
                     messages=[
                         {"role": "system", "content": system_message},
-                        {"role": "user", "content": content_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=settings.search_summary_temperature,
+                    max_tokens=1000,
+                )
+                text = response.choices[0].message.content.strip()
+            else:
+                raise
+
+        # Citation guard — one retry with an explicit nudge if the model
+        # produced a citation-free wall of text.
+        citations_missing = False
+        if not _CITATION_RE.search(text):
+            logger.info("Summary returned no citations — retrying with strict nudge")
+            try:
+                strict = (
+                    prompt
+                    + "\n\nIMPORTANT: Your previous answer had no citations. Rewrite it so that "
+                    "every significant claim includes a [Source Name](URL) link in Discord markdown."
+                )
+                response = await async_chat_completion(
+                    model=settings.local_chat,
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": strict},
                     ],
                     temperature=settings.search_summary_temperature,
                     max_tokens=1500,
                 )
-
-                return response.choices[0].message.content.strip()
-
-            except Exception as e:
-                if "context length" in str(e).lower():
-                    # Fallback to shorter content if context length is exceeded
-                    logger.warning("Context length exceeded, falling back to shorter content")
-                    shortened_articles = []
-                    for article in processed_articles:
-                        shortened_articles.append(
-                            {
-                                "title": article["title"],
-                                "source": article["source"],
-                                "url": article["url"],
-                                "content": article["content"][:300],  # Use shorter excerpts
-                            }
-                        )
-
-                    content_prompt = (
-                        f"Search Query: {query}\n\n"
-                        "IMPORTANT: Your response MUST include citations from these articles. "
-                        "Every significant piece of information MUST be backed by at least one citation. "
-                        "Here are brief excerpts from the articles to analyze and cite:\n\n"
-                    )
-
-                    for i, article in enumerate(shortened_articles, 1):
-                        content_prompt += (
-                            f"Article {i}:\n"
-                            f"Title: {article['title']}\n"
-                            f"Source: {article['source']}\n"
-                            f"URL: {article['url']}\n"
-                            f"Excerpt: {article['content']}\n\n"
-                        )
-
-                    content_prompt += (
-                        "REMINDER: Format your response as a natural conversation, but ensure EVERY "
-                        "significant point has a citation in [Source Name](URL) format. DO NOT skip citations.\n\n"
-                    )
-
-                    response = await async_chat_completion(
-                        model=settings.local_chat,
-                        messages=[
-                            {"role": "system", "content": system_message},
-                            {"role": "user", "content": content_prompt},
-                        ],
-                        temperature=settings.search_summary_temperature,
-                        max_tokens=1000,
-                    )
-
-                    return response.choices[0].message.content.strip()
+                retry_text = response.choices[0].message.content.strip()
+                if _CITATION_RE.search(retry_text):
+                    text = retry_text
                 else:
-                    raise
+                    citations_missing = True
+                    text = retry_text or text
+            except Exception as e:
+                logger.error(f"Citation retry failed: {e}")
+                citations_missing = True
 
-        except Exception as e:
-            logger.error(f"Error generating final response: {e}")
-            return "❌ An error occurred while generating the response."
+        return text, degraded, citations_missing
+
+    def _build_embeds(
+        self,
+        query: str,
+        summary: str,
+        articles: List[Tuple[Dict, FetchResult]],
+        elapsed: float,
+        fetched_count: int,
+        target_count: int,
+        degraded: bool,
+        citations_missing: bool,
+    ) -> List[discord.Embed]:
+        """Render the response as one (or rarely multiple) embeds.
+
+        Sources go in their own field rather than appended to the description
+        so users can scan them at a glance.
+        """
+        prefix_parts = []
+        if degraded:
+            prefix_parts.append("*(based on excerpts — articles too long to fully analyze)*")
+        if citations_missing:
+            prefix_parts.append("*(no inline citations returned — see Sources below)*")
+        prefix = "\n".join(prefix_parts)
+        body = (prefix + "\n\n" + summary).strip() if prefix else summary
+
+        # Chunk only if the description overflows.
+        if len(body) <= _EMBED_DESC_MAX:
+            chunks = [body]
+        else:
+            chunks = [body[i : i + _EMBED_DESC_MAX] for i in range(0, len(body), _EMBED_DESC_MAX)]
+
+        # Build the Sources field value(s).
+        source_lines = []
+        for i, (meta, res) in enumerate(articles, 1):
+            title = (meta.get("title") or res.title or "Untitled").strip()
+            url = meta.get("href", "").strip()
+            if not url:
+                continue
+            line = f"{i}. [{title}]({url})"
+            source_lines.append(line)
+        sources_text = "\n".join(source_lines)
+
+        footer_bits = [f"{elapsed:.2f}s", f"sources: {fetched_count}/{target_count}"]
+        if degraded:
+            footer_bits.append("excerpts mode")
+        footer_text = " · ".join(footer_bits)
+
+        embeds: List[discord.Embed] = []
+        for i, chunk in enumerate(chunks):
+            title = f"🔍 {query}"
+            if len(chunks) > 1:
+                title += f" (Part {i+1}/{len(chunks)})"
+            embed = discord.Embed(
+                title=title[:256],
+                description=chunk,
+                color=discord.Color.green(),
+            )
+            if i == len(chunks) - 1 and sources_text:
+                # Source list lives on the last embed. If sources overflow the
+                # 1024-char field cap, paginate into multiple fields.
+                if len(sources_text) <= _EMBED_FIELD_MAX:
+                    embed.add_field(name="Sources", value=sources_text, inline=False)
+                else:
+                    buf, n = "", 1
+                    for line in source_lines:
+                        candidate = (buf + "\n" + line).strip()
+                        if len(candidate) > _EMBED_FIELD_MAX:
+                            embed.add_field(
+                                name=f"Sources ({n})" if n > 1 else "Sources",
+                                value=buf,
+                                inline=False,
+                            )
+                            buf, n = line, n + 1
+                        else:
+                            buf = candidate
+                    if buf:
+                        embed.add_field(
+                            name=f"Sources ({n})" if n > 1 else "Sources",
+                            value=buf,
+                            inline=False,
+                        )
+            embed.set_footer(text=footer_text)
+            embeds.append(embed)
+        return embeds
 
     @app_commands.command(
         name="soupysearch",
@@ -442,7 +584,6 @@ class SearchCog(commands.Cog):
     )
     @app_commands.describe(query="The search query.")
     async def search_command(self, interaction: discord.Interaction, query: str):
-        """Handle the /soupysearch command"""
         start_time = time.time()
         logger.info(f"🔍 Search requested by {interaction.user}: '{query}'")
 
@@ -455,9 +596,16 @@ class SearchCog(commands.Cog):
         await interaction.response.defer()
 
         try:
-            # Get initial search results (with resilient backends and timeout)
+            target_count = settings.search_results_per_query
+            recency_query = _is_recency_query(query)
+            channel_hint = _channel_hint(interaction)
+            if recency_query:
+                logger.info(f"🔍 Recency-seeking query detected: '{query}'")
+
+            # Fetch a wider pool so the LLM has options after blocklist filtering.
+            pool_size = max(target_count * 2, 10)
             try:
-                initial_results = await self.perform_text_search(query, max_results=10)
+                initial_results = await self.perform_text_search(query, max_results=pool_size)
             except SearchBackendError:
                 await interaction.followup.send(
                     "❌ Search failed — couldn't reach DuckDuckGo. Try again in a moment.",
@@ -470,8 +618,6 @@ class SearchCog(commands.Cog):
                 await interaction.followup.send("❌ No results found.", ephemeral=True)
                 return
 
-            # Strip dictionary / definition / glossary sites — they make for
-            # awful summarization sources. See _DEFAULT_BLOCKED_DOMAINS at module top.
             blocked_domains = _build_blocked_domains()
             kept = []
             blocked_count = 0
@@ -482,7 +628,9 @@ class SearchCog(commands.Cog):
                     continue
                 kept.append(r)
             if blocked_count:
-                logger.info(f"🔍 Blocked-domain filter dropped {blocked_count} of {len(initial_results)} results")
+                logger.info(
+                    f"🔍 Blocked-domain filter dropped {blocked_count} of {len(initial_results)} results"
+                )
             initial_results = kept
 
             if not initial_results:
@@ -492,47 +640,47 @@ class SearchCog(commands.Cog):
                 )
                 return
 
-            # Select and process articles
-            selected_results = await self.select_articles(initial_results)
-            final_response = await self.generate_final_response(query, selected_results)
+            selected_results = await self.select_articles(
+                initial_results,
+                target_count=target_count,
+                recency_query=recency_query,
+                channel_hint=channel_hint,
+            )
 
-            # Ensure sources are included by appending them
-            sources_section = "\n\n**Sources Used:**\n"
-            for i, article in enumerate(selected_results, 1):
-                title = article.get("title", "Untitled").strip()
-                url = article.get("href", "").strip()
-                if url:  # Only include if we have a URL
-                    sources_section += f"{i}. [{title}]({url})\n"
-
-            # Combine response with sources
-            final_response = final_response.strip() + sources_section
-
-            # Split response if needed
-            MAX_EMBED_LENGTH = 3900
-            response_chunks = [
-                final_response[i : i + MAX_EMBED_LENGTH] for i in range(0, len(final_response), MAX_EMBED_LENGTH)
-            ]
-
-            elapsed_time = round(time.time() - start_time, 2)
-
-            for i, chunk in enumerate(response_chunks):
-                embed = discord.Embed(
-                    title=f"🔍 Search Results for: {query}"
-                    + (f" (Part {i+1}/{len(response_chunks)})" if len(response_chunks) > 1 else ""),
-                    description=chunk,
-                    color=discord.Color.green(),
+            fetched = await self.fetch_articles_parallel(selected_results)
+            if not fetched:
+                await interaction.followup.send(
+                    "❌ Couldn't extract content from any of the selected sources. They may be blocking "
+                    "scrapers or returning errors.",
+                    ephemeral=True,
                 )
+                return
 
-                if i == 0:
-                    embed.set_footer(text=f"Search completed in {elapsed_time} seconds")
-                    await interaction.followup.send(embed=embed)
-                else:
-                    await interaction.followup.send(embed=embed)
+            summary, degraded, citations_missing = await self.generate_final_response(
+                query, fetched, recency_query
+            )
 
-                if i < len(response_chunks) - 1:
+            elapsed = time.time() - start_time
+            embeds = self._build_embeds(
+                query=query,
+                summary=summary,
+                articles=fetched,
+                elapsed=elapsed,
+                fetched_count=len(fetched),
+                target_count=len(selected_results),
+                degraded=degraded,
+                citations_missing=citations_missing,
+            )
+
+            for i, embed in enumerate(embeds):
+                await interaction.followup.send(embed=embed)
+                if i < len(embeds) - 1:
                     await asyncio.sleep(1)
 
-            logger.info(f"✅ Search completed for {interaction.user}")
+            logger.info(
+                f"✅ Search completed for {interaction.user} in {elapsed:.2f}s "
+                f"(degraded={degraded}, citations_missing={citations_missing})"
+            )
 
         except Exception as e:
             logger.error(f"❌ Error in search command: {e}")
@@ -540,5 +688,5 @@ class SearchCog(commands.Cog):
 
 
 async def setup(bot):
-    """Setup function for loading the cog"""
+    """Setup function for loading the cog."""
     await bot.add_cog(SearchCog(bot))

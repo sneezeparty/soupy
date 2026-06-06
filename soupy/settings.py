@@ -216,6 +216,24 @@ class Settings:
         return _env_float("SEARCH_SUMMARY_TEMPERATURE", 0.7)
 
     @cached_property
+    def search_backend_timeout_seconds(self) -> int:
+        return _env_int("SEARCH_BACKEND_TIMEOUT_SECONDS", 12, minimum=1)
+
+    @cached_property
+    def search_results_per_query(self) -> int:
+        return _env_int("SEARCH_RESULTS_PER_QUERY", 5, minimum=1)
+
+    @cached_property
+    def search_backends(self) -> str:
+        """Comma-separated ddgs text backends. Empty -> library's 'auto' mode.
+
+        Valid choices (ddgs 9.x): brave, duckduckgo, grokipedia, mojeek,
+        wikipedia, yahoo, yandex. Default skips the two knowledge-base engines
+        (wikipedia, grokipedia) so news-style queries hit real web sources first.
+        """
+        return _env_str("SEARCH_BACKENDS", "brave,duckduckgo,mojeek,yahoo,yandex").strip()
+
+    @cached_property
     def recent_message_limit(self) -> int:
         return _env_int("RECENT_MESSAGE_LIMIT", 15, minimum=1)
 
@@ -342,6 +360,37 @@ class Settings:
     def flux_default_strength(self) -> float:
         # Default img2img strength when /flux is given an input image.
         return _env_float("FLUX_DEFAULT_STRENGTH", 0.35, minimum=0.0, maximum=1.0)
+
+    # ----- Flux dimensions ----------------------------------------------
+    # FLUX.2-Klein was trained on a ~1-megapixel aspect-ratio bucket list
+    # (1024x1024, 1392x752, 752x1392, ...). The /flux command's default /
+    # wide / tall choices map to these buckets so results stay sharp and
+    # the Klein-Edit token budget is bounded. Don't push these past ~1.05 MP
+    # — anything larger trips Metal's max-buffer cap on klein-edit.
+
+    @cached_property
+    def flux_default_width(self) -> int:
+        return _env_int("FLUX_DEFAULT_WIDTH", 1024, minimum=64)
+
+    @cached_property
+    def flux_default_height(self) -> int:
+        return _env_int("FLUX_DEFAULT_HEIGHT", 1024, minimum=64)
+
+    @cached_property
+    def flux_wide_width(self) -> int:
+        return _env_int("FLUX_WIDE_WIDTH", 1392, minimum=64)
+
+    @cached_property
+    def flux_wide_height(self) -> int:
+        return _env_int("FLUX_WIDE_HEIGHT", 752, minimum=64)
+
+    @cached_property
+    def flux_tall_width(self) -> int:
+        return _env_int("FLUX_TALL_WIDTH", 752, minimum=64)
+
+    @cached_property
+    def flux_tall_height(self) -> int:
+        return _env_int("FLUX_TALL_HEIGHT", 1392, minimum=64)
 
     # ----- Flux edit pipeline (FLUX.2-Klein only) -----------------------
     # When enabled, /flux with an attached image routes to flux_server.py's

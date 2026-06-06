@@ -31,9 +31,6 @@ _DISPATCH_FUNCS = [
     "handle_wide",
     "handle_tall",
     "handle_edit",
-    "handle_2x2_grid",
-    "handle_thumbnail_upscale",
-    "handle_regenerate_selected",
 ]
 
 

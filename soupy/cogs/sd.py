@@ -2,8 +2,8 @@
 
 Extracted from the main bot file (``soupy_remastered_stablediffusion.py``). Owns
 the ``/sd``, ``/img2img``, ``/inpaint`` and ``/outpaint`` commands, the
-Remix / Edit / Outpaint button UIs (``ThumbnailSelectionView``, ``SDRemixView``,
-``EditImageModal``), and the SD HTTP pipeline (``generate_sd_image``).
+Remix / Edit / Outpaint button UIs (``SDRemixView``, ``EditImageModal``), and
+the SD HTTP pipeline (``generate_sd_image``).
 
 WHY the queue isn't here: ``SDQueue`` stays in the main module because the same
 queue also dispatches ``"chat"`` jobs and must be running before the first
@@ -27,7 +27,7 @@ import re
 import sys
 import time
 from io import BytesIO
-from typing import Dict, List, Optional
+from typing import Optional
 
 import aiohttp
 import cv2
@@ -759,185 +759,6 @@ async def handle_edit(interaction, prompt, width, height, seed, queue_size):
     await generate_sd_image(interaction, prompt, width, height, seed, action_name="Edit", queue_size=queue_size)
 
 
-async def handle_regenerate_selected(interaction, prompt, width, height, seed, queue_size, thumbnail_index):
-    """Handle regenerating a full 1024x1024 image using the selected thumbnail's seed."""
-    # Increment the images_generated stat
-    await increment_user_stat(interaction.user.id, "images_generated")
-
-    # Proceed with image generation using normal SD settings
-    action_label = f"Selected #{thumbnail_index}"
-    await generate_sd_image(interaction, prompt, width, height, seed, action_name=action_label, queue_size=queue_size)
-
-
-async def handle_thumbnail_upscale(interaction, prompt, width, height, thumbnail_data, queue_size, thumbnail_index):
-    """Handle regenerating thumbnail with 30 steps then upscaling to full-size image"""
-    try:
-        logger.info(
-            f"🔲 Regenerating and upscaling thumbnail {thumbnail_index} for {interaction.user}: prompt='{prompt}', seed={thumbnail_data['seed']}"
-        )
-
-        # Check if we need to send an initial response
-        if not interaction.response.is_done():
-            await interaction.response.defer(thinking=True)
-
-        sd_server_url = SD_SERVER_URL.rstrip("/")
-
-        # Use typing context manager for consistent behavior
-        async with interaction.channel.typing():
-            # Use optimized session with connection pooling and keep-alive
-            connector = aiohttp.TCPConnector(
-                limit=100,  # Total connection pool size
-                limit_per_host=30,  # Per-host connection limit
-                keepalive_timeout=30,  # Keep connections alive
-                enable_cleanup_closed=True,
-            )
-            # Increased timeout for SD 3.5 Medium on Mac (can take 2-5 minutes)
-            timeout = aiohttp.ClientTimeout(total=600, connect=10)
-
-            async with aiohttp.ClientSession(
-                connector=connector, timeout=timeout, headers={"Connection": "keep-alive"}
-            ) as session:
-                # Start timing the entire process
-                total_start_time = time.perf_counter()
-
-                # Step 1: Regenerate thumbnail with steps from env at same resolution and seed
-                steps = int(os.getenv("SD_STEPS", 20))
-                logger.info(
-                    f"🔲 Step 1: Regenerating thumbnail {thumbnail_index} with {steps} steps at {thumbnail_data['width']}x{thumbnail_data['height']}"
-                )
-                regenerate_start_time = time.perf_counter()
-
-                regenerate_payload = {
-                    "prompt": prompt,
-                    "negative_prompt": soupy_prompts.load_prompt("sd_negative_prompt", fallback=""),
-                    "steps": str(int(os.getenv("SD_STEPS", 20))),  # Deprecated in new flow; kept for compatibility
-                    "guidance_scale": str(float(os.getenv("SD_GUIDANCE", 7.5))),
-                    "width": str(thumbnail_data["width"]),
-                    "height": str(thumbnail_data["height"]),
-                    "seed": str(thumbnail_data["seed"]),
-                }
-
-                async with session.post(f"{sd_server_url}/sd", data=regenerate_payload) as regenerate_response:
-                    if regenerate_response.status != 200:
-                        logger.error(
-                            f"🔲 Regeneration failed for thumbnail {thumbnail_index}: HTTP {regenerate_response.status}"
-                        )
-                        await interaction.followup.send(
-                            f"❌ Failed to regenerate thumbnail: HTTP {regenerate_response.status}", ephemeral=True
-                        )
-                        return
-
-                    regenerated_bytes = await regenerate_response.read()
-                    regenerate_end_time = time.perf_counter()
-                    regenerate_duration = regenerate_end_time - regenerate_start_time
-                    logger.info(f"⏱️ Thumbnail regeneration completed in {regenerate_duration:.2f} seconds")
-
-                # Step 2: Upscale the regenerated thumbnail
-                logger.info(f"🔲 Step 2: Upscaling regenerated thumbnail to {width}x{height}")
-                upscale_start_time = time.perf_counter()
-
-                # Prepare form data for upscaling
-                form = aiohttp.FormData()
-                form.add_field(
-                    "image", regenerated_bytes, filename="regenerated_thumbnail.jpg", content_type="image/jpeg"
-                )
-                form.add_field("target_width", str(width))
-                form.add_field("target_height", str(height))
-
-                async with session.post(f"{sd_server_url}/upscale", data=form) as upscale_response:
-                    if upscale_response.status == 200:
-                        upscaled_bytes = await upscale_response.read()
-
-                        # End timing the upscaling process
-                        upscale_end_time = time.perf_counter()
-                        upscale_duration = upscale_end_time - upscale_start_time
-                        total_duration = upscale_end_time - total_start_time
-
-                        logger.info(f"⏱️ Upscaling completed in {upscale_duration:.2f} seconds")
-                        logger.info(
-                            f"⏱️ Total process completed in {total_duration:.2f} seconds for {interaction.user}"
-                        )
-
-                        # Generate a unique filename
-                        random_number = random.randint(100000, 999999)
-                        safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
-                        filename = f"{random_number}_{safe_prompt}_regenerated_upscaled.png"
-
-                        # Create a Discord File object from the upscaled image bytes
-                        image_file = discord.File(BytesIO(upscaled_bytes), filename=filename)
-
-                        # Create embed messages
-                        description_embed = discord.Embed(
-                            description=f"**Prompt:** {prompt}\n**Regenerated & Upscaled from thumbnail {thumbnail_index}**",
-                            color=discord.Color.purple(),
-                        )
-                        details_embed = discord.Embed(color=discord.Color.green())
-
-                        queue_total = queue_size + 1
-                        details_text = (
-                            f"🔲 Regen+Upscale Thumbnail {thumbnail_index} ⏱️ {total_duration:.2f}s 📋 {queue_total}"
-                        )
-                        details_embed.description = details_text
-
-                        # Initialize the SDRemixView with current image parameters
-                        new_view = SDRemixView(prompt=prompt, width=width, height=height, seed=thumbnail_data["seed"])
-
-                        # When sending the final message, use followup if the initial response was deferred
-                        if interaction.response.is_done():
-                            await interaction.followup.send(
-                                content=f"{interaction.user.mention} 🔲 Regenerated & Upscaled Image:",
-                                embeds=[description_embed, details_embed],
-                                file=image_file,
-                                view=new_view,
-                            )
-                        else:
-                            await interaction.channel.send(
-                                content=f"{interaction.user.mention} 🔲 Regenerated & Upscaled Image:",
-                                embeds=[description_embed, details_embed],
-                                file=image_file,
-                                view=new_view,
-                            )
-                        logger.info(
-                            f"🔲 Regeneration and upscaling completed for {interaction.user}: filename='{filename}', total_duration={total_duration:.2f}s"
-                        )
-                    else:
-                        logger.error(
-                            f"🔲 Upscaling server error for {interaction.user}: HTTP {upscale_response.status}"
-                        )
-                        try:
-                            await interaction.followup.send(
-                                f"❌ Upscaling server error: HTTP {upscale_response.status}", ephemeral=True
-                            )
-                        except Exception as send_error:
-                            logger.error(f"❌ Failed to send follow-up message: {send_error}")
-
-    except (ClientConnectorError, ClientOSError):
-        logger.error(f"🔲 Server is offline or unreachable for {interaction.user}.")
-        if isinstance(interaction, discord.Interaction):
-            try:
-                await interaction.followup.send("❌ The server is currently offline.", ephemeral=True)
-            except Exception as send_error:
-                logger.error(f"❌ Failed to send follow-up message: {send_error}")
-    except ServerTimeoutError:
-        logger.error(f"🔲 Server request timed out for {interaction.user}.")
-        if isinstance(interaction, discord.Interaction):
-            try:
-                await interaction.followup.send(
-                    "❌ The server timed out while processing your request. Please try again later.", ephemeral=True
-                )
-            except Exception as send_error:
-                logger.error(f"❌ Failed to send follow-up message: {send_error}")
-    except Exception as e:
-        logger.error(f"🔲 Unexpected error during regeneration and upscaling for {interaction.user}: {e}")
-        if isinstance(interaction, discord.Interaction):
-            try:
-                await interaction.followup.send(
-                    f"❌ An unexpected error occurred during regeneration and upscaling: {e}", ephemeral=True
-                )
-            except Exception as send_error:
-                logger.error(f"❌ Failed to send follow-up message: {send_error}")
-
-
 async def handle_outpaint(
     interaction, prompt, direction, width, height, seed, queue_size, strength=0.8, steps=None, guidance=None
 ):
@@ -1279,144 +1100,6 @@ async def handle_outpaint(
                 pass
 
 
-async def handle_2x2_grid(interaction, prompt, width, height, seed, queue_size):
-    """Handle 2x2 grid generation - creates 4 candidate images and combines them"""
-    try:
-        logger.info(f"🔲 Starting 2x2 grid generation for {interaction.user}: prompt='{prompt}', size={width}x{height}")
-
-        # For the new flow, generate four 1024x1024 candidates regardless of the current view size
-        thumbnail_width = 1024
-        thumbnail_height = 1024
-        # Ensure dimensions are multiples of 64 for SD (defensive)
-        thumbnail_width = ((thumbnail_width + 63) // 64) * 64
-        thumbnail_height = ((thumbnail_height + 63) // 64) * 64
-
-        # Generate 4 unique seeds
-        thumbnail_seeds = []
-        base_seed = seed if seed is not None else random.randint(0, 2**32 - 1)
-        for i in range(4):
-            thumbnail_seeds.append(base_seed + i)
-
-        logger.info(f"🔲 Generated seeds for thumbnails: {thumbnail_seeds}")
-
-        # Generate 4 thumbnail images
-        thumbnail_images = []
-        thumbnail_data = []  # Store individual thumbnail data for upscaling
-        sd_server_url = SD_SERVER_URL.rstrip("/")
-        # Use 10 steps for the candidate images
-        num_steps = 10
-        guidance = float(os.getenv("SD_GUIDANCE", 7.5))
-        negative_prompt = soupy_prompts.load_prompt("sd_negative_prompt", fallback="")
-
-        async with interaction.channel.typing():
-            connector = aiohttp.TCPConnector(
-                limit=100, limit_per_host=30, keepalive_timeout=30, enable_cleanup_closed=True
-            )
-            # Increased timeout for SD 3.5 Medium on Mac (can take 2-5 minutes)
-            timeout = aiohttp.ClientTimeout(total=600, connect=10)
-
-            async with aiohttp.ClientSession(
-                connector=connector, timeout=timeout, headers={"Connection": "keep-alive"}
-            ) as session:
-                for i, thumb_seed in enumerate(thumbnail_seeds):
-                    payload = {
-                        "prompt": prompt,
-                        "negative_prompt": negative_prompt,
-                        "steps": str(num_steps),
-                        "guidance_scale": str(guidance),
-                        "width": str(thumbnail_width),
-                        "height": str(thumbnail_height),
-                        "seed": str(thumb_seed),
-                    }
-
-                    logger.info(f"🔲 Generating thumbnail {i+1}/4 with seed {thumb_seed}")
-
-                    async with session.post(f"{sd_server_url}/sd", data=payload) as response:
-                        if response.status == 200:
-                            image_bytes = await response.read()
-                            thumbnail_images.append(image_bytes)
-                            # Store individual thumbnail data for upscaling
-                            thumbnail_data.append(
-                                {
-                                    "image_bytes": image_bytes,
-                                    "seed": thumb_seed,
-                                    "width": thumbnail_width,
-                                    "height": thumbnail_height,
-                                }
-                            )
-                            logger.info(f"🔲 Successfully generated thumbnail {i+1}/4")
-                        else:
-                            logger.error(f"🔲 Failed to generate thumbnail {i+1}/4: HTTP {response.status}")
-                            raise Exception(f"Failed to generate thumbnail {i+1}/4: HTTP {response.status}")
-
-        # Combine thumbnails into 2x2 grid
-        logger.info(f"🔲 Combining {len(thumbnail_images)} thumbnails into 2x2 grid")
-
-        # Create the combined image (2x2 grid of 1024x1024 => 2048x2048)
-        combined_width = thumbnail_width * 2
-        combined_height = thumbnail_height * 2
-        combined_image = Image.new("RGB", (combined_width, combined_height))
-
-        # Paste each thumbnail into the grid
-        positions = [
-            (0, 0),  # Top-left
-            (thumbnail_width, 0),  # Top-right
-            (0, thumbnail_height),  # Bottom-left
-            (thumbnail_width, thumbnail_height),  # Bottom-right
-        ]
-
-        for i, (image_bytes, pos) in enumerate(zip(thumbnail_images, positions, strict=False)):
-            thumbnail_img = Image.open(BytesIO(image_bytes))
-            combined_image.paste(thumbnail_img, pos)
-            logger.debug(f"🔲 Pasted thumbnail {i+1} at position {pos}")
-
-        # Convert combined image to bytes
-        combined_bytes = BytesIO()
-        combined_image.save(combined_bytes, format="PNG")
-        combined_bytes.seek(0)
-
-        # Generate filename
-        random_number = random.randint(100000, 999999)
-        safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
-        filename = f"{random_number}_{safe_prompt}_2x2grid.png"
-
-        # Create Discord file
-        image_file = discord.File(combined_bytes, filename=filename)
-
-        # Create embeds
-        description_embed = discord.Embed(
-            description=f"**Prompt:** {prompt}\n**Seeds:** {', '.join(map(str, thumbnail_seeds))}",
-            color=discord.Color.purple(),
-        )
-
-        details_embed = discord.Embed(
-            description=f"🔲 2x2 Grid ⏱️ 10 steps each 📋 {queue_size + 1}", color=discord.Color.green()
-        )
-
-        # Create thumbnail selection view
-        thumbnail_view = ThumbnailSelectionView(prompt=prompt, width=1024, height=1024, thumbnail_data=thumbnail_data)
-
-        # Send the combined image with selection buttons
-        await interaction.followup.send(
-            content=f"{interaction.user.mention} 🔲 2x2 Thumbnail Grid:",
-            embeds=[description_embed, details_embed],
-            file=image_file,
-            view=thumbnail_view,
-        )
-
-        logger.info(f"🔲 Successfully created 2x2 grid for {interaction.user}: {filename}")
-
-        # Increment the images_generated stat
-        await increment_user_stat(interaction.user.id, "images_generated")
-
-    except Exception as e:
-        logger.error(f"🔲 Error generating 2x2 grid for {interaction.user}: {e}")
-        if not interaction.response.is_done():
-            await interaction.response.send_message(f"❌ Error generating 2x2 grid: {e}", ephemeral=True)
-        else:
-            await interaction.followup.send(f"❌ Error generating 2x2 grid: {e}", ephemeral=True)
-
-
 fancy_instructions = soupy_prompts.load_prompt("fancy", fallback="")
 
 
@@ -1495,75 +1178,8 @@ async def handle_fancy(interaction, prompt, width, height, seed, queue_size):
 
 
 # ---------------------------------------------------------------------------
-# Discord UI components: thumbnail selection grid, edit modal, remix buttons
+# Discord UI components: edit modal, remix buttons
 # ---------------------------------------------------------------------------
-
-
-class ThumbnailSelectionView(View):
-    def __init__(self, prompt: str, width: int, height: int, thumbnail_data: List[Dict]):
-        super().__init__(timeout=None)
-        self.prompt = prompt
-        self.width = width
-        self.height = height
-        self.thumbnail_data = thumbnail_data
-        logger.debug(
-            f"ThumbnailSelectionView initialized: prompt='{prompt}', {width}x{height}, {len(thumbnail_data)} thumbnails"
-        )
-
-    @discord.ui.button(label="1", style=discord.ButtonStyle.primary, custom_id="thumbnail_1_button", row=0)
-    @universal_cooldown_check()
-    async def thumbnail_1_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._handle_thumbnail_selection(interaction, 0)
-
-    @discord.ui.button(label="2", style=discord.ButtonStyle.primary, custom_id="thumbnail_2_button", row=0)
-    @universal_cooldown_check()
-    async def thumbnail_2_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._handle_thumbnail_selection(interaction, 1)
-
-    @discord.ui.button(label="3", style=discord.ButtonStyle.primary, custom_id="thumbnail_3_button", row=1)
-    @universal_cooldown_check()
-    async def thumbnail_3_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._handle_thumbnail_selection(interaction, 2)
-
-    @discord.ui.button(label="4", style=discord.ButtonStyle.primary, custom_id="thumbnail_4_button", row=1)
-    @universal_cooldown_check()
-    async def thumbnail_4_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._handle_thumbnail_selection(interaction, 3)
-
-    async def _handle_thumbnail_selection(self, interaction: discord.Interaction, thumbnail_index: int):
-        """Handle thumbnail selection and regenerate at 1024x1024 using selected seed"""
-        logger.info(f"Thumbnail {thumbnail_index + 1} selected by {interaction.user} for prompt: '{self.prompt}'")
-        try:
-            await interaction.response.send_message(
-                "🛠️ Generating selected image at 1024x1024 using its seed...", ephemeral=True
-            )
-
-            selected_thumbnail = self.thumbnail_data[thumbnail_index]
-            _queue_size = bot.sd_queue.qsize()
-
-            await bot.sd_queue.put(
-                {
-                    "type": "button",
-                    "interaction": interaction,
-                    "action": "regenerate_selected",
-                    "prompt": self.prompt,
-                    "width": 1024,
-                    "height": 1024,
-                    "seed": selected_thumbnail["seed"],
-                    "thumbnail_index": thumbnail_index + 1,
-                }
-            )
-
-            logger.info(
-                f"Enqueued regenerate_selected for thumbnail {thumbnail_index + 1} for {interaction.user}: prompt='{self.prompt}', size=1024x1024, seed={selected_thumbnail['seed']}"
-            )
-
-            # Increment the images_generated stat
-            await increment_user_stat(interaction.user.id, "images_generated")
-
-        except Exception as e:
-            logger.error(f"Error during thumbnail selection for {interaction.user}: {e}")
-            await interaction.followup.send("❌ Error generating selected image.", ephemeral=True)
 
 
 class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
@@ -1882,33 +1498,6 @@ class SDRemixView(View):
             logger.error(f"Error during tall generation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating tall version.", ephemeral=True)
 
-    @discord.ui.button(label="🔲 2x2", style=discord.ButtonStyle.secondary, custom_id="flux_2x2_button", row=1)
-    @universal_cooldown_check()
-    async def grid_2x2_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'2x2 Grid' button clicked by {interaction.user} for prompt: '{self.prompt}'")
-        try:
-            await interaction.response.send_message(
-                "🛠️ Generating 2x2 grid (4× 1024×1024 @ 10 steps)...", ephemeral=True
-            )
-            _queue_size = bot.sd_queue.qsize()
-            await bot.sd_queue.put(
-                {
-                    "type": "button",
-                    "interaction": interaction,
-                    "action": "2x2_grid",
-                    "prompt": self.cleaned_prompt,
-                    "width": self.width,
-                    "height": self.height,
-                    "seed": self.seed,
-                }
-            )
-            logger.info(
-                f"Enqueued '2x2 Grid' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={self.seed}"
-            )
-        except Exception as e:
-            logger.error(f"Error during 2x2 grid generation for {interaction.user}: {e}")
-            await interaction.followup.send("❌ Error generating 2x2 grid.", ephemeral=True)
-
     @discord.ui.button(label="⤡ Outpaint", style=discord.ButtonStyle.success, custom_id="outpaint_both_button", row=0)
     @universal_cooldown_check()
     async def outpaint_both_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1939,7 +1528,7 @@ class SDRemixView(View):
 
 # ---------------------------------------------------------------------------
 # Image generation pipeline — sends prompts to the SD backend, fetches the
-# result, archives it, and posts the 2x2 thumbnail grid back to Discord.
+# result, archives it, and posts it back to Discord with the remix view.
 # ---------------------------------------------------------------------------
 
 

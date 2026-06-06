@@ -2,15 +2,22 @@
 
 A second image backend that runs **locally** on the Mac via ``flux_server.py``
 (an mflux/MLX HTTP server), as opposed to the remote Stable Diffusion server the
-``soupy.cogs.sd`` cog talks to. ``/flux`` mirrors ``/sd`` (text-to-image with the
-same default/wide/tall/square sizes and the same Remix button panel) but also
-accepts an optional ``image`` attachment to run **image-to-image**.
+``soupy.cogs.sd`` cog talks to. ``/flux`` mirrors ``/sd``'s Remix button panel
+and also accepts an optional ``image`` attachment to run **image-to-image**.
+
+**Dimensions are Klein-specific, not SD's.** FLUX.2-Klein was trained on a
+~1 MP aspect-ratio bucket list (1024x1024, 1392x752, 752x1392, ...). The
+``FLUX_*`` env vars in ``.env-stable`` map default/wide/tall to those buckets
+— going off-distribution (or above ~1.05 MP) softens output and, on
+klein-edit, trips Metal's max-buffer cap because the reference-token area
+goes quadratic in attention.
 
 Buttons under a result mirror ``/sd``'s ``SDRemixView`` — Edit, Fancy, Remix,
-R-Fancy, R-Keyword, Wide, Tall, 2x2 — minus Outpaint (the Flux server has no
-outpaint/inpaint endpoint; schnell/klein can't outpaint natively). img2img
-results additionally get a 🎚️ Strength button that re-runs the img2img with a
-new strength; all other buttons act as text2img on the prompt (matching /sd).
+R-Fancy, R-Keyword, Wide, Tall — minus Outpaint (the Flux server has no
+outpaint/inpaint endpoint; schnell/klein can't outpaint natively). Every result
+also gets a 🖼️ img2img button that opens a prompt+strength modal and re-runs
+img2img against the displayed image (chain forward). All other buttons act as
+text2img on the prompt (matching /sd).
 
 Design notes:
 - Work is funnelled through the single ``SDQueue`` in the main module so Flux and
@@ -34,7 +41,7 @@ import sys
 import time
 from io import BytesIO
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import aiohttp
 import discord
@@ -53,12 +60,6 @@ if _mm is not None and hasattr(_mm, "SDQueue"):
 else:  # imported as a module (tests, tooling) rather than run as the script
     import soupy_remastered_stablediffusion as _main  # noqa: E402
 
-SD_DEFAULT_WIDTH = _main.SD_DEFAULT_WIDTH
-SD_DEFAULT_HEIGHT = _main.SD_DEFAULT_HEIGHT
-SD_WIDE_WIDTH = _main.SD_WIDE_WIDTH
-SD_WIDE_HEIGHT = _main.SD_WIDE_HEIGHT
-SD_TALL_WIDTH = _main.SD_TALL_WIDTH
-SD_TALL_HEIGHT = _main.SD_TALL_HEIGHT
 bot = _main.bot
 logger = _main.logger
 archive_sent_message = _main.archive_sent_message
@@ -66,11 +67,23 @@ increment_user_stat = _main.increment_user_stat
 universal_cooldown_check = _main.universal_cooldown_check
 _ensure_media_dirs = _main._ensure_media_dirs
 
+# Flux uses its own dimension presets — not the SD cog's — because FLUX.2-Klein
+# was trained on a ~1 MP aspect-ratio bucket list and goes off-distribution
+# (and trips Metal's max-buffer on klein-edit) above ~1.05 MP. Defaults map to
+# the closest BFL training buckets: 1024x1024 (1:1), 1392x752 (~16:9 wide),
+# 752x1392 (~9:16 tall).
+FLUX_DEFAULT_WIDTH = settings.flux_default_width
+FLUX_DEFAULT_HEIGHT = settings.flux_default_height
+FLUX_WIDE_WIDTH = settings.flux_wide_width
+FLUX_WIDE_HEIGHT = settings.flux_wide_height
+FLUX_TALL_WIDTH = settings.flux_tall_width
+FLUX_TALL_HEIGHT = settings.flux_tall_height
+
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 _RANDOM_DIMS = [
-    (SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT),  # square
-    (SD_WIDE_WIDTH, SD_WIDE_HEIGHT),  # wide
-    (SD_TALL_WIDTH, SD_TALL_HEIGHT),  # tall
+    (FLUX_DEFAULT_WIDTH, FLUX_DEFAULT_HEIGHT),  # square
+    (FLUX_WIDE_WIDTH, FLUX_WIDE_HEIGHT),  # wide
+    (FLUX_TALL_WIDTH, FLUX_TALL_HEIGHT),  # tall
 ]
 
 
@@ -105,10 +118,33 @@ def _flux_edit_url() -> str:
 
 def _dims_for_size(size: str) -> tuple[int, int]:
     if size == "wide":
-        return SD_WIDE_WIDTH, SD_WIDE_HEIGHT
+        return FLUX_WIDE_WIDTH, FLUX_WIDE_HEIGHT
     if size == "tall":
-        return SD_TALL_WIDTH, SD_TALL_HEIGHT
-    return SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT  # default / square
+        return FLUX_TALL_WIDTH, FLUX_TALL_HEIGHT
+    return FLUX_DEFAULT_WIDTH, FLUX_DEFAULT_HEIGHT  # default / square
+
+
+# Mirrors flux_server.py's defaults — kept in sync so the cog's embed/buttons
+# reflect the size flux_server will actually generate. The server is still the
+# authority and clamps again on its side, but pre-clamping here means a phone
+# photo doesn't display "4032x3024" on a result the server downsized to 1024.
+_FLUX_MAX_PIXELS = 1024 * 1024
+_FLUX_MAX_DIMENSION = 1536
+
+
+def _clamp_src_dims(w: int, h: int) -> tuple[int, int]:
+    """Fit (w, h) into the flux area+dim budget, snapped to multiples of 16."""
+    if w <= 0 or h <= 0:
+        return FLUX_DEFAULT_WIDTH, FLUX_DEFAULT_HEIGHT
+    scale = 1.0
+    if max(w, h) > _FLUX_MAX_DIMENSION:
+        scale = _FLUX_MAX_DIMENSION / max(w, h)
+    pixels = (w * scale) * (h * scale)
+    if pixels > _FLUX_MAX_PIXELS:
+        scale *= (_FLUX_MAX_PIXELS / pixels) ** 0.5
+    new_w = max(16, (int(w * scale) // 16) * 16)
+    new_h = max(16, (int(h * scale) // 16) * 16)
+    return new_w, new_h
 
 
 def _flux_sources_dir() -> Path:
@@ -164,10 +200,10 @@ def _make_session() -> aiohttp.ClientSession:
 )
 @app_commands.choices(
     size=[
-        app_commands.Choice(name=f"Default ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="default"),
-        app_commands.Choice(name=f"Wide ({SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT})", value="wide"),
-        app_commands.Choice(name=f"Tall ({SD_TALL_WIDTH}x{SD_TALL_HEIGHT})", value="tall"),
-        app_commands.Choice(name=f"Square ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="square"),
+        app_commands.Choice(name=f"Default ({FLUX_DEFAULT_WIDTH}x{FLUX_DEFAULT_HEIGHT})", value="default"),
+        app_commands.Choice(name=f"Wide ({FLUX_WIDE_WIDTH}x{FLUX_WIDE_HEIGHT})", value="wide"),
+        app_commands.Choice(name=f"Tall ({FLUX_TALL_WIDTH}x{FLUX_TALL_HEIGHT})", value="tall"),
+        app_commands.Choice(name=f"Square ({FLUX_DEFAULT_WIDTH}x{FLUX_DEFAULT_HEIGHT})", value="square"),
     ]
 )
 async def flux(
@@ -236,11 +272,14 @@ async def generate_flux_image(
     queue_size: int = 0,
     selected_terms: Optional[str] = None,
     pre_duration: float = 0.0,
+    force_noise_mix: bool = False,
 ):
     """POST to the local Flux server and post the result to Discord.
 
     img2img is used when ``image_url`` (fresh attachment) or ``source_file`` (a
     persisted source, for the Strength button) is given; otherwise text2img.
+    ``force_noise_mix`` skips klein-edit even when ``FLUX_EDIT_ENABLED`` is on —
+    used by the img2img button so its strength input is actually honored.
     """
     try:
         if not interaction.response.is_done():
@@ -270,7 +309,7 @@ async def generate_flux_image(
         # Edit mode = klein-edit endpoint with concatenated reference-image
         # tokens. Stronger prompt following than the noise-mix /flux_img2img
         # path, but no `strength` knob and FLUX.2-klein only.
-        is_edit_mode = is_img2img and settings.flux_edit_enabled
+        is_edit_mode = is_img2img and settings.flux_edit_enabled and not force_noise_mix
 
         async with interaction.channel.typing():
             async with _make_session() as session:
@@ -279,7 +318,11 @@ async def generate_flux_image(
                 if is_img2img:
                     try:
                         src_w, src_h = Image.open(BytesIO(src_bytes)).size
-                        width, height = src_w, src_h
+                        # Cap source-derived dims so a 12-megapixel phone photo
+                        # doesn't ask flux_server for a 12-megapixel generation
+                        # (Klein-Edit would OOM at attention time; the server
+                        # also clamps defensively).
+                        width, height = _clamp_src_dims(src_w, src_h)
                     except Exception:
                         pass
                     form = aiohttp.FormData()
@@ -377,10 +420,21 @@ async def generate_flux_image(
                     details_text += f" 🎚️ {strength}"
                 details_embed.description = details_text
 
+                # Persist the OUTPUT bytes too so the img2img button on this
+                # view can use the displayed image as a fresh img2img source
+                # (chaining generations). Best-effort: if the write fails, the
+                # button will surface a clear error when clicked.
+                display_source_file: Optional[str] = None
+                try:
+                    display_source_file = _persist_flux_source(image_bytes)
+                except Exception as e:
+                    logger.debug(f"flux: could not persist output as display source: {e}")
+
                 new_view = FluxRemixView(
                     prompt=prompt, width=width, height=height, seed=seed,
                     is_img2img=is_img2img, source_file=source_file,
                     is_edit_mode=is_edit_mode,
+                    display_source_file=display_source_file,
                 )
 
                 content = f"{interaction.user.mention} ⚡ Flux Image:"
@@ -459,11 +513,7 @@ async def process_flux_image(item: dict):
         if action == "random":
             await _handle_flux_random(item)
             return
-        if action == "2x2_grid":
-            await handle_flux_2x2_grid(item)
-            return
-
-        # Basic generations: flux / edit / remix / wide / tall / strength / regenerate_selected
+        # Basic generations: flux / edit / remix / wide / tall / img2img
         seed = item.get("seed")
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
@@ -484,6 +534,7 @@ async def process_flux_image(item: dict):
             strength=item.get("strength"),
             action_name=item.get("action_name", "Flux"),
             queue_size=bot.sd_queue.qsize(),
+            force_noise_mix=bool(item.get("force_noise_mix", False)),
         )
     except Exception as e:
         logger.error(f"Error in process_flux_image (action={action}): {e}")
@@ -525,79 +576,6 @@ async def _handle_flux_random(item: dict):
         action_name="Random", selected_terms=selected_terms,
         pre_duration=duration, queue_size=bot.sd_queue.qsize(),
     )
-
-
-async def handle_flux_2x2_grid(item: dict):
-    """Generate four low-step candidates, composite a 2x2 grid, post selection buttons."""
-    interaction = item["interaction"]
-    prompt = item.get("prompt") or item.get("description")
-    try:
-        tw = th = 1024
-        base_seed = item.get("seed")
-        if base_seed is None:
-            base_seed = random.randint(0, 2**32 - 1)
-        thumb_seeds = [base_seed + i for i in range(4)]
-        logger.info(f"🔲 Flux 2x2 grid for {interaction.user}: seeds={thumb_seeds}")
-
-        server_url = settings.flux_server_url.rstrip("/")
-        steps = settings.flux_steps
-        guidance = settings.flux_guidance
-        negative_prompt = soupy_prompts.load_prompt("sd_negative_prompt", fallback="")
-
-        thumbnail_data: List[Dict] = []
-        thumbnail_images: List[bytes] = []
-        async with interaction.channel.typing():
-            async with _make_session() as session:
-                for i, thumb_seed in enumerate(thumb_seeds):
-                    payload = {
-                        "prompt": prompt,
-                        "negative_prompt": negative_prompt,
-                        "steps": str(steps),
-                        "guidance_scale": str(guidance),
-                        "width": str(tw),
-                        "height": str(th),
-                        "seed": str(thumb_seed),
-                    }
-                    async with session.post(f"{server_url}/flux", data=payload) as response:
-                        if response.status != 200:
-                            raise Exception(f"Failed to generate candidate {i+1}/4: HTTP {response.status}")
-                        image_bytes = await _read_image_response(response)
-                    thumbnail_images.append(image_bytes)
-                    thumbnail_data.append({"image_bytes": image_bytes, "seed": thumb_seed, "width": tw, "height": th})
-
-        combined = Image.new("RGB", (tw * 2, th * 2))
-        positions = [(0, 0), (tw, 0), (0, th), (tw, th)]
-        for image_bytes, pos in zip(thumbnail_images, positions, strict=False):
-            combined.paste(Image.open(BytesIO(image_bytes)).convert("RGB"), pos)
-        out = BytesIO()
-        combined.save(out, format="PNG")
-        out.seek(0)
-
-        random_number = random.randint(100000, 999999)
-        safe_prompt = re.sub(r"\W+", "", prompt[:40]).lower()
-        filename = f"{random_number}_{safe_prompt}_2x2grid.png"
-        description_embed = discord.Embed(
-            description=f"**Prompt:** {prompt}\n**Seeds:** {', '.join(map(str, thumb_seeds))}",
-            color=discord.Color.purple(),
-        )
-        details_embed = discord.Embed(
-            description=f"🔲 2x2 Grid ⏱️ {steps} steps each 📋 {bot.sd_queue.qsize() + 1}",
-            color=discord.Color.green(),
-        )
-        view = FluxThumbnailSelectionView(prompt=prompt, thumbnail_data=thumbnail_data)
-        await interaction.followup.send(
-            content=f"{interaction.user.mention} 🔲 Flux 2x2 Grid:",
-            embeds=[description_embed, details_embed],
-            file=discord.File(out, filename=filename),
-            view=view,
-        )
-        await increment_user_stat(interaction.user.id, "images_generated", interaction.guild_id)
-    except Exception as e:
-        logger.error(f"🔲 Error generating flux 2x2 grid for {interaction.user}: {e}")
-        try:
-            await interaction.followup.send(f"❌ Error generating 2x2 grid: {e}", ephemeral=True)
-        except Exception as send_error:
-            logger.error(f"❌ Failed to send follow-up message: {send_error}")
 
 
 # --- UI: modals + views --------------------------------------------------------
@@ -654,30 +632,44 @@ class FluxEditModal(Modal, title="⚡ Edit Flux Parameters"):
             await interaction.followup.send("❌ An error occurred while processing your edit.", ephemeral=True)
 
 
-class FluxStrengthModal(Modal, title="🎚️ Change img2img Strength"):
-    def __init__(self, prompt: str, width: int, height: int, seed: int, source_file: str, current: float):
+class FluxImg2ImgModal(Modal, title="🖼️ img2img from this image"):
+    """Prompt + strength dialog for re-running img2img against the displayed image.
+
+    Takes a new prompt and starts from the displayed output image — letting
+    you iterate forward. Always uses the noise-mix path so `strength` is
+    actually honored even when ``FLUX_EDIT_ENABLED`` is on.
+    """
+
+    def __init__(self, display_source_file: str, default_strength: float):
         super().__init__()
-        self.prompt = prompt
-        self.width = width
-        self.height = height
-        self.seed = seed
-        self.source_file = source_file
+        self.display_source_file = display_source_file
+        self.prompt_input = TextInput(
+            label="📝 Prompt",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=2000,
+            placeholder="Describe what you want the new image to look like",
+        )
         self.strength_input = TextInput(
             label="🎚️ Strength (0.0 - 1.0)",
             style=discord.TextStyle.short,
-            default=str(current),
+            default=str(default_strength),
             required=True,
             min_length=1,
             max_length=5,
-            placeholder="e.g. 0.35 — lower keeps more of the original",
+            placeholder="e.g. 0.6 — lower preserves more of the source",
         )
+        self.add_item(self.prompt_input)
         self.add_item(self.strength_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            raw = self.strength_input.value.strip()
+            new_prompt = self.prompt_input.value.strip()
+            if not new_prompt:
+                await interaction.response.send_message("❌ Prompt cannot be empty.", ephemeral=True)
+                return
             try:
-                value = float(raw)
+                value = float(self.strength_input.value.strip())
             except ValueError:
                 await interaction.response.send_message("❌ Strength must be a number between 0.0 and 1.0.", ephemeral=True)
                 return
@@ -685,88 +677,41 @@ class FluxStrengthModal(Modal, title="🎚️ Change img2img Strength"):
                 await interaction.response.send_message("❌ Strength must be between 0.0 and 1.0.", ephemeral=True)
                 return
 
-            await interaction.response.send_message(f"🛠️ Re-running img2img at strength {value}...", ephemeral=True)
+            await interaction.response.send_message(
+                f"🛠️ Running img2img at strength {value}...", ephemeral=True
+            )
             await bot.sd_queue.put(
                 {
                     "type": "flux",
                     "interaction": interaction,
-                    "action": "strength",
-                    "prompt": self.prompt,
-                    "width": self.width,
-                    "height": self.height,
-                    "seed": self.seed,
-                    "source_file": self.source_file,
+                    "action": "img2img",
+                    "prompt": new_prompt,
+                    "source_file": self.display_source_file,
                     "strength": value,
-                    "action_name": "Strength",
+                    "seed": random.randint(0, 2**32 - 1),
+                    "action_name": "Img2Img",
+                    "force_noise_mix": True,
                 }
             )
         except Exception as e:
-            logger.error(f"Error in FluxStrengthModal submission: {e}")
+            logger.error(f"Error in FluxImg2ImgModal submission: {e}")
             try:
-                await interaction.followup.send("❌ An error occurred while changing strength.", ephemeral=True)
+                await interaction.followup.send("❌ An error occurred while starting img2img.", ephemeral=True)
             except Exception:
                 pass
-
-
-class FluxThumbnailSelectionView(View):
-    """Pick one of the four 2x2 candidates to regenerate at full size/steps via Flux."""
-
-    def __init__(self, prompt: str, thumbnail_data: List[Dict]):
-        super().__init__(timeout=None)
-        self.prompt = prompt
-        self.thumbnail_data = thumbnail_data
-
-    async def _select(self, interaction: discord.Interaction, index: int):
-        try:
-            await interaction.response.send_message("🛠️ Regenerating the selected candidate at full size...", ephemeral=True)
-            chosen = self.thumbnail_data[index]
-            await bot.sd_queue.put(
-                {
-                    "type": "flux",
-                    "interaction": interaction,
-                    "action": "regenerate_selected",
-                    "prompt": self.prompt,
-                    "width": chosen.get("width", 1024),
-                    "height": chosen.get("height", 1024),
-                    "seed": chosen["seed"],
-                    "action_name": f"Selected #{index + 1}",
-                }
-            )
-        except Exception as e:
-            logger.error(f"Error during flux thumbnail selection for {interaction.user}: {e}")
-            await interaction.followup.send("❌ Error generating selected image.", ephemeral=True)
-
-    @discord.ui.button(label="1", style=discord.ButtonStyle.primary, custom_id="fluxgen_thumb_1", row=0)
-    @universal_cooldown_check()
-    async def t1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._select(interaction, 0)
-
-    @discord.ui.button(label="2", style=discord.ButtonStyle.primary, custom_id="fluxgen_thumb_2", row=0)
-    @universal_cooldown_check()
-    async def t2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._select(interaction, 1)
-
-    @discord.ui.button(label="3", style=discord.ButtonStyle.primary, custom_id="fluxgen_thumb_3", row=1)
-    @universal_cooldown_check()
-    async def t3(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._select(interaction, 2)
-
-    @discord.ui.button(label="4", style=discord.ButtonStyle.primary, custom_id="fluxgen_thumb_4", row=1)
-    @universal_cooldown_check()
-    async def t4(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._select(interaction, 3)
 
 
 class FluxRemixView(View):
     """Full button panel for /flux results — mirrors SDRemixView (minus Outpaint).
 
-    img2img results additionally show a 🎚️ Strength button (re-runs the img2img);
-    every other button acts as text2img on the prompt.
+    Every result gets a 🖼️ img2img button that opens a prompt+strength modal
+    and re-runs img2img against the displayed image. Every other button acts
+    as text2img on the prompt.
     """
 
     def __init__(self, prompt: str, width: int, height: int, seed: Optional[int] = None,
                  *, is_img2img: bool = False, source_file: Optional[str] = None,
-                 is_edit_mode: bool = False):
+                 is_edit_mode: bool = False, display_source_file: Optional[str] = None):
         super().__init__(timeout=None)
         self.prompt = prompt.strip()
         self.width = width
@@ -775,12 +720,13 @@ class FluxRemixView(View):
         self.is_img2img = is_img2img
         self.source_file = source_file
         self.is_edit_mode = is_edit_mode
-        # The Strength button only makes sense for the noise-mix img2img path —
-        # not text2img (no source) and not klein-edit (no strength knob).
-        show_strength = is_img2img and bool(source_file) and not is_edit_mode
-        if not show_strength:
+        # display_source_file is the persisted OUTPUT of this generation — used
+        # by the img2img button to iterate forward from the displayed image.
+        self.display_source_file = display_source_file
+        # The img2img button needs a persisted display source to start from.
+        if not display_source_file:
             for child in list(self.children):
-                if getattr(child, "custom_id", None) == "fluxgen_strength_button":
+                if getattr(child, "custom_id", None) == "fluxgen_img2img_button":
                     self.remove_item(child)
 
     async def _enqueue(self, interaction: discord.Interaction, msg: str, item: dict):
@@ -816,18 +762,23 @@ class FluxRemixView(View):
              "seed": random.randint(0, 2**32 - 1), "action_name": "Remix"},
         )
 
-    @discord.ui.button(label="🎚️ Strength", style=discord.ButtonStyle.secondary, custom_id="fluxgen_strength_button", row=0)
+    @discord.ui.button(label="🖼️ img2img", style=discord.ButtonStyle.secondary, custom_id="fluxgen_img2img_button", row=0)
     @universal_cooldown_check()
-    async def strength_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def img2img_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.display_source_file:
+            await interaction.response.send_message(
+                "❌ No source image available for img2img.", ephemeral=True
+            )
+            return
         try:
             await interaction.response.send_modal(
-                FluxStrengthModal(
-                    prompt=self.prompt, width=self.width, height=self.height, seed=self.seed,
-                    source_file=self.source_file, current=settings.flux_default_strength,
+                FluxImg2ImgModal(
+                    display_source_file=self.display_source_file,
+                    default_strength=settings.flux_default_strength,
                 )
             )
         except Exception as e:
-            logger.error(f"Error opening Flux strength modal for {interaction.user}: {e}")
+            logger.error(f"Error opening Flux img2img modal for {interaction.user}: {e}")
 
     # ----- row 1 -----
     @discord.ui.button(label="🎨 R-Fancy", style=discord.ButtonStyle.danger, custom_id="fluxgen_rfancy_button", row=1)
@@ -858,7 +809,7 @@ class FluxRemixView(View):
     async def wide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._enqueue(
             interaction, "🛠️ Generating wide version...",
-            {"action": "wide", "prompt": self.prompt, "width": SD_WIDE_WIDTH, "height": SD_WIDE_HEIGHT,
+            {"action": "wide", "prompt": self.prompt, "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT,
              "seed": self.seed, "action_name": "Wide"},
         )
 
@@ -867,18 +818,9 @@ class FluxRemixView(View):
     async def tall_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._enqueue(
             interaction, "🛠️ Generating tall version...",
-            {"action": "tall", "prompt": self.prompt, "width": SD_TALL_WIDTH, "height": SD_TALL_HEIGHT,
+            {"action": "tall", "prompt": self.prompt, "width": FLUX_TALL_WIDTH, "height": FLUX_TALL_HEIGHT,
              "seed": self.seed, "action_name": "Tall"},
         )
-
-    @discord.ui.button(label="🔲 2x2", style=discord.ButtonStyle.secondary, custom_id="fluxgen_2x2_button", row=1)
-    @universal_cooldown_check()
-    async def grid_2x2_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._enqueue(
-            interaction, "🛠️ Generating 2x2 grid...",
-            {"action": "2x2_grid", "prompt": self.prompt, "width": self.width, "height": self.height, "seed": self.seed},
-        )
-
 
 async def setup(bot):
     """discord.py extension entry point — registers /flux on the tree."""

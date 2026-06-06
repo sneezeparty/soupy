@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "soupy"
-version = "1.1.1"
+version = "1.2.0"
 description = "Fully-local autonomous Discord bot with AI chat, image generation, web search, and Bluesky presence."
 readme = "README.md"
 requires-python = ">=3.10"

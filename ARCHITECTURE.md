@@ -42,7 +42,7 @@ A single ~6,250-line module that is the bot process entrypoint. It owns:
 
 - The **chat reply pipeline** (`on_message` → `process_chat_message`).
 - **Image generation** (`SDQueue`, `generate_sd_image`, the `/sd` family, and the
-  `ThumbnailSelectionView` / `SDRemixView` button UIs).
+  `SDRemixView` button UI).
 - The **"main" cog** of inline slash/prefix commands (`/helpsoupy`, `/soupystats`,
   `/status`, `/8ball`, `/9ball`, `/whattime`, `/weather`, `/testurl`, `/soupyself`,
   `/soupyscan`, and the owner prefix commands `reloadenv` / `synccommands`).
@@ -200,8 +200,7 @@ and, for buttons, by `item["action"]`.
 `generate_sd_image()` POSTs to `SD_SERVER_URL` (with pooled aiohttp connections and
 a 600 s timeout), validates the returned image's magic bytes, archives it to
 `media/`, and replies with an embed carrying the `SDRemixView` button panel
-(Remix / Wide / Tall / Edit / 2×2 grid / Fancy / Outpaint). The `ThumbnailSelectionView`
-2×2 grid lets a user pick one of four candidate thumbnails to upscale.
+(Remix / Wide / Tall / Edit / Fancy / Outpaint).
 
 Outpaint is a "hybrid" mode using Canny-edge and/or depth ControlNet conditioning
 with a tunable harmonize strength (`OUTPAINT_*` env vars).
@@ -220,7 +219,7 @@ set (without a strong reference, asyncio garbage-collects a running task mid-awa
 | `archive_auto_scan_loop` | ~45 s poll | Incremental message archival per guild on its configured interval |
 | `rag_reindex_loop` | `RAG_REINDEX_INTERVAL_HOURS` (6) | Consolidate + re-embed RAG chunks |
 | `_dashboard_status_writer` | 15 s | Writes `data/bot_dashboard.json` for the web panel |
-| `_self_md_reflection_loop` | `SELF_MD_REFLECT_INTERVAL_HOURS` (24) | Runs a self-knowledge reflection cycle when enough interactions have accumulated |
+| `_self_md_reflection_loop` | daily at `SELF_MD_REFLECT_HOUR` local (3) | Runs a self-knowledge reflection cycle when enough interactions have accumulated |
 
 Each cog additionally runs its own `@tasks.loop` (dailypost, musings, bluesky). All
 of them re-read their enable flag per tick so they can be toggled live from the
