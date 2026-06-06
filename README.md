@@ -2,7 +2,7 @@
 
 ![Soupy Remastered Header](https://i.imgur.com/AiCorTA.jpeg)
 
-A fully-local, autonomous Discord bot that chats with personality, remembers conversations, posts on its own, and generates images — all running against your own LLM server.
+A fully-local Discord bot with a configurable personality, retrieval-augmented memory of your server, autonomous Discord and Bluesky posting, web search, image understanding, and two independent image-generation backends — all running against your own LLM server with no cloud API in the loop.
 
 [Soupy's Discord Server](https://discord.gg/GAv9umz5RB) · [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty)
 
@@ -10,21 +10,26 @@ A fully-local, autonomous Discord bot that chats with personality, remembers con
 
 ## What Soupy Is
 
-Soupy runs entirely on your own hardware against [LM Studio](https://lmstudio.ai/) (or any OpenAI-compatible LLM server) and an optional Stable Diffusion backend. No cloud APIs, no per-token costs, no data leaving your network. It's opinionated and autonomous — given the chance, it will decide on its own when to chime in, share an article, or post on Bluesky. A FastAPI web panel runs alongside the bot and is the primary way you operate it: start/stop, live logs, model switching, env editing, and per-loop toggles all live there.
+Soupy is a two-process application — a Discord bot and a FastAPI web control panel that supervises it — built to run entirely on hardware you own. Chat, embeddings, summarization, vision, and prompt expansion all go through [LM Studio](https://lmstudio.ai/) (or any OpenAI-compatible LLM server). Image generation has two paths: a remote Stable Diffusion backend reached over HTTP (`/sd`, `/img2img`, `/inpaint`, `/outpaint`) and a local Flux/MLX backend that runs on the same Mac as the bot via `flux_server.py` (`/flux`, with optional FLUX.2 Klein-Edit for genuine prompt-driven image editing). No cloud APIs, no per-token costs, no data leaving your network.
+
+Personality is the point. Soupy maintains a self-knowledge document about itself that it edits during a nightly reflection pass, builds structured profiles of the users it sees, and pulls relevant context out of a per-guild SQLite archive of your server's history. Given the chance, it will decide on its own when to chime in, share an article, or post on Bluesky. The web panel is the operator surface: start/stop, live logs, env editing, per-loop toggles, archive browsing, model probing, and theming all live there.
 
 ## Features
 
-- Conversational chat with a configurable personality and a self-knowledge document Soupy maintains about itself.
-- Retrieval-augmented memory pulled from a per-guild SQLite archive of your server's history.
+- Conversational chat with a configurable personality and a self-knowledge document Soupy maintains and rewrites about itself.
+- Retrieval-augmented memory pulled from a per-guild SQLite archive of your server's history, with a cosine-similarity floor so off-topic chunks don't get injected.
 - LLM-generated user profiles built from each member's message history and used to tailor replies.
-- Autonomous daily article posts: reads the room, finds something the channel would actually care about, writes a take, posts it.
+- Nightly self-reflection at a configurable hour (default 3 AM) that distills opinions, relationships, and a short identity anchor from the day's interactions.
+- Autonomous daily article posts: reads the room, finds something the channel would actually care about, writes a take, posts it, optionally cross-posts to Bluesky.
 - Autonomous Bluesky presence — replies, quote-posts, and original article posts on a randomized daily schedule, fact-checked against the source.
-- Periodic "thinking out loud" musings in a configured channel.
+- Periodic "thinking out loud" musings in a configured channel, with dedupe against recent topics via keyword filtering and embedding similarity.
 - DuckDuckGo web and image search with LLM-summarized results.
-- Stable Diffusion image generation with remix, outpaint, edit, and random-prompt buttons.
-- Local Flux image generation via mflux/MLX on Apple Silicon (`/flux`) — text-to-image, image-to-image, and FLUX.2 Klein-Edit for genuine prompt-driven image editing.
-- Optional vision: routes Discord image attachments through a vision-capable LLM.
-- FastAPI web control panel for process control, live logs, env editing, stats, theming, and per-loop toggles.
+- Optional vision: routes Discord image attachments through LM Studio's vision-capable LLM for image understanding.
+- **Two independent image-generation backends, sharing a single serial queue:**
+  - **Stable Diffusion** (`/sd`, `/img2img`, `/inpaint`, `/outpaint`) over HTTP to a separate GPU host.
+  - **Local Flux** (`/flux`) via mflux/MLX on Apple Silicon — text-to-image, noise-mix image-to-image, and FLUX.2 Klein-Edit for genuine prompt-driven editing — running on the same Mac as the bot via a small `flux_server.py` FastAPI process.
+- Post-generation control panels with Remix, Fancy, R-Fancy, R-Keyword, Edit, Wide, and Tall buttons on both backends (plus Outpaint on `/sd`, img2img-from-display on `/flux`).
+- FastAPI web control panel for process control, live logs, env editing, stats, theming, per-loop toggles, and a light-table view of every image the bot has generated.
 
 ## What Soupy Accesses In Your Server
 
@@ -58,7 +63,9 @@ After the bot is running, run `/soupyscan` once per guild as an owner to archive
 
 - Python 3.10+
 - LM Studio (or any OpenAI-compatible server) with a chat model and an embedding model loaded
-- Optional: a separate GPU host for the Stable Diffusion backend
+- Optional: a separate GPU host for the Stable Diffusion backend (powers `/sd`, `/img2img`, `/inpaint`, `/outpaint`)
+- Optional: Apple Silicon Mac with enough unified memory to run mflux (powers `/flux`; ~8-12 GB at `FLUX_QUANTIZE=4` for FLUX.1 schnell, more for FLUX.2 Klein-Edit). Runs on the same host as the bot.
+- Optional: a vision-capable LLM in LM Studio (set `ENABLE_VISION=true` and `VISION_MODEL`)
 - Optional: a Bluesky account with an app password
 
 ## Documentation
