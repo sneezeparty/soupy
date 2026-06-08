@@ -4,7 +4,15 @@
 
 A fully-local Discord bot with a configurable personality, retrieval-augmented memory of your server, autonomous Discord and Bluesky posting, web search, image understanding, and two independent image-generation backends — all running against your own LLM server with no cloud API in the loop.
 
-[Soupy's Discord Server](https://discord.gg/GAv9umz5RB) · [Buy Me A Coffee](https://buymeacoffee.com/sneezeparty)
+<p align="center">
+  <a href="https://discord.gg/GAv9umz5RB">
+    <img src="https://img.shields.io/badge/Join-Soupy's%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Soupy's Discord">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://buymeacoffee.com/sneezeparty">
+    <img src="https://img.shields.io/badge/Buy%20me-a%20coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee">
+  </a>
+</p>
 
 ---
 
