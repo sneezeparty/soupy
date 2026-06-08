@@ -41,6 +41,10 @@ PYTORCH_CUDA_CMD = [
 ]
 PYTORCH_MPS_CMD = ["torch", "torchvision", "torchaudio"]
 
+# Flux runs in the bot venv (same .venv as discord.py), not a separate one —
+# mflux pulls its own MLX/torch wheels for Apple Silicon.
+FLUX_BOT_VENV_EXTRAS = ["mflux", "python-multipart"]
+
 
 def _venv_python(venv: Path) -> Path:
     if sys.platform == "win32":  # pragma: no cover — wizard targets POSIX in tests
@@ -145,6 +149,19 @@ def _setup_bot_venv(ui, dry_run: bool) -> None:
     ui.ok("bot deps installed")
 
 
+def _setup_flux_extras(ui, dry_run: bool) -> None:
+    """Add mflux + python-multipart to the bot venv so flux_server.py runs."""
+    if _has_sentinel(BOT_VENV, "mflux"):
+        ui.ok(f"{BOT_VENV.name} already has Flux deps installed")
+        return
+    if dry_run:
+        ui.info(f"[dry-run] would install {' '.join(FLUX_BOT_VENV_EXTRAS)} into {BOT_VENV.name}")
+        return
+    ui.step("installing mflux + python-multipart (Flux backend deps)")
+    _install(BOT_VENV, FLUX_BOT_VENV_EXTRAS, ui)
+    ui.ok("Flux deps installed")
+
+
 def _setup_sd_venv(mode: str, ui, dry_run: bool) -> None:
     if mode not in ("local_cuda", "local_mps"):
         return
@@ -181,7 +198,10 @@ def run(state: Dict, ui) -> Dict:
 
     dry_run = bool(state.get("__dry_run__"))
 
+    mode = state.get("image_gen_mode", "none")
     _setup_bot_venv(ui, dry_run)
-    _setup_sd_venv(state.get("image_gen_mode", "none"), ui, dry_run)
+    if mode == "local_flux":
+        _setup_flux_extras(ui, dry_run)
+    _setup_sd_venv(mode, ui, dry_run)
 
     return {"venv_ready": True}

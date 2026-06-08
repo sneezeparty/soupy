@@ -94,4 +94,9 @@ def run(state: Dict, ui) -> Dict:
         out["ENABLE_VISION"] = "true"
         out["VISION_MODEL"] = vision_model
 
+    # Populate the web-UI model dropdown with whatever's actually loaded so the
+    # user doesn't have to hand-edit AVAILABLE_MODELS later.
+    if models:
+        out["AVAILABLE_MODELS"] = ", ".join(models)
+
     return out

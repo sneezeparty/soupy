@@ -27,19 +27,27 @@ end it offers to launch `python run_all.py`.
 
 ## What it does, step by step
 
-1. **Goals** — picks which downstream paths apply (image gen on this
-   machine vs. a different one vs. none; Bluesky on/off; vision on/off;
-   daily posts on/off).
+1. **Goals** — picks which downstream paths apply. Image gen can be
+   *none*, *NVIDIA CUDA on this machine* (Stable Diffusion), *Apple
+   Silicon on this machine* (Flux/mflux — recommended on a Mac, or
+   Stable Diffusion via MPS for the older path), or *on a different
+   machine* (Stable Diffusion over HTTP). Also asks about Bluesky,
+   vision (image descriptions in chat), and autonomous daily article
+   posts.
 2. **Environment** — verifies Python ≥ 3.10, creates `.venv`, installs
-   `requirements.txt`. If you opted into local image gen, also creates
-   `.venv-sd` with the right PyTorch flavour and `sd-api/requirements*.txt`.
+   `requirements.txt`. If you picked Flux, also installs `mflux` +
+   `python-multipart` into the same `.venv`. If you picked CUDA or MPS
+   Stable Diffusion, builds a separate `.venv-sd` with the right PyTorch
+   flavour and `sd-api/requirements*.txt`.
 3. **Discord** — prints the developer-portal checklist, opens the portal
    in your browser, validates the token live against `GET /users/@me`.
 4. **LM Studio** — probes `/v1/models`, lets you pick chat + embedding
    (and vision, if enabled) from whatever's loaded. If only one model is
-   loaded, walks you through loading the second one.
-5. **Optional** — Bluesky credentials, remote SD URL, daily-post channel
-   map. Skipped entirely under `--minimal`.
+   loaded, walks you through loading the second one. Populates
+   `AVAILABLE_MODELS` (the web-UI dropdown) from the live list.
+5. **Optional** — Bluesky credentials, remote SD URL, Flux host/port +
+   Klein-Edit toggle, and daily-post channel map. Skipped entirely under
+   `--minimal`.
 6. **Write config** — renders `.env-stable` from `.env-stable.example`,
    preserving comments and ordering. Backs up any existing
    `.env-stable` to `.env-stable.bak.<timestamp>` first and prints a
@@ -54,6 +62,17 @@ end it offers to launch `python run_all.py`.
 Run `/soupyscan` once per guild as an owner. The first scan archives
 your server's history and embeds it for RAG. On a busy server this can
 take hours or days — see `soupy_database/SETUP.md` for tuning.
+
+If you picked the Flux backend, launch it separately in another
+terminal — `flux_server.py` holds the model resident so the bot process
+stays light:
+
+```bash
+source .venv/bin/activate
+python flux_server.py
+```
+
+`/flux` will report "Flux is not configured" until that server is up.
 
 ## Reproducible installs (optional)
 

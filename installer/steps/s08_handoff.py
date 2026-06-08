@@ -22,6 +22,14 @@ def run(state: Dict, ui) -> Dict:
     ui.info("re-run the wizard later with:  python install.py --resume")
     ui.hr()
 
+    if state.get("image_gen_mode") == "local_flux":
+        ui.info("Flux backend:")
+        ui.info("  /flux runs against a separate local server. Launch it in another terminal:")
+        ui.info("      source .venv/bin/activate")
+        ui.info("      python flux_server.py")
+        ui.info("  (First request downloads weights; mflux holds the model resident after.)")
+        ui.hr()
+
     ui.info("First-run reminder:")
     ui.info("  After the bot is running, hop into your server as an owner and run /soupyscan.")
     ui.info("  The first scan can take hours — or days on a busy server. See soupy_database/SETUP.md")

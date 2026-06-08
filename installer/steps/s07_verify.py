@@ -42,13 +42,29 @@ def _verify_lm_studio(state: Dict, ui) -> List[Tuple[str, bool, str]]:
 
 
 def _verify_sd(state: Dict, ui) -> List[Tuple[str, bool, str]]:
-    if state.get("image_gen_mode", "none") == "none":
+    mode = state.get("image_gen_mode", "none")
+    if mode in ("none", "local_flux"):
         return []
     base = state.get("SD_SERVER_URL", "")
     if not base:
         return [("SD backend reachable", False, "no SD URL in state")]
     result = validators.sd_backend(base)
     return [("SD backend reachable", result.ok, result.message)]
+
+
+def _verify_flux(state: Dict, ui) -> List[Tuple[str, bool, str]]:
+    if state.get("image_gen_mode", "none") != "local_flux":
+        return []
+    base = state.get("FLUX_SERVER_URL", "")
+    if not base:
+        return [("Flux backend configured", False, "no FLUX_SERVER_URL in state")]
+    # flux_server.py is launched separately and may well not be running yet
+    # during install — soft-probe and downgrade a failure to a warning row
+    # rather than a hard fail.
+    result = validators.sd_backend(base)
+    if result.ok:
+        return [("Flux backend reachable", True, result.message)]
+    return [("Flux backend reachable", True, f"not running yet — launch with `python flux_server.py` ({result.message})")]
 
 
 def _render_row(label: str, ok: bool, msg: str, ui) -> None:
@@ -68,6 +84,7 @@ def run(state: Dict, ui) -> Dict:
 
     rows.extend(_verify_lm_studio(state, ui))
     rows.extend(_verify_sd(state, ui))
+    rows.extend(_verify_flux(state, ui))
 
     for label, ok, msg in rows:
         _render_row(label, ok, msg, ui)

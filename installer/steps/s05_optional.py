@@ -79,6 +79,32 @@ def _local_sd(ui) -> Dict:
     }
 
 
+def _local_flux(state: Dict, ui) -> Dict:
+    ui.step("Flux (local, mflux)")
+    ui.info("Flux runs on this Mac via flux_server.py (port 4942 by default).")
+    ui.info("You'll launch it separately:  python flux_server.py")
+    host = ui.prompt(
+        "Flux server bind host",
+        default=state.get("FLUX_SERVER_HOST", "127.0.0.1"),
+    )
+    port = ui.prompt(
+        "Flux server port",
+        default=state.get("FLUX_SERVER_PORT", "4942"),
+    )
+    base = f"http://{host}:{port}"
+    edit_enabled = ui.confirm(
+        "Enable the FLUX.2 Klein-Edit pipeline? (~5-8 GB extra RAM, much stronger img2img edits)",
+        default=False,
+    )
+    return {
+        "FLUX_ENABLED": "true",
+        "FLUX_SERVER_HOST": host,
+        "FLUX_SERVER_PORT": str(port),
+        "FLUX_SERVER_URL": base,
+        "FLUX_EDIT_ENABLED": "true" if edit_enabled else "false",
+    }
+
+
 def _daily_posts(state: Dict, ui) -> Dict:
     ui.step("Daily posts")
     ui.info("Map channel IDs to short topic hints. Soupy uses these to bias article picking.")
@@ -117,8 +143,10 @@ def run(state: Dict, ui) -> Dict:
         out.update(_remote_sd(state, ui))
     elif image_gen_mode in ("local_cuda", "local_mps"):
         out.update(_local_sd(ui))
+    elif image_gen_mode == "local_flux":
+        out.update(_local_flux(state, ui))
     else:
-        ui.info("image generation: none (skipping SD configuration)")
+        ui.info("image generation: none (skipping SD/Flux configuration)")
 
     if state.get("bluesky"):
         out.update(_bluesky(state, ui))

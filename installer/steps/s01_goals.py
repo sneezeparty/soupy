@@ -13,9 +13,10 @@ from typing import Dict
 
 IMAGE_GEN_OPTIONS = [
     ("none", "no image generation"),
-    ("local_cuda", "image gen on this machine, NVIDIA CUDA"),
-    ("local_mps", "image gen on this machine, Apple Silicon (MPS)"),
-    ("remote", "image gen on a different machine"),
+    ("local_cuda", "image gen on this machine, NVIDIA CUDA (Stable Diffusion)"),
+    ("local_flux", "image gen on this machine, Apple Silicon (Flux / mflux) — recommended on a Mac"),
+    ("local_mps", "image gen on this machine, Apple Silicon (Stable Diffusion via MPS)"),
+    ("remote", "image gen on a different machine (Stable Diffusion)"),
 ]
 
 
@@ -34,7 +35,7 @@ def run(state: Dict, ui) -> Dict:
         default=bool(state.get("bluesky", False)),
     )
     vision = ui.confirm(
-        "Enable vision (image descriptions in /soupyscan)?",
+        "Enable vision (Soupy describes images users attach in chat)?",
         default=bool(state.get("vision", False)),
     )
     daily_posts = ui.confirm(
