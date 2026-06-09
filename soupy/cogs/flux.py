@@ -202,7 +202,6 @@ def _make_session() -> aiohttp.ClientSession:
 )
 @app_commands.choices(
     size=[
-        app_commands.Choice(name=f"Default ({FLUX_DEFAULT_WIDTH}x{FLUX_DEFAULT_HEIGHT})", value="default"),
         app_commands.Choice(name=f"Wide ({FLUX_WIDE_WIDTH}x{FLUX_WIDE_HEIGHT})", value="wide"),
         app_commands.Choice(name=f"Tall ({FLUX_TALL_WIDTH}x{FLUX_TALL_HEIGHT})", value="tall"),
         app_commands.Choice(name=f"Square ({FLUX_DEFAULT_WIDTH}x{FLUX_DEFAULT_HEIGHT})", value="square"),
@@ -222,7 +221,8 @@ async def flux(
         )
         return
 
-    size_value = size.value if size else "default"
+    # Default to wide when no size is specified — matches the button panel's default.
+    size_value = size.value if size else "wide"
 
     image_url: Optional[str] = None
     if image is not None:

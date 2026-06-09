@@ -770,7 +770,6 @@ def archive_image_bytes(
 )
 @app_commands.choices(
     size=[
-        app_commands.Choice(name=f"Default ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="default"),
         app_commands.Choice(name=f"Wide ({SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT})", value="wide"),
         app_commands.Choice(name=f"Tall ({SD_TALL_WIDTH}x{SD_TALL_HEIGHT})", value="tall"),
         app_commands.Choice(name=f"Square ({SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT})", value="square"),
@@ -782,7 +781,8 @@ async def sd(
     size: Optional[app_commands.Choice[str]] = None,
     seed: Optional[int] = None,
 ):
-    size_value = size.value if size else "default"
+    # Default to wide when no size is specified — matches the button panel's default.
+    size_value = size.value if size else "wide"
 
     logger.info(
         f"🎨 Slash Command 'sd' invoked by {interaction.user} with description: '{description}', size: '{size_value}', seed: '{seed if seed else 'random'}'"
@@ -1971,8 +1971,10 @@ async def generate_sd_image(
 async def process_sd_image(interaction: discord.Interaction, description: str, size: str, seed: Optional[int]):
     """Entry point for slash command /sd tasks to push work into generate_sd_image."""
     try:
-        # Default dims for SD
-        width, height = SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT
+        # Default dims for SD — wide is the new house default; the /sd slash
+        # command already substitutes "wide" when the user omits the size arg,
+        # so this fallback only matters for legacy callers / unmapped values.
+        width, height = SD_WIDE_WIDTH, SD_WIDE_HEIGHT
 
         if size == "wide":
             width, height = SD_WIDE_WIDTH, SD_WIDE_HEIGHT
