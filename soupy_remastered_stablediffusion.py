@@ -44,9 +44,16 @@ Key invariants:
 
 Gotchas:
 
-* Slash commands sync once at ``on_ready``. Guild-scoped sync (when
-  ``GUILD_ID`` is set) is near-instant; global sync can take up to an hour.
-  Never sync both — that duplicates commands.
+* Slash commands sync **globally only** at ``on_ready`` so every guild
+  the bot is in (or joins later) eventually sees them — Discord
+  propagates within ~5min, up to 1hr the very first time. Do NOT also
+  guild-sync the same command set: Discord shows both copies in the
+  typeahead, so users see every command twice (this was the duplicate-
+  commands incident in the home guild). For dev iteration, owners can
+  force a temporary guild sync via ``!synccommands guild`` and clean it
+  up later with ``!synccommands clear-guild``. ``on_ready`` also clears
+  guild-scoped command overrides on every startup to self-heal stale
+  guild registrations.
 * ``intents.message_content`` is required for the bot to read message
   contents at all. It must also be toggled in the Discord Developer Portal.
 * Multi-guild: each Discord server gets its own SQLite database and
@@ -97,7 +104,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 # Third party imports
 import aiohttp
@@ -1832,50 +1839,88 @@ async def reload_env(ctx):
         logger.error(f"Error during env and file reload by {ctx.author}: {str(e)}")
 
 
-@bot.command(name="synccommands", help="Syncs slash commands to Discord (Owner only)")
-async def sync_commands(ctx):
+@bot.command(
+    name="synccommands",
+    help=(
+        "Syncs slash commands to Discord (Owner only). "
+        "Scope: global (default) | guild (dev — will visibly duplicate commands in that guild "
+        "until you re-run with 'global' or restart) | clear-guild (remove guild-scoped overrides)."
+    ),
+)
+async def sync_commands(ctx, scope: Literal["global", "guild", "clear-guild"] = "global"):
     # Check if the user is in OWNER_IDS
     if ctx.author.id not in OWNER_IDS:
         await ctx.send("❌ You don't have permission to use this command.", ephemeral=True)
         logger.warning(f"Unauthorized attempt to sync commands by {ctx.author}")
         return
 
-    await ctx.send("🔄 Syncing slash commands...", ephemeral=True)
+    await ctx.send(f"🔄 Syncing slash commands (scope={scope})...", ephemeral=True)
 
     try:
-        # List all registered commands for debugging
         registered_commands = [cmd.name for cmd in bot.tree.get_commands()]
         logger.info(f"Registered commands before sync: {registered_commands}")
 
-        # Sync to guild first (instant) if GUILD_ID is set, then globally
-        guild_id_str = os.getenv("GUILD_ID")
-        if guild_id_str:
+        target_guild = ctx.guild or (discord.Object(id=int(os.getenv("GUILD_ID"))) if os.getenv("GUILD_ID") else None)
+
+        if scope == "global":
             try:
-                gid = int(guild_id_str)
-                guild_obj = discord.Object(id=gid)
-                bot.tree.copy_global_to(guild=guild_obj)
-                synced = await bot.tree.sync(guild=guild_obj)
-                synced_names = [cmd.name for cmd in synced]
-                logger.info(f"Synced commands to guild {gid}: {synced_names}")
-                response_msg = f"✅ Synced {len(synced)} commands to guild (instant).\n"
-                response_msg += f"Commands: {', '.join(synced_names)}"
-                await ctx.send(response_msg, ephemeral=True)
-                logger.info(f"Commands synced to guild {gid} by {ctx.author}")
-            except (ValueError, AttributeError) as e:
-                logger.warning(f"Guild sync failed ({e}), falling back to global sync")
                 synced = await bot.tree.sync()
-                synced_names = [cmd.name for cmd in synced]
-                response_msg = f"✅ Synced {len(synced)} commands globally (may take up to 1 hour).\n"
-                response_msg += f"Commands: {', '.join(synced_names)}"
-                await ctx.send(response_msg, ephemeral=True)
-        else:
-            synced = await bot.tree.sync()
-            synced_names = [cmd.name for cmd in synced]
-            logger.info(f"Synced commands: {synced_names}")
-            response_msg = f"✅ Synced {len(synced)} commands globally (may take up to 1 hour).\n"
-            response_msg += f"Commands: {', '.join(synced_names)}"
-            await ctx.send(response_msg, ephemeral=True)
-            logger.info(f"Commands synced globally by {ctx.author}")
+                names = [cmd.name for cmd in synced]
+                logger.info(f"Globally synced {len(synced)} commands by {ctx.author}: {names}")
+                await ctx.send(
+                    f"✅ Globally synced {len(synced)} commands (Discord may take ~5min, "
+                    f"up to 1hr the first time).",
+                    ephemeral=True,
+                )
+            except Exception as e:
+                logger.error(f"Global sync failed: {e}")
+                await ctx.send(f"❌ Global sync failed: {e}", ephemeral=True)
+
+        elif scope == "guild":
+            if target_guild is None:
+                await ctx.send(
+                    "⚠️ Run this in a server, or set GUILD_ID in .env-stable.",
+                    ephemeral=True,
+                )
+            else:
+                gid = target_guild.id
+                guild_obj = discord.Object(id=gid)
+                try:
+                    bot.tree.copy_global_to(guild=guild_obj)
+                    synced = await bot.tree.sync(guild=guild_obj)
+                    names = [cmd.name for cmd in synced]
+                    logger.info(f"Synced {len(synced)} commands to guild {gid} by {ctx.author}: {names}")
+                    await ctx.send(
+                        f"✅ Synced {len(synced)} commands to guild {gid} (instant). "
+                        f"⚠️ These will visibly duplicate any global commands of the same name "
+                        f"until you run `!synccommands clear-guild` or restart the bot.",
+                        ephemeral=True,
+                    )
+                except Exception as e:
+                    logger.error(f"Guild sync failed for {gid}: {e}")
+                    await ctx.send(f"❌ Guild sync failed for {gid}: {e}", ephemeral=True)
+
+        elif scope == "clear-guild":
+            if target_guild is None:
+                await ctx.send(
+                    "⚠️ Run this in a server, or set GUILD_ID in .env-stable.",
+                    ephemeral=True,
+                )
+            else:
+                gid = target_guild.id
+                guild_obj = discord.Object(id=gid)
+                try:
+                    bot.tree.clear_commands(guild=guild_obj)
+                    await bot.tree.sync(guild=guild_obj)
+                    logger.info(f"Cleared guild-scoped commands for {gid} by {ctx.author}")
+                    await ctx.send(
+                        f"🧹 Cleared guild-scoped command overrides for guild {gid}. "
+                        f"Global commands remain.",
+                        ephemeral=True,
+                    )
+                except Exception as e:
+                    logger.error(f"Guild clear failed for {gid}: {e}")
+                    await ctx.send(f"❌ Guild clear failed for {gid}: {e}", ephemeral=True)
 
     except Exception as e:
         error_message = f"❌ Error syncing commands: {str(e)}"
@@ -3168,41 +3213,69 @@ async def on_ready():
     if is_self_md_enabled():
         bot.loop.create_task(_self_md_reflection_loop(bot))
 
-    # Sync slash commands
-    # Sync to guild if GUILD_ID is set (faster updates), otherwise sync globally
-    # Do NOT sync both - that causes duplicate commands
+    # Sync slash commands GLOBALLY ONLY.
+    #
+    # Earlier versions also did a guild-scoped sync to GUILD_ID for instant
+    # dev iteration. Discord, however, shows *both* the global and the
+    # guild-scoped copies of a same-named command in the typeahead, so any
+    # guild that had a guild-scoped sync (the home guild via on_ready, and
+    # any newly-joined guild via on_guild_join) ends up listing every
+    # command twice once global propagation catches up. Global-only avoids
+    # that. Dev iteration is slower (Discord propagates updates within ~5
+    # min, up to ~1hr the very first time), but the owner can still force
+    # a temporary guild sync with `!synccommands guild` when they need it.
     try:
-        # List all registered commands for debugging
         registered_commands = [cmd.name for cmd in bot.tree.get_commands()]
         logger.info(f"Registered commands: {registered_commands}")
 
-        guild_id_str = os.getenv("GUILD_ID")
-        if guild_id_str:
+        logger.info("Globally syncing slash commands (Discord may take ~5min, up to 1hr the first time)...")
+        try:
+            synced_global = await bot.tree.sync()
+            logger.info(
+                f"✅ Globally synced {len(synced_global)} commands: "
+                f"{[cmd.name for cmd in synced_global]}"
+            )
+        except Exception as e:
+            logger.error(f"Global slash-command sync failed: {e}")
+
+        # Clear any stale guild-scoped registrations left over from previous
+        # versions of this code (or from manual `!synccommands guild` runs).
+        # Sending an empty bulk-upsert for a guild removes that guild's
+        # guild-scoped commands without touching globals — this is what
+        # self-heals the duplicate-command UI on next restart. Idempotent:
+        # if a guild has none, it stays at none.
+        for g in list(bot.guilds):
             try:
-                guild_id = int(guild_id_str)
-                guild_obj = discord.Object(id=guild_id)
-                logger.info(f"Syncing commands to guild {guild_id} (faster sync, guild-only)...")
-                bot.tree.copy_global_to(guild=guild_obj)
-                synced = await bot.tree.sync(guild=guild_obj)
-                synced_names = [cmd.name for cmd in synced]
-                logger.info(f"✅ Synced {len(synced)} commands to guild {guild_id}: {synced_names}")
-            except (ValueError, AttributeError) as e:
-                logger.warning(f"Could not sync to guild {guild_id_str}: {e}")
-                logger.info("Falling back to global sync...")
-                synced = await bot.tree.sync()
-                synced_names = [cmd.name for cmd in synced]
-                logger.info(f"✅ Synced {len(synced)} commands globally: {synced_names}")
-        else:
-            logger.info("No GUILD_ID specified, syncing commands globally (may take up to 1 hour)...")
-            synced = await bot.tree.sync()
-            synced_names = [cmd.name for cmd in synced]
-            logger.info(f"✅ Synced {len(synced)} commands globally: {synced_names}")
+                bot.tree.clear_commands(guild=discord.Object(id=g.id))
+                cleared = await bot.tree.sync(guild=discord.Object(id=g.id))
+                if cleared:
+                    logger.info(
+                        f"⚠️ Guild {g.name!r} ({g.id}) still reported {len(cleared)} "
+                        f"guild-scoped commands after clear — Discord may take a moment to settle."
+                    )
+                else:
+                    logger.info(f"🧹 Cleared guild-scoped command overrides for {g.name!r} ({g.id})")
+            except Exception as e:
+                logger.warning(f"Could not clear guild-scoped commands for {g.id}: {e}")
     except Exception as e:
-        logger.error(f"Error syncing commands: {e}")
+        logger.error(f"Error during slash-command sync: {e}")
 
     # Set the bot start time
     bot_start_time = datetime.utcnow()
     logger.info(f"Bot start time set to {bot_start_time} UTC")
+
+
+@bot.event
+async def on_guild_join(guild: discord.Guild):
+    # NOTE: deliberately does NOT sync commands. Global-only sync (see
+    # on_ready) means new guilds receive commands automatically via Discord
+    # propagation. Doing a guild-scoped sync here would briefly make
+    # commands appear instantly, but once globals propagate they'd show
+    # twice — see the duplicate-commands incident in the home guild.
+    logger.info(
+        f"🆕 Joined guild {guild.name!r} ({guild.id}); "
+        f"commands will appear via global propagation (~5min, up to 1hr the first time)."
+    )
 
 
 # ---------------------------------------------------------------------------
