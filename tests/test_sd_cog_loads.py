@@ -30,6 +30,7 @@ _DISPATCH_FUNCS = [
     "handle_fancy",
     "handle_wide",
     "handle_tall",
+    "handle_square",
     "handle_edit",
 ]
 
@@ -75,3 +76,70 @@ def test_cog_binds_to_the_live_bot_instance():
     """
     sd = _ensure_loaded()
     assert sd.bot is bot_module.bot
+
+
+def test_persistent_views_registered():
+    """Both remix panels must be registered as persistent views at cog setup.
+
+    Without `bot.add_view(...)`, every button on messages posted before the last
+    restart answers "This interaction failed." — the regression this guards.
+    """
+    _ensure_loaded()
+
+    async def _load_flux():
+        if "soupy.cogs.flux" not in bot_module.bot.extensions:
+            await bot_module.bot.load_extension("soupy.cogs.flux")
+
+    asyncio.run(_load_flux())
+    registered = {type(v).__name__ for v in bot_module.bot.persistent_views}
+    assert "SDRemixView" in registered
+    assert "FluxRemixView" in registered
+
+
+def test_view_state_recovered_from_message():
+    """_view_state_from_message parses prompt/seed/dims back out of a result message."""
+    sd = _ensure_loaded()
+
+    class _Embed:
+        def __init__(self, description):
+            self.description = description
+
+    class _Attachment:
+        width, height = 1152, 896
+
+    class _Message:
+        embeds = [
+            _Embed("**Selected Terms:** cat, neon\n\n**Prompt:** a neon cat\n**Direction:** Both"),
+            _Embed("🌱 1234567 🔄 Remix ⏱️ 12.34s 📋 1"),
+        ]
+        attachments = [_Attachment()]
+
+    state = sd._view_state_from_message(_Message())
+    assert state == {"prompt": "a neon cat", "seed": 1234567, "width": 1152, "height": 896}
+
+    # Unparseable message → all None (callbacks fall back to instance state).
+    class _Bare:
+        embeds = []
+        attachments = []
+
+    assert all(v is None for v in sd._view_state_from_message(_Bare()).values())
+    assert all(v is None for v in sd._view_state_from_message(None).values())
+
+
+def test_square_button_present_on_both_views():
+    """Both panels expose a Square button alongside Wide/Tall."""
+    sd = _ensure_loaded()
+
+    async def _load_flux():
+        if "soupy.cogs.flux" not in bot_module.bot.extensions:
+            await bot_module.bot.load_extension("soupy.cogs.flux")
+
+    asyncio.run(_load_flux())
+    from soupy.cogs import flux
+
+    sd_view = sd.SDRemixView(prompt="x", width=1024, height=1024, seed=1)
+    flux_view = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1)
+    sd_ids = {getattr(c, "custom_id", None) for c in sd_view.children}
+    flux_ids = {getattr(c, "custom_id", None) for c in flux_view.children}
+    assert "flux_square_button" in sd_ids
+    assert "fluxgen_square_button" in flux_ids

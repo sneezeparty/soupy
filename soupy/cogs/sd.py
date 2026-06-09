@@ -826,6 +826,14 @@ async def handle_wide(interaction, prompt, width, height, seed, queue_size):
     await generate_sd_image(interaction, prompt, width, height, seed, action_name="Wide", queue_size=queue_size)
 
 
+async def handle_square(interaction, prompt, width, height, seed, queue_size):
+    """Handles the 'square' action by calling the generate_sd_image function."""
+    logger.info(
+        f"➡️ handle_square called by {interaction.user} | prompt='{prompt}', dimensions={width}x{height}, seed={seed}"
+    )
+    await generate_sd_image(interaction, prompt, width, height, seed, action_name="Square", queue_size=queue_size)
+
+
 async def handle_tall(interaction, prompt, width, height, seed, queue_size):
     # Increment the images_generated stat
     await increment_user_stat(interaction.user.id, "images_generated")
@@ -1108,7 +1116,7 @@ async def handle_outpaint(
                 details_embed = discord.Embed(color=discord.Color.green())
 
                 queue_total = queue_size + 1
-                details_text = f"🖼️ Outpaint {direction.title()} ⏱️ Extended ⏱️ 📋 {queue_total}"
+                details_text = f"🌱 {seed} 🖼️ Outpaint {direction.title()} ⏱️ Extended ⏱️ 📋 {queue_total}"
                 details_embed.description = details_text
 
                 # Initialize the SDRemixView with new image parameters
@@ -1356,7 +1364,45 @@ class EditImageModal(Modal, title="🖌️ Edit Image Parameters"):
             logger.error(f"Error in EditImageModal submission: {e}")
 
 
+def _view_state_from_message(message) -> dict:
+    """Recover generation state (prompt/seed/width/height) from a posted result.
+
+    Persistent views survive bot restarts, but the per-message state held on the
+    view instance does not — after a restart the registered template view has
+    blank defaults. Everything we need is already visible in the message itself:
+    the prompt in embed[0] (``**Prompt:** ...``), the seed in embed[1]
+    (``🌱 {seed}``), and the dimensions on the image attachment. Each key is
+    ``None`` when that field can't be recovered.
+    """
+    state = {"prompt": None, "seed": None, "width": None, "height": None}
+    if message is None:
+        return state
+    try:
+        embeds = message.embeds or []
+        if embeds and embeds[0].description and "**Prompt:** " in embeds[0].description:
+            prompt = embeds[0].description.split("**Prompt:** ", 1)[1]
+            # Outpaint results append "\n**Direction:** ..." after the prompt.
+            prompt = prompt.split("\n**Direction:**", 1)[0].strip()
+            if prompt:
+                state["prompt"] = prompt
+        if len(embeds) > 1 and embeds[1].description:
+            seed_match = re.search(r"🌱\s*(\d+)", embeds[1].description)
+            if seed_match:
+                state["seed"] = int(seed_match.group(1))
+        for attachment in message.attachments:
+            if attachment.width and attachment.height:
+                state["width"] = attachment.width
+                state["height"] = attachment.height
+                break
+    except Exception as e:
+        logger.debug(f"Failed to recover view state from message: {e}")
+    return state
+
+
 # UI view class for image remixing and manipulation
+# NOTE: the custom_ids below use a legacy "flux_" prefix (FluxRemixView uses
+# "fluxgen_"). Do NOT rename them — persistent-view dispatch matches on
+# custom_id, so a rename would permanently break buttons on every existing message.
 class SDRemixView(View):
     def __init__(self, prompt: str, width: int, height: int, seed: int = None):
         super().__init__(timeout=None)
@@ -1371,12 +1417,31 @@ class SDRemixView(View):
         # Clean and format the prompt text
         return prompt.strip()
 
+    def _effective_state(self, interaction: discord.Interaction) -> dict:
+        """Resolve state from the clicked message, falling back to instance state.
+
+        After a restart the persistent template handles clicks with empty
+        instance state, so the message is the source of truth; per-field
+        fallback keeps live (pre-restart) views behaving exactly as before.
+        """
+        parsed = _view_state_from_message(interaction.message)
+        prompt = parsed["prompt"] or self.cleaned_prompt
+        return {
+            "prompt": prompt,
+            "width": parsed["width"] or self.width or SD_DEFAULT_WIDTH,
+            "height": parsed["height"] or self.height or SD_DEFAULT_HEIGHT,
+            "seed": parsed["seed"] if parsed["seed"] is not None else (self.seed or random.randint(0, 2**32 - 1)),
+        }
+
     @discord.ui.button(label="✏️", style=discord.ButtonStyle.success, custom_id="flux_edit_button", row=0)
     @universal_cooldown_check()
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'Edit' button clicked by {interaction.user} for prompt: '{self.prompt}'")
+        state = self._effective_state(interaction)
+        logger.info(f"'Edit' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
         try:
-            modal = EditImageModal(prompt=self.prompt, width=self.width, height=self.height, seed=self.seed)
+            modal = EditImageModal(
+                prompt=state["prompt"], width=state["width"], height=state["height"], seed=state["seed"]
+            )
             await interaction.response.send_modal(modal)
             logger.info(f"Opened Edit modal for {interaction.user}")
         except Exception as e:
@@ -1386,23 +1451,29 @@ class SDRemixView(View):
     @discord.ui.button(label="🪄", style=discord.ButtonStyle.primary, custom_id="flux_fancy_button", row=0)
     @universal_cooldown_check()
     async def fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{self.prompt}'")
+        state = self._effective_state(interaction)
+        logger.info(f"'Fancy' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         try:
             await interaction.response.send_message("🛠️ Making it fancy...", ephemeral=True)
             _queue_size = bot.sd_queue.qsize()
+            # Default to wide for one-click generations; user explicitly picks
+            # other shapes via the Wide/Tall/Square buttons.
             await bot.sd_queue.put(
                 {
                     "type": "button",
                     "interaction": interaction,
                     "action": "fancy",
-                    "prompt": self.cleaned_prompt,  # The original prompt
-                    "width": self.width,
-                    "height": self.height,
-                    "seed": self.seed,
+                    "prompt": state["prompt"],  # The original prompt
+                    "width": SD_WIDE_WIDTH,
+                    "height": SD_WIDE_HEIGHT,
+                    "seed": state["seed"],
                 }
             )
             logger.info(
-                f"Enqueued 'Fancy' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={self.seed}"
+                f"Enqueued 'Fancy' action for {interaction.user}: prompt='{state['prompt']}', size={SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT}, seed={state['seed']}"
             )
         except Exception as e:
             logger.error(f"Error during fancy transformation for {interaction.user}: {e}")
@@ -1411,24 +1482,30 @@ class SDRemixView(View):
     @discord.ui.button(label="🌱🎲", style=discord.ButtonStyle.primary, custom_id="flux_remix_button", row=0)
     @universal_cooldown_check()
     async def remix_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'Remix' button clicked by {interaction.user} for prompt: '{self.prompt}'")
+        state = self._effective_state(interaction)
+        logger.info(f"'Remix' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         try:
             await interaction.response.send_message("🛠️ Remixing...", ephemeral=True)
             _queue_size = bot.sd_queue.qsize()
             new_seed = random.randint(0, 2**32 - 1)
+            # Default to wide for one-click generations; user explicitly picks
+            # other shapes via the Wide/Tall/Square buttons.
             await bot.sd_queue.put(
                 {
                     "type": "button",
                     "interaction": interaction,
                     "action": "remix",
-                    "prompt": self.cleaned_prompt,
-                    "width": self.width,
-                    "height": self.height,
+                    "prompt": state["prompt"],
+                    "width": SD_WIDE_WIDTH,
+                    "height": SD_WIDE_HEIGHT,
                     "seed": new_seed,
                 }
             )
             logger.info(
-                f"Enqueued 'Remix' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={self.width}x{self.height}, seed={new_seed}"
+                f"Enqueued 'Remix' action for {interaction.user}: prompt='{state['prompt']}', size={SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT}, seed={new_seed}"
             )
 
             # Increment the images_generated stat
@@ -1450,13 +1527,8 @@ class SDRemixView(View):
         try:
             await interaction.response.send_message("🛠️ Generating fancy random image...", ephemeral=True)
 
-            # Randomly select dimensions with equal probability
-            dimensions = [
-                (SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT),  # Square
-                (SD_WIDE_WIDTH, SD_WIDE_HEIGHT),  # Wide
-                (SD_TALL_WIDTH, SD_TALL_HEIGHT),  # Tall
-            ]
-            width, height = random.choice(dimensions)
+            # Default to wide for one-click random generations.
+            width, height = SD_WIDE_WIDTH, SD_WIDE_HEIGHT
 
             # Use LLM-generated prompt (set prompt to None so handle_random generates it)
             prompt = None  # Will be generated in handle_random
@@ -1493,13 +1565,8 @@ class SDRemixView(View):
         try:
             await interaction.response.send_message("🛠️ Generating keyword random image...", ephemeral=True)
 
-            # Randomly select dimensions with equal probability
-            dimensions = [
-                (SD_DEFAULT_WIDTH, SD_DEFAULT_HEIGHT),  # Square
-                (SD_WIDE_WIDTH, SD_WIDE_HEIGHT),  # Wide
-                (SD_TALL_WIDTH, SD_TALL_HEIGHT),  # Tall
-            ]
-            width, height = random.choice(dimensions)
+            # Default to wide for one-click random generations.
+            width, height = SD_WIDE_WIDTH, SD_WIDE_HEIGHT
 
             # Get random terms and use them directly as the prompt
             random_terms = get_random_terms()
@@ -1534,7 +1601,11 @@ class SDRemixView(View):
     @discord.ui.button(label="↔️", style=discord.ButtonStyle.primary, custom_id="flux_wide_button", row=1)
     @universal_cooldown_check()
     async def wide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'Wide' button clicked by {interaction.user} for prompt: '{self.prompt}'")
+        state = self._effective_state(interaction)
+        logger.info(f"'Wide' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         try:
             await interaction.response.send_message("🛠️ Generating wide version...", ephemeral=True)
             _queue_size = bot.sd_queue.qsize()
@@ -1543,14 +1614,14 @@ class SDRemixView(View):
                     "type": "button",
                     "interaction": interaction,
                     "action": "wide",
-                    "prompt": self.cleaned_prompt,
+                    "prompt": state["prompt"],
                     "width": SD_WIDE_WIDTH,
                     "height": SD_WIDE_HEIGHT,
-                    "seed": self.seed,
+                    "seed": state["seed"],
                 }
             )
             logger.info(
-                f"Enqueued 'Wide' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT}, seed={self.seed}"
+                f"Enqueued 'Wide' action for {interaction.user}: prompt='{state['prompt']}', size={SD_WIDE_WIDTH}x{SD_WIDE_HEIGHT}, seed={state['seed']}"
             )
         except Exception as e:
             logger.error(f"Error during wide generation for {interaction.user}: {e}")
@@ -1559,7 +1630,11 @@ class SDRemixView(View):
     @discord.ui.button(label="↕️", style=discord.ButtonStyle.primary, custom_id="flux_tall_button", row=1)
     @universal_cooldown_check()
     async def tall_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'Tall' button clicked by {interaction.user} for prompt: '{self.prompt}'")
+        state = self._effective_state(interaction)
+        logger.info(f"'Tall' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         try:
             await interaction.response.send_message("🛠️ Generating tall version...", ephemeral=True)
             _queue_size = bot.sd_queue.qsize()
@@ -1568,23 +1643,56 @@ class SDRemixView(View):
                     "type": "button",
                     "interaction": interaction,
                     "action": "tall",
-                    "prompt": self.cleaned_prompt,
+                    "prompt": state["prompt"],
                     "width": SD_TALL_WIDTH,
                     "height": SD_TALL_HEIGHT,
-                    "seed": self.seed,
+                    "seed": state["seed"],
                 }
             )
             logger.info(
-                f"Enqueued 'Tall' action for {interaction.user}: prompt='{self.cleaned_prompt}', size={SD_TALL_WIDTH}x{SD_TALL_HEIGHT}, seed={self.seed}"
+                f"Enqueued 'Tall' action for {interaction.user}: prompt='{state['prompt']}', size={SD_TALL_WIDTH}x{SD_TALL_HEIGHT}, seed={state['seed']}"
             )
         except Exception as e:
             logger.error(f"Error during tall generation for {interaction.user}: {e}")
             await interaction.followup.send("❌ Error generating tall version.", ephemeral=True)
 
+    @discord.ui.button(label="🟦", style=discord.ButtonStyle.primary, custom_id="flux_square_button", row=1)
+    @universal_cooldown_check()
+    async def square_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
+        logger.info(f"'Square' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
+        try:
+            await interaction.response.send_message("🛠️ Generating square version...", ephemeral=True)
+            _queue_size = bot.sd_queue.qsize()
+            await bot.sd_queue.put(
+                {
+                    "type": "button",
+                    "interaction": interaction,
+                    "action": "square",
+                    "prompt": state["prompt"],
+                    "width": SD_DEFAULT_WIDTH,
+                    "height": SD_DEFAULT_HEIGHT,
+                    "seed": state["seed"],
+                }
+            )
+            logger.info(
+                f"Enqueued 'Square' action for {interaction.user}: prompt='{state['prompt']}', size={SD_DEFAULT_WIDTH}x{SD_DEFAULT_HEIGHT}, seed={state['seed']}"
+            )
+        except Exception as e:
+            logger.error(f"Error during square generation for {interaction.user}: {e}")
+            await interaction.followup.send("❌ Error generating square version.", ephemeral=True)
+
     @discord.ui.button(label="⤡ Outpaint", style=discord.ButtonStyle.success, custom_id="outpaint_both_button", row=0)
     @universal_cooldown_check()
     async def outpaint_both_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"'Outpaint Both' button clicked by {interaction.user} for prompt: '{self.prompt}'")
+        state = self._effective_state(interaction)
+        logger.info(f"'Outpaint Both' button clicked by {interaction.user} for prompt: '{state['prompt']}'")
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         try:
             await interaction.response.send_message("🛠️ Extending image in all directions...", ephemeral=True)
             _queue_size = bot.sd_queue.qsize()
@@ -1593,16 +1701,16 @@ class SDRemixView(View):
                     "type": "button",
                     "interaction": interaction,
                     "action": "outpaint",
-                    "prompt": self.cleaned_prompt,
+                    "prompt": state["prompt"],
                     "direction": "both",
-                    "width": self.width,
-                    "height": self.height,
-                    "seed": self.seed,
+                    "width": state["width"],
+                    "height": state["height"],
+                    "seed": state["seed"],
                     "strength": 0.8,  # Higher for outpaint
                 }
             )
             logger.info(
-                f"Enqueued 'Outpaint Both' action for {interaction.user}: prompt='{self.cleaned_prompt}', direction='both'"
+                f"Enqueued 'Outpaint Both' action for {interaction.user}: prompt='{state['prompt']}', direction='both'"
             )
         except Exception as e:
             logger.error(f"Error during outpainting in all directions for {interaction.user}: {e}")
@@ -1905,4 +2013,8 @@ async def setup(bot):
     bot.tree.add_command(img2img_cmd)
     bot.tree.add_command(inpaint_cmd)
     bot.tree.add_command(outpaint_cmd)
+    # Persistent-view template: lets buttons on messages posted before the last
+    # restart keep working. The blank state is fine — callbacks recover the real
+    # prompt/seed/dims from the clicked message via _effective_state().
+    bot.add_view(SDRemixView(prompt="", width=SD_DEFAULT_WIDTH, height=SD_DEFAULT_HEIGHT, seed=0))
     logger.info("✅ Loaded sd (image generation) extension")

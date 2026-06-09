@@ -52,8 +52,13 @@ def test_views_and_modals_present():
         assert hasattr(flux, cls), f"missing {cls}"
 
 
-def test_img2img_button_requires_display_source():
-    """The 🖼️ img2img button appears only when a persisted display source exists."""
+def test_img2img_button_always_present():
+    """The 🖼️ img2img button stays in the panel even without a persisted display source.
+
+    Persistent-view dispatch needs the template to register every custom_id, and
+    the button falls back to the message attachment URL when the source file is
+    unknown (i.e. on views restored after a bot restart).
+    """
     flux = _ensure_loaded()
 
     def has_img2img(view):
@@ -61,7 +66,7 @@ def test_img2img_button_requires_display_source():
 
     no_disp = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1)
     with_disp = flux.FluxRemixView(prompt="x", width=1024, height=1024, seed=1, display_source_file="out.png")
-    assert not has_img2img(no_disp), "view without a display source must NOT show img2img"
+    assert has_img2img(no_disp), "view without a display source must still show img2img"
     assert has_img2img(with_disp), "view with a display source SHOULD show img2img"
 
 

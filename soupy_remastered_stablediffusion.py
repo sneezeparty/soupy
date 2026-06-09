@@ -526,6 +526,15 @@ class SDQueue:
                             item["seed"],
                             self.qsize(),
                         )
+                    elif item["action"] == "square":
+                        await _sd.handle_square(
+                            item["interaction"],
+                            item["prompt"],
+                            item["width"],
+                            item["height"],
+                            item["seed"],
+                            self.qsize(),
+                        )
                     elif item["action"] == "edit":
                         await _sd.handle_edit(
                             item["interaction"],

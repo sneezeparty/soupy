@@ -642,9 +642,13 @@ class FluxImg2ImgModal(Modal, title="🖼️ img2img from this image"):
     actually honored even when ``FLUX_EDIT_ENABLED`` is on.
     """
 
-    def __init__(self, display_source_file: str, default_strength: float):
+    def __init__(self, display_source_file: Optional[str], default_strength: float,
+                 source_url: Optional[str] = None):
         super().__init__()
+        # Either a persisted file on disk (live view) or the message attachment's
+        # URL (restored view after a restart) — generate_flux_image accepts both.
         self.display_source_file = display_source_file
+        self.source_url = source_url
         self.prompt_input = TextInput(
             label="📝 Prompt",
             style=discord.TextStyle.paragraph,
@@ -682,19 +686,21 @@ class FluxImg2ImgModal(Modal, title="🖼️ img2img from this image"):
             await interaction.response.send_message(
                 f"🛠️ Running img2img at strength {value}...", ephemeral=True
             )
-            await bot.sd_queue.put(
-                {
-                    "type": "flux",
-                    "interaction": interaction,
-                    "action": "img2img",
-                    "prompt": new_prompt,
-                    "source_file": self.display_source_file,
-                    "strength": value,
-                    "seed": random.randint(0, 2**32 - 1),
-                    "action_name": "Img2Img",
-                    "force_noise_mix": True,
-                }
-            )
+            item = {
+                "type": "flux",
+                "interaction": interaction,
+                "action": "img2img",
+                "prompt": new_prompt,
+                "strength": value,
+                "seed": random.randint(0, 2**32 - 1),
+                "action_name": "Img2Img",
+                "force_noise_mix": True,
+            }
+            if self.display_source_file:
+                item["source_file"] = self.display_source_file
+            else:
+                item["image_url"] = self.source_url
+            await bot.sd_queue.put(item)
         except Exception as e:
             logger.error(f"Error in FluxImg2ImgModal submission: {e}")
             try:
@@ -724,12 +730,26 @@ class FluxRemixView(View):
         self.is_edit_mode = is_edit_mode
         # display_source_file is the persisted OUTPUT of this generation — used
         # by the img2img button to iterate forward from the displayed image.
+        # When it's missing (restored view after a restart), the button falls
+        # back to the message attachment URL instead. Keeping the button in
+        # place is also what lets the persistent template register its custom_id.
         self.display_source_file = display_source_file
-        # The img2img button needs a persisted display source to start from.
-        if not display_source_file:
-            for child in list(self.children):
-                if getattr(child, "custom_id", None) == "fluxgen_img2img_button":
-                    self.remove_item(child)
+
+    def _effective_state(self, interaction: discord.Interaction) -> dict:
+        """Resolve state from the clicked message, falling back to instance state.
+
+        After a restart the persistent template handles clicks with empty
+        instance state; the embed format matches sd.py's, so its parser works here.
+        """
+        from soupy.cogs.sd import _view_state_from_message
+
+        parsed = _view_state_from_message(interaction.message)
+        return {
+            "prompt": parsed["prompt"] or self.prompt,
+            "width": parsed["width"] or self.width or FLUX_DEFAULT_WIDTH,
+            "height": parsed["height"] or self.height or FLUX_DEFAULT_HEIGHT,
+            "seed": parsed["seed"] if parsed["seed"] is not None else (self.seed or random.randint(0, 2**32 - 1)),
+        }
 
     async def _enqueue(self, interaction: discord.Interaction, msg: str, item: dict):
         await interaction.response.send_message(msg, ephemeral=True)
@@ -740,9 +760,10 @@ class FluxRemixView(View):
     @discord.ui.button(label="✏️", style=discord.ButtonStyle.success, custom_id="fluxgen_edit_button", row=0)
     @universal_cooldown_check()
     async def edit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
         try:
             await interaction.response.send_modal(
-                FluxEditModal(prompt=self.prompt, width=self.width, height=self.height, seed=self.seed)
+                FluxEditModal(prompt=state["prompt"], width=state["width"], height=state["height"], seed=state["seed"])
             )
         except Exception as e:
             logger.error(f"Error opening Flux edit modal for {interaction.user}: {e}")
@@ -750,24 +771,43 @@ class FluxRemixView(View):
     @discord.ui.button(label="🪄", style=discord.ButtonStyle.primary, custom_id="fluxgen_fancy_button", row=0)
     @universal_cooldown_check()
     async def fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
+        # Default to wide for one-click generations; user explicitly picks
+        # other shapes via the Wide/Tall/Square buttons.
         await self._enqueue(
             interaction, "🛠️ Making it fancy...",
-            {"action": "fancy", "prompt": self.prompt, "width": self.width, "height": self.height, "seed": self.seed},
+            {"action": "fancy", "prompt": state["prompt"], "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT,
+             "seed": state["seed"]},
         )
 
     @discord.ui.button(label="🌱🎲", style=discord.ButtonStyle.primary, custom_id="fluxgen_remix_button", row=0)
     @universal_cooldown_check()
     async def remix_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
+        # Default to wide for one-click generations.
         await self._enqueue(
             interaction, "🛠️ Remixing...",
-            {"action": "remix", "prompt": self.prompt, "width": self.width, "height": self.height,
+            {"action": "remix", "prompt": state["prompt"], "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT,
              "seed": random.randint(0, 2**32 - 1), "action_name": "Remix"},
         )
 
     @discord.ui.button(label="🖼️ img2img", style=discord.ButtonStyle.secondary, custom_id="fluxgen_img2img_button", row=0)
     @universal_cooldown_check()
     async def img2img_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not self.display_source_file:
+        source_file = self.display_source_file
+        source_url = None
+        if not source_file:
+            # Restored view after a restart — start from the displayed attachment.
+            message = interaction.message
+            if message and message.attachments:
+                source_url = message.attachments[0].url
+        if not source_file and not source_url:
             await interaction.response.send_message(
                 "❌ No source image available for img2img.", ephemeral=True
             )
@@ -775,8 +815,9 @@ class FluxRemixView(View):
         try:
             await interaction.response.send_modal(
                 FluxImg2ImgModal(
-                    display_source_file=self.display_source_file,
+                    display_source_file=source_file,
                     default_strength=settings.flux_default_strength,
+                    source_url=source_url,
                 )
             )
         except Exception as e:
@@ -786,10 +827,10 @@ class FluxRemixView(View):
     @discord.ui.button(label="🎨 R-Fancy", style=discord.ButtonStyle.danger, custom_id="fluxgen_rfancy_button", row=1)
     @universal_cooldown_check()
     async def random_fancy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        w, h = random.choice(_RANDOM_DIMS)
+        # Default to wide for one-click random generations.
         await self._enqueue(
             interaction, "🛠️ Generating fancy random image...",
-            {"action": "random", "prompt": None, "width": w, "height": h, "seed": None},
+            {"action": "random", "prompt": None, "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT, "seed": None},
         )
 
     @discord.ui.button(label="🔤 R-Keyword", style=discord.ButtonStyle.danger, custom_id="fluxgen_rkeyword_button", row=1)
@@ -797,34 +838,61 @@ class FluxRemixView(View):
     async def random_keyword_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         from soupy.cogs.sd import get_random_terms
 
-        w, h = random.choice(_RANDOM_DIMS)
         terms_list: List[str] = []
         for _category, terms in get_random_terms().items():
             terms_list.extend([t.strip() for t in terms.split(",")])
+        # Default to wide for one-click random generations.
         await self._enqueue(
             interaction, "🛠️ Generating keyword random image...",
-            {"action": "random", "prompt": ", ".join(terms_list), "width": w, "height": h, "seed": None},
+            {"action": "random", "prompt": ", ".join(terms_list),
+             "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT, "seed": None},
         )
 
     @discord.ui.button(label="↔️", style=discord.ButtonStyle.primary, custom_id="fluxgen_wide_button", row=1)
     @universal_cooldown_check()
     async def wide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         await self._enqueue(
             interaction, "🛠️ Generating wide version...",
-            {"action": "wide", "prompt": self.prompt, "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT,
-             "seed": self.seed, "action_name": "Wide"},
+            {"action": "wide", "prompt": state["prompt"], "width": FLUX_WIDE_WIDTH, "height": FLUX_WIDE_HEIGHT,
+             "seed": state["seed"], "action_name": "Wide"},
         )
 
     @discord.ui.button(label="↕️", style=discord.ButtonStyle.primary, custom_id="fluxgen_tall_button", row=1)
     @universal_cooldown_check()
     async def tall_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
         await self._enqueue(
             interaction, "🛠️ Generating tall version...",
-            {"action": "tall", "prompt": self.prompt, "width": FLUX_TALL_WIDTH, "height": FLUX_TALL_HEIGHT,
-             "seed": self.seed, "action_name": "Tall"},
+            {"action": "tall", "prompt": state["prompt"], "width": FLUX_TALL_WIDTH, "height": FLUX_TALL_HEIGHT,
+             "seed": state["seed"], "action_name": "Tall"},
+        )
+
+    @discord.ui.button(label="🟦", style=discord.ButtonStyle.primary, custom_id="fluxgen_square_button", row=1)
+    @universal_cooldown_check()
+    async def square_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        state = self._effective_state(interaction)
+        if not state["prompt"]:
+            await interaction.response.send_message("❌ Couldn't recover the original prompt from this message.", ephemeral=True)
+            return
+        await self._enqueue(
+            interaction, "🛠️ Generating square version...",
+            {"action": "square", "prompt": state["prompt"],
+             "width": FLUX_DEFAULT_WIDTH, "height": FLUX_DEFAULT_HEIGHT,
+             "seed": state["seed"], "action_name": "Square"},
         )
 
 async def setup(bot):
     """discord.py extension entry point — registers /flux on the tree."""
     bot.tree.add_command(flux)
+    # Persistent-view template: lets buttons on messages posted before the last
+    # restart keep working. The blank state is fine — callbacks recover the real
+    # prompt/seed/dims from the clicked message via _effective_state().
+    bot.add_view(FluxRemixView(prompt="", width=FLUX_DEFAULT_WIDTH, height=FLUX_DEFAULT_HEIGHT, seed=0))
     logger.info("✅ Loaded flux (local Flux image generation) extension")
