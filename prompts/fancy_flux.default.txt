@@ -1,0 +1,16 @@
+Objective:
+1. Rewrite a short image prompt as one dense natural-language paragraph for Flux 2 (50–75 words, hard ceiling 75)
+
+Constraints:
+1. Preserve the original subject, theme, and intent exactly — do not invent new characters, props, scenes, or lore
+2. Write in fluent natural prose, not a list of tags or comma-separated descriptors
+3. Cover, where relevant: subject, setting, composition/framing, lighting, color palette, mood, key materials/textures, era or rendering style
+4. Be specific and concrete — prefer "low golden sidelight" over "beautiful lighting"
+5. No headings, no preface, no narrative or storyline, no opinions, no meta commentary
+6. If the original is vague, make a small confident creative leap that stays consistent with the input
+7. Stay within ~75 words; trim adjectives before exceeding the cap
+
+Output:
+1. Return only the rewritten paragraph — no quotes, labels, or surrounding text
+
+Original prompt:

@@ -292,11 +292,64 @@ async def build_random_prompt(direct_prompt: Optional[str] = None):
     return random_prompt, selected_terms_str, time.perf_counter() - start
 
 
+async def build_flux_random_prompt(direct_prompt: Optional[str] = None):
+    """Flux 2-tuned variant of :func:`build_random_prompt`.
+
+    Loads ``prompts/randomprompt_flux*`` (falling back to ``RANDOMPROMPT``
+    if no Flux variant is configured) and respects ``FLUX_RANDOM_MAX_TOKENS``
+    (default 140) so the rewritten prompt stays a tight natural-language
+    paragraph. Same return signature as ``build_random_prompt``.
+    """
+    start = time.perf_counter()
+    if direct_prompt:
+        return direct_prompt, direct_prompt, time.perf_counter() - start
+
+    flux_randomprompt = soupy_prompts.load_prompt("randomprompt_flux", fallback=RANDOMPROMPT or "")
+    if not flux_randomprompt:
+        raise RuntimeError("No RANDOMPROMPT (or randomprompt_flux) found.")
+
+    random_terms = get_random_terms()
+    art_style = random_terms.get("Artistic Rendering Style", "")
+    other_terms = [term for category, term in random_terms.items() if category != "Artistic Rendering Style"]
+    style_emphasis = (
+        f"The image should be rendered combining these artistic styles: {art_style}. "
+        f"These artistic styles should be the dominant visual characteristics, "
+        f"blended together, with the following elements incorporated within these styles: {', '.join(other_terms)}"
+    )
+    sd_hint = ""
+    if "SD Keywords" in random_terms:
+        sd_hint = f"\nFocus on these rendering/photographic cues as global style constraints: {random_terms['SD Keywords']}."
+    combined_prompt = f"{flux_randomprompt} {style_emphasis}{sd_hint}"
+
+    messages_for_llm = [
+        {
+            "role": "system",
+            "content": "You are an assistant that creates image prompts with strong emphasis on artistic style. "
+            "The artistic rendering style should be prominently featured in your prompt, affecting every element described.",
+        },
+        {"role": "user", "content": combined_prompt},
+    ]
+    response = await async_chat_completion(
+        model=os.getenv("LOCAL_CHAT"),
+        messages=messages_for_llm,
+        temperature=float(os.getenv("RANDOM_PROMPT_TEMPERATURE", 0.8)),
+        max_tokens=int(os.getenv("FLUX_RANDOM_MAX_TOKENS", 140)),
+    )
+    random_prompt = response.choices[0].message.content.strip()
+
+    selected_terms_list = []
+    for _category, terms in random_terms.items():
+        selected_terms_list.extend([term.strip() for term in terms.split(",")])
+    selected_terms_str = ", ".join(selected_terms_list)
+    return random_prompt, selected_terms_str, time.perf_counter() - start
+
+
 async def build_fancy_prompt(prompt: str):
     """LLM-rewrite ``prompt`` into a more elaborate "fancy" version.
 
-    Returns ``(cleaned_prompt, duration)``. Shared by the SD and Flux Fancy
-    buttons. Mirror of the inline logic in ``handle_fancy`` — keep in sync.
+    Returns ``(cleaned_prompt, duration)``. Used by the SD Fancy button path.
+    Mirror of the inline logic in ``handle_fancy`` — keep in sync. The Flux
+    Fancy button uses :func:`build_flux_fancy_prompt` instead.
     """
     fancy_instructions = soupy_prompts.load_prompt("fancy", fallback="")
     combined_instructions = f"{fancy_instructions}\n\nThe prompt you are elaborating on is: {prompt}"
@@ -310,6 +363,36 @@ async def build_fancy_prompt(prompt: str):
         messages=messages,
         temperature=float(os.getenv("FANCY_PROMPT_TEMPERATURE", 0.7)),
         max_tokens=int(os.getenv("FANCY_MAX_TOKENS", 150)),
+    )
+    fancy_prompt = response.choices[0].message.content.strip()
+    duration = time.perf_counter() - start
+    cleaned_prompt = fancy_prompt.strip()
+    while (cleaned_prompt.startswith('"') and cleaned_prompt.endswith('"')) or (
+        cleaned_prompt.startswith("'") and cleaned_prompt.endswith("'")
+    ):
+        cleaned_prompt = cleaned_prompt[1:-1].strip()
+    return cleaned_prompt, duration
+
+
+async def build_flux_fancy_prompt(prompt: str):
+    """Flux 2-tuned variant of :func:`build_fancy_prompt`.
+
+    Loads ``prompts/fancy_flux*`` and respects ``FLUX_FANCY_MAX_TOKENS``
+    (default 120) so the rewritten prompt stays a tight natural-language
+    paragraph instead of SD's longer CLIP-style tag dump.
+    """
+    fancy_instructions = soupy_prompts.load_prompt("fancy_flux", fallback="")
+    combined_instructions = f"{fancy_instructions}\n\nThe prompt you are elaborating on is: {prompt}"
+    start = time.perf_counter()
+    messages = [
+        {"role": "system", "content": combined_instructions},
+        {"role": "user", "content": "Please rewrite the above prompt accordingly."},
+    ]
+    response = await async_chat_completion(
+        model=os.getenv("LOCAL_CHAT"),
+        messages=messages,
+        temperature=float(os.getenv("FANCY_PROMPT_TEMPERATURE", 0.7)),
+        max_tokens=int(os.getenv("FLUX_FANCY_MAX_TOKENS", 120)),
     )
     fancy_prompt = response.choices[0].message.content.strip()
     duration = time.perf_counter() - start

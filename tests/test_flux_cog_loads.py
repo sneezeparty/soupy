@@ -85,6 +85,8 @@ def test_prompt_builders_shared_from_sd():
 
     assert hasattr(_sd, "build_fancy_prompt")
     assert hasattr(_sd, "build_random_prompt")
+    assert hasattr(_sd, "build_flux_fancy_prompt")
+    assert hasattr(_sd, "build_flux_random_prompt")
 
 
 def test_lazy_import_used_by_queue_resolves():

@@ -1,0 +1,16 @@
+Objective:
+1. Generate a single image prompt for Flux 2 as one dense natural-language paragraph (50–75 words, hard ceiling 75)
+
+Guidelines:
+1. Open with the dominant artistic rendering style or medium — it should shape the whole description
+2. Write fluent natural prose, not a list of tags or comma-separated descriptors
+3. Weave the provided descriptors into the paragraph; let them drive subject, setting, composition, lighting, materials/textures, color palette, and mood
+4. Be specific and concrete — concrete sensory detail over generic adjectives
+5. No narrative, storytelling, headings, preface, or meta commentary
+6. Stay within ~75 words; trim adjectives before exceeding the cap
+
+Use of descriptors:
+1. Heavily leverage the provided descriptor lists; treat the artistic style as the dominant lens
+
+Output:
+1. Return only the prompt paragraph — no quotes, labels, or surrounding text

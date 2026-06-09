@@ -24,9 +24,11 @@ Design notes:
   SD generations run one-at-a-time. ``SDQueue.process_queue`` dispatches
   ``type:"flux"`` items here to ``process_flux_image``, which branches on
   ``item["action"]``.
-- The LLM prompt builders (Fancy / R-Fancy / R-Keyword) are reused from
-  ``soupy.cogs.sd`` (``build_fancy_prompt`` / ``build_random_prompt``) so prompt
-  behaviour matches /sd exactly.
+- The LLM prompt builders are imported from ``soupy.cogs.sd``. R-Keyword reuses
+  ``build_random_prompt`` directly. Fancy and R-Fancy use Flux-tuned variants
+  (``build_flux_fancy_prompt`` / ``build_flux_random_prompt``) that emit a
+  shorter natural-language paragraph — Flux 2 handles those better than the
+  longer CLIP-style output SD's Remix view still uses.
 - img2img sources are persisted under ``media/flux_sources/`` so the Strength
   button can re-run from the original image after the Discord attachment URL
   expires.
@@ -546,11 +548,11 @@ async def process_flux_image(item: dict):
 
 async def _handle_flux_fancy(item: dict):
     interaction = item["interaction"]
-    from soupy.cogs.sd import build_fancy_prompt
+    from soupy.cogs.sd import build_flux_fancy_prompt
 
     if not interaction.response.is_done():
         await interaction.response.defer()
-    cleaned_prompt, duration = await build_fancy_prompt(item["prompt"])
+    cleaned_prompt, duration = await build_flux_fancy_prompt(item["prompt"])
     await increment_user_stat(interaction.user.id, "images_generated", interaction.guild_id)
     await generate_flux_image(
         interaction, cleaned_prompt, item["width"], item["height"], item["seed"],
@@ -560,12 +562,12 @@ async def _handle_flux_fancy(item: dict):
 
 async def _handle_flux_random(item: dict):
     interaction = item["interaction"]
-    from soupy.cogs.sd import build_random_prompt
+    from soupy.cogs.sd import build_flux_random_prompt
 
     if not interaction.response.is_done():
         await interaction.response.defer()
     try:
-        prompt, selected_terms, duration = await build_random_prompt(item.get("prompt"))
+        prompt, selected_terms, duration = await build_flux_random_prompt(item.get("prompt"))
     except RuntimeError as e:
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
         return
