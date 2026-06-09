@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- **Flux-tuned Fancy / R-Fancy prompt builders.** The `/flux` Remix view's `Fancy` and `R-Fancy` buttons previously routed through `soupy.cogs.sd`'s `build_fancy_prompt` / `build_random_prompt`, which emit the longer CLIP-style prompt shape SD wants — but Flux 2 produces sharper images from a tight ~50–75 word natural-language paragraph. Added `build_flux_fancy_prompt` / `build_flux_random_prompt` in `soupy/cogs/sd.py` that load `prompts/fancy_flux.*` / `prompts/randomprompt_flux.*` (with `RANDOMPROMPT` fallback for the latter) and respect two new env vars — `FLUX_FANCY_MAX_TOKENS` (default 120) and `FLUX_RANDOM_MAX_TOKENS` (default 140) — instead of the SD-tuned `FANCY_MAX_TOKENS`. The Flux cog's `_handle_flux_fancy` / `_handle_flux_random` switch to the new builders; the SD Remix view is unaffected. Two shipped defaults under `prompts/`; `tests/test_flux_cog_loads.py` asserts both builders are exported.
+
+### Changed
+- **Personality panel reads/writes prompts via a dedicated `/api/prompts` endpoint.** After the 2026-05-06 migration moved `BEHAVIOUR`, `BEHAVIOUR_SEARCH`, `9BALL`, `FANCY`, `RANDOMPROMPT`, and `SD_NEGATIVE_PROMPT` out of `.env-stable` into `prompts/<name>.txt`, the dashboard's Personality panel was loading them through `/api/env/get` and getting empty strings — the env editor no longer sees them, so saves silently went to keys the bot ignored. New `GET /api/prompts/get` and `POST /api/prompts/save` in `web/app.py` resolve via the same chain the bot uses (legacy env > `prompts/<name>.txt` > `prompts/<name>.default.txt`) and persist saves to `prompts/<name>.txt` with an atomic `tmp + os.replace`. CRLF is normalised to LF on save so browser-edited values don't accumulate `\r` characters that survive the bot's prompt cache. The React dashboard gains `loadPrompts()` + a `PRESET_TO_PROMPT_NAME` map; existing preset dropdown labels keep working against the new endpoint.
+
+### Fixed
+- **Slash commands no longer show up twice in the Discord typeahead.** `on_ready` used to do a guild-scoped `copy_global_to(...) + sync(guild=...)` when `GUILD_ID` was set, for instant dev iteration. Discord overlays guild-scoped commands on top of globals rather than replacing them, so once global propagation caught up, the home guild listed every command twice. `on_ready` now syncs **globally only**, then sends an empty bulk-upsert per guild (`clear_commands` + `sync(guild=...)`) to self-heal any stale guild-scoped registrations from prior runs; the clear is idempotent. Dev iteration is slower (Discord propagates within ~5min, up to ~1hr the first time), so `!synccommands` grows a `Literal["global","guild","clear-guild"]` `scope` argument — owners can still force a temporary guild sync, and `clear-guild` removes the override afterward. A new `on_guild_join` handler is deliberately a no-op for sync: newly-joined guilds receive commands via global propagation rather than another guild-scoped copy that would later duplicate.
+
+### Docs
+- **Installer caught up to the Flux backend.** The wizard predated `/flux`, so a Mac user picking "image gen on Apple Silicon" got pushed into the old SD-via-MPS path and was never prompted about `FLUX_ENABLED` / `FLUX_SERVER_URL` / Klein-Edit. Added a first-class `local_flux` mode end to end: installs `mflux` + `python-multipart` into `.venv` (no separate `.venv-sd`), prompts for host/port and the Klein-Edit toggle, writes the `FLUX_*` keys, soft-probes the backend in verification (the server is launched separately, so a "not running yet" result is informational), and reminds the user to launch `python flux_server.py` at handoff. Step 4 also populates `AVAILABLE_MODELS` from the live LM Studio model probe so the web-UI dropdown matches what's loaded, and the vision question is reworded to mention chat attachments rather than `/soupyscan`. INSTALL.md updated to match.
+
 ## [1.2.0] - 2026-06-05
 
 ### Added
@@ -87,7 +99,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Initial public release of Soupy Remastered: chat with personality, RAG-backed memory, autonomous Discord article posts, autonomous Bluesky engagement, web search, vision, image generation via a separate Stable Diffusion backend, and a FastAPI web control panel for live config and monitoring.
 
-[Unreleased]: https://github.com/sneezeparty/soupy/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/sneezeparty/soupy/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/sneezeparty/soupy/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/sneezeparty/soupy/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/sneezeparty/soupy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sneezeparty/soupy/releases/tag/v1.0.0
