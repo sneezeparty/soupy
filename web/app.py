@@ -985,6 +985,89 @@ def create_app() -> FastAPI:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
 
     # -----------------------------------------------------------------------
+    # Prompts subsystem — BEHAVIOUR, BEHAVIOUR_SEARCH, etc. were migrated out
+    # of .env-stable into prompts/<name>.txt (see soupy/prompts.py and
+    # tools/migrate_prompts.py). The dashboard's Personality panel used to
+    # read these via /api/env/get, which now returns empty for them. These
+    # endpoints expose the same resolution chain the bot uses so the panel
+    # can show the live prompt and write back to the prompts/ file.
+    # -----------------------------------------------------------------------
+
+    # name -> legacy env var. Mirrors soupy/prompts.py::_LEGACY_ENV — kept
+    # local rather than imported so an editor change here doesn't touch the
+    # bot's runtime loader (and vice versa).
+    _PROMPT_NAMES = {
+        "behaviour": "BEHAVIOUR",
+        "behaviour_search": "BEHAVIOUR_SEARCH",
+        "behaviour_daily_post": "BEHAVIOUR_DAILY_POST",
+        "nineball": "9BALL",
+        "fancy": "FANCY",
+        "randomprompt": "RANDOMPROMPT",
+        "sd_negative_prompt": "SD_NEGATIVE_PROMPT",
+    }
+
+    def _read_prompt_state(name: str) -> dict:
+        env_var = _PROMPT_NAMES[name]
+        prompts_dir = BASE_DIR / "prompts"
+        custom_path = prompts_dir / f"{name}.txt"
+        default_path = prompts_dir / f"{name}.default.txt"
+        # Re-parse .env-stable each call (cheap) so a legacy env value the
+        # user just edited shows up immediately.
+        _, kv = parse_env(BASE_DIR / ".env-stable")
+        env_value = kv.get(env_var, "")
+        custom_value = custom_path.read_text(encoding="utf-8") if custom_path.is_file() else None
+        default_value = default_path.read_text(encoding="utf-8") if default_path.is_file() else None
+        if env_value:
+            source, value = "env", env_value
+        elif custom_value is not None:
+            source, value = "custom", custom_value
+        elif default_value is not None:
+            source, value = "default", default_value
+        else:
+            source, value = "missing", ""
+        return {
+            "name": name,
+            "env_var": env_var,
+            "source": source,
+            "value": value,
+            "has_env": bool(env_value),
+            "has_custom": custom_value is not None,
+            "has_default": default_value is not None,
+            "custom_path": str(custom_path),
+            "default_path": str(default_path),
+        }
+
+    @app.get("/api/prompts/get")
+    async def api_prompts_get():
+        return JSONResponse({"prompts": {n: _read_prompt_state(n) for n in _PROMPT_NAMES}})
+
+    @app.post("/api/prompts/save")
+    async def api_prompts_save(request: Request):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            return JSONResponse({"ok": False, "message": "Invalid payload"}, status_code=400)
+        name = str(payload.get("name", "")).strip().lower()
+        if name not in _PROMPT_NAMES:
+            return JSONResponse({"ok": False, "message": f"Unknown prompt: {name!r}"}, status_code=400)
+        value = payload.get("value")
+        if value is None:
+            return JSONResponse({"ok": False, "message": "Missing 'value'"}, status_code=400)
+        # Normalise CRLF → LF so files saved through the browser don't
+        # accumulate \r characters that survive a round-trip through the
+        # bot's prompt cache.
+        text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+        prompts_dir = BASE_DIR / "prompts"
+        try:
+            prompts_dir.mkdir(parents=True, exist_ok=True)
+            target = prompts_dir / f"{name}.txt"
+            tmp = target.with_suffix(target.suffix + ".tmp")
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, target)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+        return JSONResponse({"ok": True, "message": "Saved", "state": _read_prompt_state(name)})
+
+    # -----------------------------------------------------------------------
     # LM Studio integration — list loaded models, hot-swap the chat model
     # WHY: switching the model writes LOCAL_CHAT to .env-stable and triggers
     # a bot restart so the new model is picked up by the next chat call.

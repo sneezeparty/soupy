@@ -1272,6 +1272,7 @@
     const [contextWindowSize, setContextWindowSize] = useState("16000");
     const [preset, setPreset] = useState("BEHAVIOUR");
     const [personalityText, setPersonalityText] = useState("");
+    const [prompts, setPrompts] = useState({});
     const [selectedCommand, setSelectedCommand] = useState(null);
     const [cmdEnvDrafts, setCmdEnvDrafts] = useState({});
     const [dashStatus, setDashStatus] = useState({});
@@ -1409,6 +1410,7 @@
     useEffect(function () {
       loadSummary();
       loadEnv();
+      loadPrompts();
       loadRuntimeFlags();
       refreshStatus();
       loadEnvToggles();
@@ -1911,6 +1913,28 @@
       }
     }
 
+    // Prompts (BEHAVIOUR, BEHAVIOUR_SEARCH, etc.) live in prompts/<name>.txt
+    // since the 2026-05-06 migration — the env editor no longer sees them.
+    // /api/prompts/get returns them via the same resolution chain the bot
+    // uses (legacy env > custom file > shipped default).
+    async function loadPrompts() {
+      try {
+        const data = await readJson("/api/prompts/get");
+        setPrompts(data.prompts || {});
+      } catch (err) {
+        setNotice("Failed to load prompts: " + err.message);
+        setNoticeError(true);
+      }
+    }
+
+    // Map dashboard preset keys (env-var style) to the prompt names used by
+    // soupy/prompts.py and /api/prompts/*. The preset select shows the
+    // env-var labels for continuity with older docs/UI.
+    const PRESET_TO_PROMPT_NAME = { BEHAVIOUR: "behaviour", BEHAVIOUR_SEARCH: "behaviour_search" };
+    function promptNameFor(key) {
+      return PRESET_TO_PROMPT_NAME[key] || String(key || "").toLowerCase();
+    }
+
     useEffect(
       function () {
         if (!personalityOptions.length) {
@@ -1925,17 +1949,56 @@
         if (!hasPreset) {
           setPreset(resolved);
         }
-        setPersonalityText(formatBehaviourForEditor(normalizeLineEndings(envVars[resolved] || "")));
+        setPersonalityText(formatBehaviourForEditor(getPresetValueRaw(resolved)));
       },
-      [preset, envVars, personalityOptions]
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [preset, prompts, envVars, personalityOptions]
     );
 
     function getPresetValueRaw(key) {
+      const entry = prompts[promptNameFor(key)];
+      if (entry && typeof entry.value === "string" && entry.value) {
+        return normalizeLineEndings(entry.value);
+      }
       return normalizeLineEndings(envVars[key] || "");
     }
 
     function getPresetValueFormatted(key) {
       return formatBehaviourForEditor(getPresetValueRaw(key));
+    }
+
+    function presetSourceLabel(key) {
+      const entry = prompts[promptNameFor(key)];
+      if (!entry) return "";
+      if (entry.source === "env") return "legacy env var " + (entry.env_var || key);
+      if (entry.source === "custom") return "prompts/" + entry.name + ".txt";
+      if (entry.source === "default") return "shipped default prompts/" + entry.name + ".default.txt";
+      return "no prompt set";
+    }
+
+    async function savePrompt(key, text, restart, successMsg) {
+      const name = promptNameFor(key);
+      setBusy(true);
+      setNotice(restart ? "Saving and restarting..." : "Saving...");
+      setNoticeError(false);
+      try {
+        await readJson("/api/prompts/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name, value: normalizeLineEndings(text) }),
+        });
+        if (restart) {
+          const restarted = await readJson("/api/bot/restart", { method: "POST" });
+          setStatus(restarted);
+        }
+        setNotice(successMsg);
+        await loadPrompts();
+      } catch (err) {
+        setNotice("Save failed: " + err.message);
+        setNoticeError(true);
+      } finally {
+        setBusy(false);
+      }
     }
 
     async function saveEnvOnly(updates, msg) {
@@ -3295,7 +3358,9 @@
               e("span", { className: "mono" }, "BEHAVIOUR"),
               " system prompt or the ",
               e("span", { className: "mono" }, "BEHAVIOUR_SEARCH"),
-              " search prompt below. Auto-format on load; ",
+              " search prompt below. Prompts live in ",
+              e("span", { className: "mono" }, "prompts/<name>.txt"),
+              " (loader falls back to legacy env vars and shipped defaults). Auto-format on load; ",
               e("span", { className: "mono" }, "Load raw"),
               " shows the file as stored."
             ),
@@ -3337,14 +3402,19 @@
                   disabled: busy,
                   onClick: function () {
                     loadEnv();
-                    setNotice("Reloaded from .env");
+                    loadPrompts();
+                    setNotice("Reloaded from disk");
                     setNoticeError(false);
                   },
                 },
-                "Reload from .env"
+                "Reload"
               )
             ),
-            e("p", { className: "muted mono", style: { margin: "0.35rem 0 0.5rem" } }, "Saving to env key: " + preset),
+            e(
+              "p",
+              { className: "muted mono", style: { margin: "0.35rem 0 0.5rem" } },
+              "Source: " + (presetSourceLabel(preset) || "—")
+            ),
             e(
               "div",
               { className: "dash-field" },
@@ -3394,7 +3464,7 @@
                     setPersonalityText(getPresetValueRaw(preset));
                   },
                 },
-                "Load raw from .env"
+                "Load raw from file"
               ),
               e(
                 "button",
@@ -3415,12 +3485,15 @@
                   className: "secondary",
                   disabled: busy,
                   onClick: function () {
-                    var payload = {};
-                    payload[preset] = normalizeLineEndings(personalityText);
-                    saveEnvOnly(payload, preset + " saved to .env (bot not restarted).");
+                    savePrompt(
+                      preset,
+                      personalityText,
+                      false,
+                      preset + " saved to prompts/" + promptNameFor(preset) + ".txt (bot not restarted)."
+                    );
                   },
                 },
-                busy ? "Saving..." : "Save to .env"
+                busy ? "Saving..." : "Save to file"
               ),
               e(
                 "button",
@@ -3428,12 +3501,15 @@
                   type: "button",
                   disabled: busy,
                   onClick: function () {
-                    var payload = {};
-                    payload[preset] = normalizeLineEndings(personalityText);
-                    saveEnvAndRestart(payload, titleFromPersonalityKey(preset) + " saved; bot restarted.");
+                    savePrompt(
+                      preset,
+                      personalityText,
+                      true,
+                      titleFromPersonalityKey(preset) + " saved; bot restarted."
+                    );
                   },
                 },
-                busy ? "Saving..." : "Save preset + restart bot"
+                busy ? "Saving..." : "Save + restart bot"
               ),
             )
           )
