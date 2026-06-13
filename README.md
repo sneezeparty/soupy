@@ -32,6 +32,7 @@ Personality is the point. Soupy maintains a self-knowledge document about itself
 - Autonomous Bluesky presence — replies, quote-posts, and original article posts on a randomized daily schedule, fact-checked against the source.
 - Periodic "thinking out loud" musings in a configured channel, with dedupe against recent topics via keyword filtering and embedding similarity.
 - DuckDuckGo web and image search with LLM-summarized results.
+- Stock price lookups via `/soupystock` — accepts a ticker or company name, ships a compact embed with the current price and day change, and reveals day range / previous close / 52-week range / market cap / exchange (plus an intraday sparkline if your Finnhub tier supports candle data) on a "More" button. Free Finnhub key required.
 - Optional vision: routes Discord image attachments through LM Studio's vision-capable LLM for image understanding.
 - **Two independent image-generation backends, sharing a single serial queue:**
   - **Stable Diffusion** (`/sd`, `/img2img`, `/inpaint`, `/outpaint`) over HTTP to a separate GPU host.

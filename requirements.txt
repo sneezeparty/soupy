@@ -35,6 +35,10 @@ opencv-python>=4.8.0
 geopy>=2.4.1
 timezonefinder>=6.4.1
 
+# /soupystock sparkline (optional — the cog skips the chart gracefully
+# if matplotlib is missing, but the rendered embed looks much nicer with it).
+matplotlib>=3.8.0
+
 # PyTorch (CUDA 11.8) — install separately:
 # pip install torch==2.4.0+cu118 torchvision==0.19.0+cu118 torchaudio==2.4.0+cu118 \
 #     --extra-index-url https://download.pytorch.org/whl/cu118

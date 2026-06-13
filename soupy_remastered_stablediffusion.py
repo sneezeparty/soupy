@@ -2110,6 +2110,7 @@ async def help_command(interaction: discord.Interaction):
         "sd": "`description` [size] [seed]",
         "soupysearch": "`query`",
         "soupyimage": "`query`",
+        "soupystock": "`query`",
         "8ball": "`question`",
         "9ball": "`question`",
         "whattime": "`location`",
@@ -2123,6 +2124,7 @@ async def help_command(interaction: discord.Interaction):
         "sd": "Generate an image using Stable Diffusion. Provide a description of what you want to see, optionally choose a size and seed.",
         "soupysearch": "Search the web using DuckDuckGo and get a comprehensive answer with citations from multiple sources.",
         "soupyimage": "Search for images using DuckDuckGo and get a random image from the top results.",
+        "soupystock": "Look up the current price for a stock ticker or company name (powered by Finnhub).",
         "8ball": "Ask the Magic 8-Ball a yes/no question and receive a classic 8-ball response.",
         "9ball": "Ask the mystical 9-ball a question and receive a custom response powered by AI.",
         "whattime": "Get the current time in any city or location around the world.",
@@ -3196,6 +3198,12 @@ async def load_extensions():
         logger.info("🦋 Loaded Bluesky engagement extension")
     except Exception as e:
         logger.error(f"❌ Failed to load Bluesky extension: {e}")
+
+    try:
+        await bot.load_extension("soupy.cogs.stock")
+        logger.info("📈 Loaded stock extension")
+    except Exception as e:
+        logger.error(f"❌ Failed to load stock extension: {e}")
 
 
 # Then your existing on_ready event can use it

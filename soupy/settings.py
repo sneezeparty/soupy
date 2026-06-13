@@ -469,6 +469,12 @@ class Settings:
     def bluesky_article_freshness_days(self) -> int:
         return _env_int("BLUESKY_ARTICLE_FRESHNESS_DAYS", 14)
 
+    # ----- Stock data (Finnhub) ------------------------------------------
+
+    @cached_property
+    def finnhub_api_key(self) -> str:
+        return _env_str("FINNHUB_API_KEY")
+
     # ----- Daily posts ---------------------------------------------------
 
     @cached_property
