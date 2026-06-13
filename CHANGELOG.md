@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-13
+
 ### Added
 - **New `/soupystock` slash command — stock price lookups via Finnhub.** Takes a ticker (`AAPL`) or a company name (`apple`) and ships a compact embed: company name + small logo icon (Discord's author-slot icon), the current price, and the day change in $ and %. A `📊 More` button below the embed lazy-loads the heavier data (`/stock/metric` for the 52-week range plus a best-effort `/stock/candle` for an intraday sparkline) and swaps the message for the full quote card — day range, previous close, market cap, 52-week range, exchange, thumbnail logo, and a matplotlib-rendered sparkline PNG when the candle endpoint is accessible. Finnhub's free tier paywalls `/stock/candle` (HTTP 403), so on a free key the sparkline silently never renders and the rest of the card ships fine. The button times out after 10 minutes; on click it removes itself (`view=None`). New cog at `soupy/cogs/stock.py` modeled on the existing `imagesearch.py` shape — its own `aiohttp.ClientSession` with proper lifecycle, per-user rate limit (5 lookups/min — Finnhub free tier caps at 60/min total), and friendly error messages for missing API key / no-quote / unrecognized symbol. Company-name → ticker resolution skips `/search` when the input already looks like a ticker and `/quote` returns a non-zero price for it, saving an API call in the common `AAPL` case. New env var `FINNHUB_API_KEY` (documented in `.env-stable.example`; cog responds with a "not configured" message when blank rather than crashing). New dependency: `matplotlib>=3.8.0` for the sparkline (cog still works if it's missing — matplotlib is imported lazily inside the render path). Note: Finnhub's webhook secret is *not* used by this command; webhooks deliver pushed events (alerts, earnings), not on-demand REST queries.
 - **🟦 Square button on both image-result panels.** `SDRemixView` and `FluxRemixView` now expose a Square option (row 1, primary style) alongside Wide/Tall — five shape buttons total in the row, hitting Discord's per-row cap exactly. Square forces `SD_DEFAULT_WIDTH`/`SD_DEFAULT_HEIGHT` (or `FLUX_DEFAULT_*`), which is the project's "square" preset. SD dispatch gains a matching `handle_square` (mirrors `handle_wide`/`handle_tall`, sets `action_name="Square"` for the result embed) and a new `action == "square"` arm in `SDQueue.process_queue`; Flux's `process_flux_image` already routes all non-fancy/non-random actions through `generate_flux_image`, so it just needed the new button and an `action_name="Square"` queue item.
@@ -104,7 +106,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 - Initial public release of Soupy Remastered: chat with personality, RAG-backed memory, autonomous Discord article posts, autonomous Bluesky engagement, web search, vision, image generation via a separate Stable Diffusion backend, and a FastAPI web control panel for live config and monitoring.
 
-[Unreleased]: https://github.com/sneezeparty/soupy/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/sneezeparty/soupy/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/sneezeparty/soupy/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/sneezeparty/soupy/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/sneezeparty/soupy/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/sneezeparty/soupy/compare/v1.0.0...v1.1.0
