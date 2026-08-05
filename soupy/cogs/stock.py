@@ -46,6 +46,47 @@ HTTP_TIMEOUT = aiohttp.ClientTimeout(total=10)
 # Ticker shape: 1-8 chars, A-Z/0-9 plus '.' and '-' (covers BRK.B, BTC-USD).
 _TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,8}$")
 
+# Manual company-name → ticker overrides for cases where Finnhub's /search
+# index lags reality (typically newly-IPO'd companies). /quote and /profile2
+# work fine on the real ticker, but /search returns junk or empty. Key is the
+# uppercased query; value is the Finnhub ticker. Drop an entry once Finnhub
+# starts returning the right hit for that name.
+_NAME_ALIASES: Dict[str, str] = {
+    "SPACEX": "SPCX",  # IPO'd 2026-06-12; /search?q=spacex only finds Metaspacex Ltd (1796.HK).
+}
+
+
+def _score_search_hit(query: str, hit: Dict) -> int:
+    """Rank a Finnhub /search hit against the user's query. Higher is better.
+
+    Taking the first /search result blindly returns garbage when Finnhub's
+    index gives a coincidental substring match (e.g. "spacex" → "Metaspacex
+    Ltd"). We reward whole-word description matches, US plain tickers, and
+    common-stock type; foreign suffixed listings (`1796.HK`, `XYZ.L`) get
+    docked. A non-positive score means "don't use this hit."
+    """
+    symbol = (hit.get("symbol") or "").upper()
+    if not symbol:
+        return -100
+
+    q_lower = query.lower().strip()
+    description = (hit.get("description") or "").lower()
+    hit_type = hit.get("type") or ""
+
+    score = 0
+    if q_lower and re.search(rf"\b{re.escape(q_lower)}\b", description):
+        score += 5
+
+    if "." in symbol:
+        score -= 2
+    else:
+        score += 2
+
+    if hit_type == "Common Stock":
+        score += 2
+
+    return score
+
 
 class FinnhubError(Exception):
     """Raised when a Finnhub request fails (non-2xx or network error)."""
@@ -231,11 +272,21 @@ class StockCog(commands.Cog):
     async def _resolve_symbol(self, query: str) -> Optional[str]:
         """Return a Finnhub ticker for ``query``, or None if nothing matches.
 
-        Strategy: if the query *looks* like a ticker and ``/quote`` returns a
-        non-zero current price for it, accept it. Otherwise hit ``/search`` and
-        take the top hit. Saves an extra round-trip in the common "AAPL" case.
+        Order of attempts:
+        1. Manual alias map (handles companies Finnhub's /search index hasn't
+           caught up to, like SPACEX → SPCX shortly after IPO).
+        2. If the query *looks* like a ticker and ``/quote`` returns a
+           non-zero current price for it, accept it (the common AAPL case).
+        3. ``/search`` with quality scoring — reject hits that score 0 or
+           below rather than blindly taking the first result, which otherwise
+           lets coincidental substring matches (e.g. "Metaspacex Ltd" for
+           "spacex") slip through.
         """
         candidate = query.strip().upper()
+
+        if candidate in _NAME_ALIASES:
+            return _NAME_ALIASES[candidate]
+
         if _TICKER_RE.match(candidate):
             try:
                 quote = await self._finnhub_get("/quote", {"symbol": candidate})
@@ -250,11 +301,24 @@ class StockCog(commands.Cog):
             logger.warning(f"Finnhub /search failed for {query!r}: {exc}")
             return None
 
-        for hit in search.get("result", []) or []:
-            symbol = hit.get("symbol")
-            if symbol:
-                return symbol
-        return None
+        hits = [h for h in (search.get("result") or []) if h.get("symbol")]
+        if not hits:
+            return None
+
+        scored = sorted(
+            ((_score_search_hit(query, h), h) for h in hits),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        best_score, best_hit = scored[0]
+        if best_score <= 0:
+            logger.info(
+                f"Finnhub /search returned {len(hits)} hit(s) for {query!r} but none "
+                f"scored above 0; top candidate was {best_hit.get('symbol')!r} "
+                f"({best_hit.get('description')!r})"
+            )
+            return None
+        return best_hit.get("symbol")
 
     async def _fetch_sparkline_png(self, symbol: str) -> Optional[bytes]:
         """Best-effort intraday sparkline. Returns None on any failure.
