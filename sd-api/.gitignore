@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Secrets / local config — never commit
+.env
+*.env
+secrets*
+*secret*
+*.key
+*.pem
+.netrc
+
+# Model weights & large artifacts (re-downloaded on demand)
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+models/
+loras/
+outputs/
+*.png
+*.jpg
+*.jpeg
