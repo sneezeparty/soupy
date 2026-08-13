@@ -56,32 +56,59 @@ _NAME_ALIASES: Dict[str, str] = {
 }
 
 
+# Score returned for a hit that shares nothing with the query. Far enough below
+# the acceptance threshold that no structural bonus can drag it back over.
+_REJECT_SCORE = -100
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokens(text: str) -> List[str]:
+    return _WORD_RE.findall(text.lower())
+
+
 def _score_search_hit(query: str, hit: Dict) -> int:
     """Rank a Finnhub /search hit against the user's query. Higher is better.
 
     Taking the first /search result blindly returns garbage when Finnhub's
     index gives a coincidental substring match (e.g. "spacex" → "Metaspacex
-    Ltd"). We reward whole-word description matches, US plain tickers, and
-    common-stock type; foreign suffixed listings (`1796.HK`, `XYZ.L`) get
-    docked. A non-positive score means "don't use this hit."
+    Ltd"). Relevance is the fraction of query words that appear as whole words
+    in the hit's description, so a partial company name still scores ("tesla
+    motors" → "TESLA INC" matches one of two). An exact symbol match counts as
+    full relevance, since a ticker query shares no words with its own company
+    name ("MSFT" → "MICROSOFT CORP").
+
+    Relevance leads and the structural signals only break ties: US plain
+    tickers and common stock are preferred, foreign suffixed listings
+    (`1796.HK`, `XYZ.L`) are docked. Zero relevance is rejected outright — the
+    bonuses used to be enough on their own to carry an unrelated US listing
+    over the threshold, which is how a wrong company reached the quote card.
+
+    Callers must pre-filter to hits with a truthy ``symbol``.
     """
     symbol = (hit.get("symbol") or "").upper()
-    if not symbol:
-        return -100
-
-    q_lower = query.lower().strip()
     description = (hit.get("description") or "").lower()
     hit_type = hit.get("type") or ""
 
-    score = 0
-    if q_lower and re.search(rf"\b{re.escape(q_lower)}\b", description):
-        score += 5
+    q_norm = query.strip().lower()
+    q_tokens = _tokens(q_norm)
+    if not q_tokens:
+        return _REJECT_SCORE
 
-    if "." in symbol:
-        score -= 2
+    if symbol == q_norm.upper():
+        relevance = 1.0
     else:
-        score += 2
+        described = set(_tokens(description))
+        relevance = sum(1 for t in q_tokens if t in described) / len(q_tokens)
 
+    if relevance == 0.0:
+        return _REJECT_SCORE
+
+    score = int(round(relevance * 10))
+    if description.startswith(q_norm):
+        # "apple" should land on APPLE INC, not APPLE HOSPITALITY REIT.
+        score += 3
+    score += 2 if "." not in symbol else -2
     if hit_type == "Common Stock":
         score += 2
 
@@ -269,12 +296,26 @@ class StockCog(commands.Cog):
                 raise FinnhubError(resp.status, path, body)
             return await resp.json()
 
+    async def _quote_is_live(self, symbol: str) -> bool:
+        """True if ``/quote`` reports a non-zero current price for ``symbol``.
+
+        Finnhub answers 200 with ``c: 0`` for symbols it doesn't recognise, so
+        a zero price is the "no such ticker" signal rather than an error.
+        """
+        try:
+            quote = await self._finnhub_get("/quote", {"symbol": symbol})
+        except FinnhubError:
+            return False
+        return bool(quote.get("c"))
+
     async def _resolve_symbol(self, query: str) -> Optional[str]:
         """Return a Finnhub ticker for ``query``, or None if nothing matches.
 
         Order of attempts:
         1. Manual alias map (handles companies Finnhub's /search index hasn't
-           caught up to, like SPACEX → SPCX shortly after IPO).
+           caught up to, like SPACEX → SPCX shortly after IPO). Validated the
+           same way a user-typed ticker is, so a stale alias falls through to
+           the steps below instead of becoming a permanent dead end.
         2. If the query *looks* like a ticker and ``/quote`` returns a
            non-zero current price for it, accept it (the common AAPL case).
         3. ``/search`` with quality scoring — reject hits that score 0 or
@@ -284,16 +325,17 @@ class StockCog(commands.Cog):
         """
         candidate = query.strip().upper()
 
-        if candidate in _NAME_ALIASES:
-            return _NAME_ALIASES[candidate]
+        alias = _NAME_ALIASES.get(candidate)
+        if alias:
+            if await self._quote_is_live(alias):
+                return alias
+            logger.info(
+                f"Alias {candidate!r} → {alias!r} has no live quote (renamed or "
+                f"delisted?); falling back to /search"
+            )
 
-        if _TICKER_RE.match(candidate):
-            try:
-                quote = await self._finnhub_get("/quote", {"symbol": candidate})
-            except FinnhubError:
-                quote = {}
-            if quote.get("c"):  # 0/None means Finnhub didn't recognise the symbol
-                return candidate
+        if _TICKER_RE.match(candidate) and await self._quote_is_live(candidate):
+            return candidate
 
         try:
             search = await self._finnhub_get("/search", {"q": query})
@@ -305,12 +347,10 @@ class StockCog(commands.Cog):
         if not hits:
             return None
 
-        scored = sorted(
+        best_score, best_hit = max(
             ((_score_search_hit(query, h), h) for h in hits),
             key=lambda pair: pair[0],
-            reverse=True,
         )
-        best_score, best_hit = scored[0]
         if best_score <= 0:
             logger.info(
                 f"Finnhub /search returned {len(hits)} hit(s) for {query!r} but none "
