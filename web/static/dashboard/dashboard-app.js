@@ -2500,6 +2500,17 @@
 
         // ---------- Band 2 — Loops grid ----------
         var timers = dashStatus.timers || {};
+        // The musings loop fires at most once a day, so "what happened today"
+        // is more useful on the card than a count. Keys come from
+        // last_handled_status in soupy/cogs/musings.py.
+        var MUSING_STATUS_LABELS = {
+          posted: "Posted today",
+          no_thought_generated: "Ran today, produced nothing",
+          skipped_past_window: "Skipped — window had closed",
+          channel_unavailable: "Skipped — channel unreachable",
+          not_a_guild_channel: "Skipped — channel is not in a guild",
+          error: "Failed today — see logs"
+        };
         var bskyAct = activity.bluesky || {};
         var dailyPostsToday = (activity.daily_posts || {}).posts_today || 0;
         var bandLoops = e(
@@ -2582,7 +2593,7 @@
             nextRunIso: (timers.musings || {}).next_run,
             lastRunIso: (timers.musings || {}).last_run,
             intervalLabel: (timers.musings || {}).interval || null,
-            todayLine: null,
+            todayLine: MUSING_STATUS_LABELS[(timers.musings || {}).last_status] || null,
             runNowDisabled: true,
             runNowTitle: pendingTitle
           })
@@ -2754,7 +2765,7 @@
               },
               soupymuse: {
                 desc: "Soupy thinks out loud in a channel",
-                keys: ["MUSING_ENABLED", "MUSING_CHANNEL_ID", "MUSING_POLL_MINUTES_MIN", "MUSING_POLL_MINUTES_MAX", "MUSING_CHANCE"],
+                keys: ["MUSING_ENABLED", "MUSING_CHANNEL_ID", "MUSING_HOUR_MIN", "MUSING_HOUR_MAX"],
               },
               "8ball": {
                 desc: "Classic Magic 8-Ball responses",
@@ -2817,9 +2828,8 @@
               BEHAVIOUR_DAILY_POST: "(built-in daily post persona)",
               MUSING_ENABLED: "false",
               MUSING_CHANNEL_ID: "(channel ID)",
-              MUSING_POLL_MINUTES_MIN: "10",
-              MUSING_POLL_MINUTES_MAX: "20",
-              MUSING_CHANCE: "0.10",
+              MUSING_HOUR_MIN: "6",
+              MUSING_HOUR_MAX: "20",
               SELF_MD_ENABLED: "false",
               SELF_MD_REFLECT_INTERVAL_HOURS: "24",
               SELF_MD_MIN_INTERACTIONS: "3",

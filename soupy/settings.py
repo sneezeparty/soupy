@@ -520,27 +520,24 @@ class Settings:
 
     # ----- Musings -------------------------------------------------------
 
-    # Note: musing inline defaults below intentionally differ from the
-    # values in .env-stable.example. The example ships the *recommended*
-    # values; the inline defaults match what the bot's existing
-    # os.getenv("MUSING_*", "...") calls used so behaviour is preserved
-    # for installs that don't set these explicitly.
-
     @cached_property
     def musing_enabled(self) -> bool:
         return _env_bool("MUSING_ENABLED", default=False)
 
     @cached_property
-    def musing_chance(self) -> float:
-        return _env_float("MUSING_CHANCE", 0.10, minimum=0.0, maximum=1.0)
+    def musing_hour_min(self) -> int:
+        """Earliest local hour the daily musing may fire (inclusive)."""
+        return _env_int("MUSING_HOUR_MIN", 6, minimum=0, maximum=23)
 
     @cached_property
-    def musing_poll_minutes_min(self) -> int:
-        return _env_int("MUSING_POLL_MINUTES_MIN", 10, minimum=1)
+    def musing_hour_max(self) -> int:
+        """Latest local hour the daily musing may fire (exclusive).
 
-    @cached_property
-    def musing_poll_minutes_max(self) -> int:
-        return _env_int("MUSING_POLL_MINUTES_MAX", 20, minimum=1)
+        24 is allowed and means midnight — the cog builds the window with a
+        timedelta rather than ``.replace(hour=...)`` precisely so that the
+        natural "until midnight" value doesn't raise.
+        """
+        return _env_int("MUSING_HOUR_MAX", 20, minimum=1, maximum=24)
 
     @cached_property
     def musing_channel_id(self) -> Optional[int]:

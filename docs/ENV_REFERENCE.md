@@ -81,11 +81,10 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`TIMEZONE`** — `America/Los_Angeles` — Timezone for scheduled loops and timestamps.
 - **`BEHAVIOUR`** — *(long string)* — Main personality system prompt; see [CUSTOMIZATION.md](CUSTOMIZATION.md).
 - **`BEHAVIOUR_SEARCH`** — *(long string)* — Voice used for `/soupysearch` summaries.
-- **`MUSING_ENABLED`** — `true` — Enable the periodic "thinking out loud" musing loop.
+- **`MUSING_ENABLED`** — `true` — Enable the once-daily "thinking out loud" musing.
 - **`MUSING_CHANNEL_ID`** — *(empty)* — Channel ID where Soupy posts musings.
-- **`MUSING_POLL_MINUTES_MIN`** — `30` — Lower bound on the random polling interval, in minutes.
-- **`MUSING_POLL_MINUTES_MAX`** — `60` — Upper bound on the random polling interval, in minutes.
-- **`MUSING_CHANCE`** — `0.175` — Per-poll probability of actually firing a musing (0–1).
+- **`MUSING_HOUR_MIN`** — `6` — Earliest local hour the daily musing can fire (0–23, inclusive).
+- **`MUSING_HOUR_MAX`** — `20` — Latest local hour the daily musing can fire (1–24, exclusive; 24 means midnight).
 - **`9BALL`** — *(long string)* — Response style for `/9ball`.
 
 ## Stable Diffusion Configuration

@@ -44,7 +44,7 @@ import os
 import random
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import aiohttp
@@ -54,6 +54,13 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from soupy.scheduling import (
+    load_json_state,
+    parse_aware,
+    random_time_in_window,
+    save_json_state,
+    window_bounds,
+)
 from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
 from soupy_database.self_context import add_notable_interaction, is_self_md_enabled
@@ -64,11 +71,22 @@ MUSINGS_ARCHIVE_PATH = os.path.join("data", "musings_archive.jsonl")
 MAX_ARCHIVE_ENTRIES = 200
 
 # Daily-schedule state — one auto-musing per local day, at a random time in
-# [MUSING_HOUR_MIN, MUSING_HOUR_MAX) local. State persists across restarts so
-# a bounce during the day doesn't double-post or reroll the scheduled time.
+# [MUSING_HOUR_MIN, MUSING_HOUR_MAX) local (see settings). State persists across
+# restarts so a bounce during the day doesn't double-post or reroll the time.
 MUSING_DAILY_STATE_PATH = os.path.join("data", "musings_daily_state.json")
-MUSING_HOUR_MIN = 6   # inclusive — earliest local hour we'll fire
-MUSING_HOUR_MAX = 20  # exclusive — latest local hour we'll fire
+
+# Fallbacks used when the configured hour pair is inverted. Matches the
+# settings defaults; duplicated here so the normalization path has something
+# known-good to fall back to without re-reading env.
+DEFAULT_HOUR_MIN = 6
+DEFAULT_HOUR_MAX = 20
+
+# How far past the end of the window we'll still honour a musing that came due
+# inside it. Without this, a musing scheduled at 19:59 is silently dropped by
+# any tick that lands at 20:00:0x — the window check would fire first and mark
+# the day skipped. Anything later than the grace is a bot that booted after the
+# window closed, which genuinely should skip.
+LATE_FIRE_GRACE = timedelta(minutes=10)
 
 # How many recent musings to treat as "already covered". Used both to filter
 # archive candidates source-side and to warn the LLM off the same subject.
@@ -108,28 +126,6 @@ def _load_all_musings() -> List[Dict[str, str]]:
         return entries
     except Exception:
         return []
-
-
-def _load_daily_state() -> Dict[str, str]:
-    """Load the daily-schedule state file. Returns {} if missing or corrupt."""
-    try:
-        with open(MUSING_DAILY_STATE_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, ValueError, OSError):
-        return {}
-
-
-def _save_daily_state(state: Dict[str, str]) -> None:
-    """Atomically rewrite the daily-schedule state file."""
-    try:
-        os.makedirs(os.path.dirname(MUSING_DAILY_STATE_PATH), exist_ok=True)
-        tmp = MUSING_DAILY_STATE_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, MUSING_DAILY_STATE_PATH)
-    except Exception as exc:
-        logger.debug("💭 Failed to persist musings daily state: %s", exc)
 
 
 def _persist_all_musings(entries: List[Dict[str, str]]) -> None:
@@ -489,6 +485,10 @@ class MusingsCog(commands.Cog):
         self._musing_embeddings: Dict[str, List[float]] = {}
         self._http_session: Optional[aiohttp.ClientSession] = None
 
+        # Daily-schedule state, mirrored in memory. See _daily_state().
+        self._daily_state_cache: Optional[Dict[str, str]] = None
+        self._warned_bad_window = False
+
         self._loop.start()
         # Fire-and-forget warmup: backfill missing topics and seed the embedding
         # cache so the first musing post-deploy doesn't pay the latency.
@@ -511,15 +511,121 @@ class MusingsCog(commands.Cog):
     def _channel_id(self) -> Optional[int]:
         return settings.musing_channel_id
 
+    def _hour_window(self) -> Tuple[int, int]:
+        """Return the validated ``(start, end)`` local hours for the daily window.
+
+        ``end`` is exclusive and may be 24. An inverted pair falls back to the
+        defaults rather than propagating: this runs inside a 60-second loop, so
+        raising here would silently kill musings for every subsequent tick.
+        """
+        lo, hi = settings.musing_hour_min, settings.musing_hour_max
+        if hi <= lo:
+            # Warn once, not once per tick — this is read several times a minute.
+            if not self._warned_bad_window:
+                self._warned_bad_window = True
+                logger.warning(
+                    "💭 MUSING_HOUR_MAX (%d) must be greater than MUSING_HOUR_MIN (%d); "
+                    "using the %02d:00-%02d:00 default window instead",
+                    hi, lo, DEFAULT_HOUR_MIN, DEFAULT_HOUR_MAX,
+                )
+            return DEFAULT_HOUR_MIN, DEFAULT_HOUR_MAX
+        return lo, hi
+
+    def _now_local(self) -> datetime:
+        """Current time in the configured timezone. A seam for tests."""
+        return datetime.now(self.timezone)
+
+    def _window_bounds(self, local_date) -> Tuple[datetime, datetime]:
+        lo, hi = self._hour_window()
+        return window_bounds(self.timezone, local_date, lo, hi)
+
     def _pick_random_time_in_window(self, local_date) -> datetime:
-        """Random tz-aware datetime on ``local_date`` in [MUSING_HOUR_MIN, MUSING_HOUR_MAX)."""
-        minutes_span = (MUSING_HOUR_MAX - MUSING_HOUR_MIN) * 60
-        offset_min = random.randint(0, minutes_span - 1)
-        naive = datetime.combine(local_date, datetime.min.time()).replace(
-            hour=MUSING_HOUR_MIN + offset_min // 60,
-            minute=offset_min % 60,
-        )
-        return self.timezone.localize(naive)
+        """Random tz-aware datetime inside today's musing window."""
+        lo, hi = self._hour_window()
+        return random_time_in_window(self.timezone, local_date, lo, hi)
+
+    # ------------------------------------------------------------------
+    # Daily-schedule state
+    # ------------------------------------------------------------------
+
+    def _daily_state(self) -> Dict[str, str]:
+        """Return the daily-schedule state, hitting disk only on the first call.
+
+        The in-memory copy is authoritative once loaded. That matters for more
+        than the 1439 redundant reads it saves per day: if a write fails
+        (read-only ``data/``, full disk), the cache still records that today is
+        handled, so a persistent write failure degrades to "state is lost on
+        restart" instead of "post a musing every 60 seconds, forever."
+        """
+        if self._daily_state_cache is None:
+            self._daily_state_cache = load_json_state(MUSING_DAILY_STATE_PATH)
+        return self._daily_state_cache
+
+    def _save_daily_state(self, state: Dict[str, str]) -> None:
+        """Persist the daily state. Failures are logged, never raised."""
+        self._daily_state_cache = state
+        save_json_state(MUSING_DAILY_STATE_PATH, state)
+
+    def _scheduled_time_for(self, state: Dict[str, str], local_date) -> datetime:
+        """Today's scheduled musing time, rolling and persisting one if needed."""
+        today_str = local_date.isoformat()
+        if state.get("scheduled_date") == today_str:
+            existing = parse_aware(state.get("scheduled_at"), self.timezone)
+            if existing is not None:
+                return existing
+
+        scheduled = self._pick_random_time_in_window(local_date)
+        state["scheduled_date"] = today_str
+        state["scheduled_at"] = scheduled.isoformat()
+        self._save_daily_state(state)
+        logger.info("💭 Scheduled today's musing for %s", scheduled.strftime("%Y-%m-%d %H:%M %Z"))
+        self._update_dashboard()
+        return scheduled
+
+    def _mark_handled(self, state: Dict[str, str], today_str: str, status: str) -> None:
+        """Record that today is spoken for, whatever the outcome."""
+        state["last_handled_date"] = today_str
+        state["last_handled_status"] = status
+        state["last_handled_at"] = datetime.now(pytz.UTC).isoformat()
+        self._save_daily_state(state)
+        self._update_dashboard()
+
+    def _update_dashboard(self) -> None:
+        """Publish loop state into ``bot._timer_state`` for the web dashboard.
+
+        Derived wholly from the daily state dict so it stays correct across a
+        restart, rather than only reflecting transitions this process saw. The
+        panel has rendered a Musings card since the loop existed; it was blank
+        because nothing ever wrote this slot. Best-effort by design — a
+        dashboard write must never break the loop.
+        """
+        try:
+            timer_state = getattr(self.bot, "_timer_state", None)
+            if not isinstance(timer_state, dict) or "musings" not in timer_state:
+                return
+
+            state = self._daily_state()
+            slot = timer_state["musings"]
+            lo, hi = self._hour_window()
+            slot["enabled"] = self._is_enabled()
+            slot["interval"] = f"1x/day, {lo:02d}:00-{hi:02d}:00 local"
+
+            today_str = self._now_local().date().isoformat()
+            scheduled = (
+                parse_aware(state.get("scheduled_at"), self.timezone)
+                if state.get("scheduled_date") == today_str
+                else None
+            )
+            done_today = state.get("last_handled_date") == today_str
+            slot["next_run"] = (
+                None if (done_today or scheduled is None) else scheduled.astimezone(pytz.UTC).isoformat()
+            )
+
+            last = parse_aware(state.get("last_handled_at"), self.timezone)
+            slot["last_run"] = last.astimezone(pytz.UTC).isoformat() if last else None
+            slot["last_status"] = state.get("last_handled_status")
+        except Exception as exc:
+            logger.debug("💭 Failed to publish musings timer state: %s", exc)
 
     # ------------------------------------------------------------------
     # Warmup (lazy backfill of topics + embeddings)
@@ -708,10 +814,18 @@ class MusingsCog(commands.Cog):
         """Fire one auto-musing per local day at a random time in the window.
 
         Schedule state is persisted so a restart mid-day doesn't reroll the
-        time or double-post. If the bot boots after ``MUSING_HOUR_MAX`` on a
-        day with no post yet, we skip that day (rather than posting outside
-        the window). ``/soupymuse`` is not gated by this — it stays a manual
+        time or double-post. If the bot boots well after the window closed on a
+        day with no post yet, we skip that day rather than posting at a strange
+        hour. ``/soupymuse`` is not gated by any of this — it stays a manual
         override.
+
+        Once the day is due, it is marked handled in a ``finally`` no matter
+        what happens next, including an exception. That is deliberate, and it
+        does mean a transient failure at the scheduled minute costs the day's
+        musing: the alternative is that an LLM outage leaves this 60-second
+        loop retrying generation until the window closes — hundreds of failed
+        calls for a feature nobody is waiting on. ``last_handled_status``
+        records which of the two happened.
         """
         try:
             if not self._is_enabled():
@@ -720,73 +834,66 @@ class MusingsCog(commands.Cog):
             if not ch_id:
                 return
 
-            state = _load_daily_state()
-            now_local = datetime.now(self.timezone)
-            today_str = now_local.date().isoformat()
+            now_local = self._now_local()
+            today = now_local.date()
+            today_str = today.isoformat()
+            state = self._daily_state()
+            self._update_dashboard()
 
             if state.get("last_handled_date") == today_str:
                 return  # Already posted or skipped for today.
 
-            window_end = self.timezone.localize(
-                datetime.combine(now_local.date(), datetime.min.time())
-                .replace(hour=MUSING_HOUR_MAX)
-            )
-            if now_local >= window_end:
-                # Past today's window with nothing posted — record and wait for tomorrow.
-                state["last_handled_date"] = today_str
-                state["last_handled_status"] = "skipped_past_window"
-                _save_daily_state(state)
+            _, window_end = self._window_bounds(today)
+            if now_local >= window_end + LATE_FIRE_GRACE:
+                # Booted after the window closed with nothing posted. Note this
+                # is checked against the *window*, not the scheduled time, and
+                # the grace period is what keeps a 19:59 musing from being
+                # dropped by a tick that lands a few seconds after 20:00.
+                self._mark_handled(state, today_str, "skipped_past_window")
                 logger.info(
-                    "💭 Past daily musing window (>%02d:00 %s); skipping today",
-                    MUSING_HOUR_MAX,
+                    "💭 Past today's musing window (closed %s %s); skipping today",
+                    window_end.strftime("%H:%M"),
                     self.timezone.zone,
                 )
                 return
 
-            # Schedule if we don't have one for today.
-            scheduled_local: Optional[datetime] = None
-            if state.get("scheduled_date") == today_str and state.get("scheduled_at"):
-                try:
-                    scheduled_local = datetime.fromisoformat(state["scheduled_at"])
-                except ValueError:
-                    scheduled_local = None
-
-            if scheduled_local is None:
-                scheduled_local = self._pick_random_time_in_window(now_local.date())
-                state["scheduled_date"] = today_str
-                state["scheduled_at"] = scheduled_local.isoformat()
-                _save_daily_state(state)
-                logger.info(
-                    "💭 Scheduled today's musing for %s",
-                    scheduled_local.strftime("%Y-%m-%d %H:%M %Z"),
-                )
-
+            scheduled_local = self._scheduled_time_for(state, today)
             if now_local < scheduled_local:
                 return  # Not time yet.
 
-            channel = self.bot.get_channel(ch_id)
-            if channel is None:
-                try:
-                    channel = await self.bot.fetch_channel(ch_id)
-                except Exception:
-                    logger.warning("💭 Could not fetch musing channel %s", ch_id)
+            # The day is now spoken for. Everything below runs under a finally
+            # that records the outcome, so no failure path can loop back here.
+            status = "error"
+            try:
+                channel = self.bot.get_channel(ch_id)
+                if channel is None:
+                    try:
+                        channel = await self.bot.fetch_channel(ch_id)
+                    except Exception:
+                        logger.warning("💭 Could not fetch musing channel %s", ch_id)
+                        status = "channel_unavailable"
+                        return
+
+                guild = getattr(channel, "guild", None)
+                if guild is None:
+                    logger.warning(
+                        "💭 Musing channel %s is not in a guild; musings need a "
+                        "guild archive to draw from",
+                        ch_id,
+                    )
+                    status = "not_a_guild_channel"
                     return
 
-            guild_id = channel.guild.id
-            mode = _pick_mode()
-            logger.info(
-                "💭 ━━━ Daily musing firing at %s (mode=%s) ━━━",
-                now_local.strftime("%H:%M %Z"),
-                mode,
-            )
-            thought = await self._run_and_post(channel, guild_id, mode, trigger_label="daily")
-
-            # Mark today handled either way — if generation failed, we don't
-            # want to retry every 60s and hammer the LLM. Tomorrow gets a fresh shot.
-            state["last_handled_date"] = today_str
-            state["last_handled_status"] = "posted" if thought else "no_thought_generated"
-            state["last_handled_at"] = datetime.now(pytz.UTC).isoformat()
-            _save_daily_state(state)
+                mode = _pick_mode()
+                logger.info(
+                    "💭 ━━━ Daily musing firing at %s (mode=%s) ━━━",
+                    now_local.strftime("%H:%M %Z"),
+                    mode,
+                )
+                thought = await self._run_and_post(channel, guild.id, mode, trigger_label="daily")
+                status = "posted" if thought else "no_thought_generated"
+            finally:
+                self._mark_handled(state, today_str, status)
 
         except Exception as e:
             logger.error("💭 Musing error: %s", e, exc_info=True)

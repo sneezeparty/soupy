@@ -161,10 +161,10 @@ def test_int_above_maximum_falls_back(monkeypatch, fresh_settings, caplog):
 
 def test_float_probability_clamped_to_default(monkeypatch, fresh_settings, caplog):
     # A probability > 1 is nonsense; fall back rather than fire every time.
-    monkeypatch.setenv("MUSING_CHANCE", "5")
+    monkeypatch.setenv("RANDOM_RESPONSE_RATE", "5")
     with caplog.at_level("WARNING", logger="soupy.settings"):
-        v = fresh_settings.musing_chance
-    assert v == pytest.approx(0.10)
+        v = fresh_settings.random_response_rate
+    assert v == pytest.approx(0.05)
     assert any("above maximum" in r.message for r in caplog.records)
 
 

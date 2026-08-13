@@ -87,6 +87,7 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | [soupy/settings.py](soupy/settings.py) | Typed, cached config accessors over `.env-stable` |
 | [soupy/prompts.py](soupy/prompts.py) | Prompt loader (env → custom file → default → fallback) |
 | [soupy/triggers.py](soupy/triggers.py) | Pure respond/don't-respond predicates |
+| [soupy/scheduling.py](soupy/scheduling.py) | Shared local-time windows + atomic JSON state files for the autonomous loops |
 | [run_all.py](run_all.py) | Launcher: starts uvicorn with `SOUPY_AUTOSTART_BOT=1` |
 | [web/app.py](web/app.py) | FastAPI app — routes, WebSocket, archive/stats endpoints |
 | [web/services/bot_runner.py](web/services/bot_runner.py) | Spawns and manages the bot subprocess via PTY |
@@ -119,7 +120,7 @@ Critical variables — the bot will not start without `DISCORD_TOKEN`:
 | `RAG_ENABLED` | Enable retrieval-augmented generation |
 | `ENABLE_VISION` | Enable image understanding via LM Studio's vision-capable LLM (set `VISION_MODEL`) |
 | `DAILY_POST_ENABLED` / `DAILY_POST_CHANNELS` | Autonomous Discord article posts |
-| `MUSING_ENABLED` / `MUSING_CHANNEL_ID` / `MUSING_CHANCE` | Autonomous musings |
+| `MUSING_ENABLED` / `MUSING_CHANNEL_ID` / `MUSING_HOUR_MIN` / `MUSING_HOUR_MAX` | Autonomous musings — one per day, at a random time in the local-hour window |
 | `BLUESKY_HANDLE` / `BLUESKY_APP_PASSWORD` / `BLUESKY_AUTO_REPLY` | Bluesky integration |
 | `SELF_MD_ENABLED` / `SELF_MD_REFLECT_HOUR` | Self-knowledge reflection (runs once a day at the given local hour, default 3 AM) |
 | `SOUPY_WEB_HOST` / `SOUPY_WEB_PORT` | Web panel binding (default: `0.0.0.0:4941`) |
@@ -206,6 +207,7 @@ Under `data/`:
 - `data/bot_dashboard.json` — bot-written status the web panel reads
 - `data/self_md/guild_<id>.md` + `_core.md` + `_archive.md` — per-guild self-knowledge documents
 - `data/musings_archive.jsonl` — musings history
+- `data/musings_daily_state.json` — today's rolled musing time + whether the day has been handled
 - `data/daily_post_history.json` / `daily_post_schedule.json` — daily-post state
 - `data/bluesky_engage_history.json` / `bluesky_schedule.json` — Bluesky engagement state
 

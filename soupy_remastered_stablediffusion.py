@@ -944,6 +944,13 @@ timer_state = {
     "archive_scan": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "rag_reindex": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "self_reflect": {"last_run": None, "next_run": None, "interval": None, "enabled": False},
+    "musings": {
+        "last_run": None,
+        "next_run": None,
+        "interval": None,
+        "enabled": False,
+        "last_status": None,
+    },
     "daily_post": {
         "last_run": None,
         "next_run": None,
