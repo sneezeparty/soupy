@@ -55,6 +55,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from soupy import prompts as soupy_prompts
+from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
 from soupy_database.user_profiles import _load_structured_profiles, ensure_user_profile_schema
@@ -643,7 +644,6 @@ class DailyPostCog(commands.Cog):
     def _save_schedule(self) -> None:
         """Persist the current schedule to disk so it survives restarts."""
         try:
-            os.makedirs(os.path.dirname(SCHEDULE_PATH), exist_ok=True)
             payload = {
                 "date": self._last_schedule_date,
                 "events": [
@@ -655,16 +655,17 @@ class DailyPostCog(commands.Cog):
                     for e in self.schedule
                 ],
             }
-            Path(SCHEDULE_PATH).write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception as e:
-            logger.debug("📰 Failed to save schedule: %s", e)
+            logger.debug("📰 Failed to build schedule payload: %s", e)
+            return
+        save_json_state(SCHEDULE_PATH, payload)
 
     def _load_schedule(self) -> bool:
         """Load schedule from disk. Returns True if a valid schedule for today was loaded."""
-        if not os.path.exists(SCHEDULE_PATH):
+        data = load_json_state(SCHEDULE_PATH)
+        if not data:
             return False
         try:
-            data = json.loads(Path(SCHEDULE_PATH).read_text(encoding="utf-8"))
             saved_date = data.get("date")
             if not saved_date:
                 return False
@@ -730,8 +731,7 @@ class DailyPostCog(commands.Cog):
         start_hour = self._active_start()
         end_hour = self._active_end()
 
-        window_start = self.timezone.localize(datetime.combine(today, datetime.min.time()).replace(hour=start_hour))
-        window_end = self.timezone.localize(datetime.combine(today, datetime.min.time()).replace(hour=end_hour))
+        window_start, window_end = window_bounds(self.timezone, today, start_hour, end_hour)
 
         if window_end <= window_start:
             self.schedule = []

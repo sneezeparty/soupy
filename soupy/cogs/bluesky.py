@@ -54,6 +54,7 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
 
 logger = logging.getLogger(__name__)
@@ -2519,22 +2520,18 @@ class BlueskyEngageCog(commands.Cog):
 
     def _save_schedule(self) -> None:
         """Persist the current schedule to disk so it survives restarts."""
-        try:
-            os.makedirs(os.path.dirname(SCHEDULE_PATH), exist_ok=True)
-            payload = {
-                "date": self._schedule_date,
-                "events": [{"time": t.isoformat(), "action": a} for t, a in self._schedule],
-            }
-            Path(SCHEDULE_PATH).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        except Exception as e:
-            logger.debug("🦋 Failed to save schedule: %s", e)
+        payload = {
+            "date": self._schedule_date,
+            "events": [{"time": t.isoformat(), "action": a} for t, a in self._schedule],
+        }
+        save_json_state(SCHEDULE_PATH, payload)
 
     def _load_schedule(self) -> bool:
         """Load schedule from disk. Returns True if a valid schedule for today was loaded."""
-        if not os.path.exists(SCHEDULE_PATH):
+        data = load_json_state(SCHEDULE_PATH)
+        if not data:
             return False
         try:
-            data = json.loads(Path(SCHEDULE_PATH).read_text(encoding="utf-8"))
             saved_date = data.get("date")
             if not saved_date:
                 return False
@@ -2586,8 +2583,7 @@ class BlueskyEngageCog(commands.Cog):
         now_pacific = datetime.now(pacific)
         today = now_pacific.date()
 
-        window_start = pacific.localize(datetime.combine(today, datetime.min.time().replace(hour=6)))
-        window_end = pacific.localize(datetime.combine(today, datetime.min.time().replace(hour=23)))
+        window_start, window_end = window_bounds(pacific, today, 6, 23)
 
         window_seconds = int((window_end - window_start).total_seconds())
 
