@@ -217,7 +217,7 @@ Under `data/`:
 
 - **Cog architecture** — five extensions loaded at `on_ready` (see Architecture). Editing a cog requires only a bot restart, not a web-panel restart.
 - **Async/await throughout** — all I/O is non-blocking
-- **Queue-based image generation** — `SDQueue` prevents backend overload
+- **Two single-consumer work queues** — `SDQueue` serializes image generation so the SD/flux backend isn't overloaded; `ChatQueue` serializes chat replies. Keep them separate: they were one queue once, and since each consumer awaits a job to completion, a single `/flux` blocked every reply bot-wide with no typing indicator anywhere. Both derive from `_WorkQueue`.
 - **Per-user rate limiting** — 10 searches/minute
 - **URL content caching** — 1-hour TTL to avoid repeated fetches
 - **Embedding semaphore** — prevents LM Studio request stampedes

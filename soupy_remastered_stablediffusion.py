@@ -412,6 +412,7 @@ class SoupyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.sd_queue = SDQueue()
+        self.chat_queue = ChatQueue()
 
     # Add the async_chat_completion method to the bot class
     async def async_chat_completion(self, *args, **kwargs):
@@ -419,8 +420,15 @@ class SoupyBot(commands.Bot):
         return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
 
-# First, let's add a proper Queue class to manage the image generation queue
-class SDQueue:
+# Two single-consumer work queues, deliberately separate — see ChatQueue.
+class _WorkQueue:
+    """Bookkeeping shared by the image and chat queues.
+
+    Subclasses supply `process_queue`, the consumer loop. Everything here is
+    just the plumbing: a size counter that tracks pending work, and a shutdown
+    that drains whatever is still queued.
+    """
+
     def __init__(self):
         self._queue = asyncio.Queue()
         self._shutdown = False
@@ -447,6 +455,10 @@ class SDQueue:
                 self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
+
+
+class SDQueue(_WorkQueue):
+    """Serialises image generation so the SD/flux backend runs one job at a time."""
 
     async def process_queue(self):
         """Process items in the queue."""
@@ -596,11 +608,33 @@ class SDQueue:
                             item.get("steps"),
                             item.get("guidance"),
                         )
-                elif item["type"] == "chat":
-                    await process_chat_message(item["message"], item["image_descriptions"])
-
             except Exception as e:
                 logger.error(f"Error processing queue item: {e}")
+
+
+class ChatQueue(_WorkQueue):
+    """Serialises chat replies, separately from image generation.
+
+    Chat used to ride on `SDQueue`. That queue has a single consumer which
+    awaits each job to completion, so one /flux generation silenced Soupy
+    everywhere until it finished: the reply sat behind the image, and since
+    `process_chat_message` is what opens the typing indicator, the channel
+    showed nothing at all in the meantime.
+
+    The coupling bought nothing. Chat talks to LM Studio, image generation
+    talks to the SD/flux server, and in the usual deployment those are
+    different machines. This queue is still single-consumer, though — one
+    reply at a time keeps replies ordered and stops N concurrent best-of-
+    CHAT_NUM_CANDIDATES fan-outs from stampeding LM Studio.
+    """
+
+    async def process_queue(self):
+        while not self._shutdown:
+            try:
+                item = await self.get()
+                await process_chat_message(item["message"], item["image_descriptions"])
+            except Exception as e:
+                logger.error(f"Error processing chat queue item: {e}")
 
 
 # Then your bot initialization can use the SoupyBot class
@@ -794,6 +828,8 @@ async def shutdown():
         # Initiate queue shutdown if it exists
         if hasattr(bot, "sd_queue"):
             await bot.sd_queue.initiate_shutdown()
+        if hasattr(bot, "chat_queue"):
+            await bot.chat_queue.initiate_shutdown()
 
         # Close Discord connection
         logger.info("🔒 Closing the Discord bot connection...")
@@ -3230,6 +3266,7 @@ async def on_ready():
 
     # Start background tasks immediately so messages are processed during command sync
     bot.loop.create_task(bot.sd_queue.process_queue())
+    bot.loop.create_task(bot.chat_queue.process_queue())
     bot.loop.create_task(scan_trigger_loop(bot))
     bot.loop.create_task(archive_auto_scan_loop(bot))
     bot.loop.create_task(rag_reindex_loop(bot))
@@ -3585,7 +3622,7 @@ def split_message(msg: str, max_len=1500):
 #
 # `on_message` is the Discord event entry. It decides whether to respond
 # (via `should_bot_respond_to_message`), processes image attachments through
-# the vision model, queues the message onto `bot.sd_queue`, and
+# the vision model, queues the message onto `bot.chat_queue`, and
 # `process_chat_message` runs the full chat→LLM→reply flow with RAG, history,
 # self-knowledge, user profiles, and best-of-N candidate selection.
 # ---------------------------------------------------------------------------
@@ -4212,7 +4249,9 @@ async def on_message(message):
 
         # Queue the chat message for processing
         # Note: image_descriptions are captured synchronously above and passed to the queue
-        await bot.sd_queue.put(
+        # WHY chat_queue and not sd_queue: they were the same queue once, which
+        # meant a running /flux blocked every reply bot-wide until it finished.
+        await bot.chat_queue.put(
             {
                 "type": "chat",
                 "message": message,
@@ -4220,7 +4259,7 @@ async def on_message(message):
             }
         )
         logger.info(
-            f"📝 Queued chat message for {message.author}: description='{message.content}', queue_size={bot.sd_queue.qsize()}"
+            f"📝 Queued chat message for {message.author}: description='{message.content}', queue_size={bot.chat_queue.qsize()}"
         )
 
     # Process commands again if needed

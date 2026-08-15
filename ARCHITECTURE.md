@@ -144,7 +144,7 @@ on_message
   ├─ process_image_attachment  → vision LLM        (if ENABLE_VISION)
   ├─ _index_message_realtime   → fire-and-forget RAG embed (plain-text msgs only)
   ├─ should_bot_respond_to_message  (mention | keyword | CHANNEL_IDS | random)
-  └─ enqueue {"type": "chat"} onto bot.sd_queue
+  └─ enqueue {"type": "chat"} onto bot.chat_queue
                               │
                               ▼
 process_chat_message  (runs one-at-a-time off the queue)
@@ -191,11 +191,19 @@ replies to other bots (this was a real bug — see CHANGELOG).
 
 ## 4. Image generation
 
-`/sd` (and `/img2img`, `/inpaint`, `/outpaint`) enqueue work onto a single
+`/sd` (and `/flux`, `/img2img`, `/inpaint`, `/outpaint`) enqueue work onto a single
 `SDQueue`. The queue processor runs **one job at a time** — image generation can
 take minutes on a Mac SD backend, and the queue exists precisely to prevent
-overloading it. Routing is by `item["type"]` (`sd` / `button` / `outpaint` / `chat`)
+overloading it. Routing is by `item["type"]` (`sd` / `flux` / `button` / `outpaint`)
 and, for buttons, by `item["action"]`.
+
+Chat replies ride a **separate** `ChatQueue` (§3). Both derive from `_WorkQueue`
+and both are single-consumer, but they must stay distinct: they were one queue
+once, and because the consumer awaits each job to completion, a single `/flux`
+generation blocked every reply bot-wide until it finished — with no typing
+indicator anywhere, since `process_chat_message` is what starts it. Chat hits LM
+Studio and image generation hits the SD/flux server, so there is nothing to
+serialize between them.
 
 `generate_sd_image()` POSTs to `SD_SERVER_URL` (with pooled aiohttp connections and
 a 600 s timeout), validates the returned image's magic bytes, archives it to
@@ -214,7 +222,8 @@ set (without a strong reference, asyncio garbage-collects a running task mid-awa
 
 | Loop | Cadence | Purpose |
 |------|---------|---------|
-| `SDQueue.process_queue` | continuous | Serialized image/chat job processing |
+| `SDQueue.process_queue` | continuous | Serialized image job processing |
+| `ChatQueue.process_queue` | continuous | Serialized chat replies — independent of image work |
 | `scan_trigger_loop` | ~5 s | Watches `soupy_database/databases/scan_triggers/` for web-requested scans |
 | `archive_auto_scan_loop` | ~45 s poll | Incremental message archival per guild on its configured interval |
 | `rag_reindex_loop` | `RAG_REINDEX_INTERVAL_HOURS` (6) | Consolidate + re-embed RAG chunks |
