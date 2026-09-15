@@ -1,32 +1,33 @@
 """
-Background profile batch jobs: logging, pause/resume state in SQLite,
-worker loop.
+Profile batch job state: the job row, its log, and the schema for both.
 
-User profile refresh is potentially long-running (hundreds of members ×
-LLM call per member). This module owns the supervisor side so the web UI
-can start/pause/resume/cancel a job and stream its log.
+Building member profiles is long-running (many members × several LLM passes
+each). This module owns the bookkeeping so the web UI can queue, pause, resume
+and cancel a job and stream its log, while the bot process does the work.
 
 State lives in two SQLite tables (per guild):
 
-* ``profile_jobs`` — one row per job: state (running/paused/done/cancelled),
-  progress counters, started_at.
+* ``profile_batch_jobs`` — one row per guild: status (running / paused /
+  completed / cancelled), the member list, progress counters, ``kind``
+  (manual or nightly), an optional ``deadline_at``, and ``heartbeat_at``,
+  which the bot's worker touches every pass.
 * ``profile_job_log_lines`` — append-only log lines, capped at
   ``PROFILE_JOB_LOG_MAX_LINES`` so a long job doesn't grow without bound.
 
 Cross-module:
 
-* :func:`spawn_profile_worker` is called from the web UI's
-  ``POST /api/profiles/batch/start/{guild_id}`` endpoint.
-* The worker calls into :mod:`soupy_database.user_profiles` to do the
-  actual LLM-driven profile generation.
+* The web UI's ``/api/profiles/batch/*`` endpoints write the job row through
+  :mod:`soupy_database.user_profiles`.
+* The bot's ``profile_jobs_loop`` (in :mod:`soupy_database.user_profiles`)
+  polls the row and runs the job. Pause and cancel are just status flips that
+  the worker checks before each pass.
 
 Gotchas:
 
-* ``_PROFILE_TASKS`` is module-level and tracks the asyncio.Task for
-  each guild's worker. Pause/resume flips a SQLite flag that the worker
-  loop polls; cancel actually cancels the task. Both states have to be
-  reconciled on bot restart (the worker loop reads its initial state
-  from SQLite on start).
+* The worker runs in the bot, not the web process, so every profile LLM call
+  goes through the bot's ``llm_gate`` and never overlaps a chat reply. A
+  queued job does nothing while the bot is stopped; ``heartbeat_at`` going
+  stale is how the dashboard tells.
 * Log lines are mirrored to the Python logger *and* the SQLite table —
   the SQLite copy is what the web UI streams; the logger copy is for
   ``logs/soupy.log``.
@@ -34,19 +35,15 @@ Gotchas:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, List, Optional
 
 from .database import get_db_path
 
 logger = logging.getLogger(__name__)
-
-_PROFILE_TASKS: Dict[int, asyncio.Task] = {}
-
 
 def _profile_log_max_stored() -> int:
     try:
@@ -156,6 +153,13 @@ def ensure_profile_job_schema(conn: sqlite3.Connection) -> None:
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_profile_job_log_guild_id ON profile_job_log_lines(guild_id, id)"
     )
+    # WHY: same on-connect ALTER pattern as user_profile_summaries — columns
+    # added when the worker moved into the bot and gained the nightly run.
+    cur.execute("PRAGMA table_info(profile_batch_jobs)")
+    cols = {row[1] for row in cur.fetchall()}
+    for name, decl in (("kind", "TEXT NOT NULL DEFAULT 'manual'"), ("deadline_at", "TEXT"), ("heartbeat_at", "TEXT")):
+        if name not in cols:
+            cur.execute(f"ALTER TABLE profile_batch_jobs ADD COLUMN {name} {decl}")
     conn.commit()
 
 
@@ -174,14 +178,21 @@ def upsert_job(
     next_index: Optional[int] = None,
     total: Optional[int] = None,
     stats_json: Optional[str] = None,
+    kind: Optional[str] = None,
+    deadline_at: Optional[str] = None,
+    heartbeat_at: Optional[str] = None,
 ) -> None:
+    """Insert or update the guild's job row. ``None`` leaves a field alone; ``deadline_at=""`` clears it."""
     cur = conn.cursor()
     row = get_job_row(conn, guild_id)
     if row is None:
         cur.execute(
             """
-            INSERT INTO profile_batch_jobs (guild_id, status, user_ids_json, next_index, total, stats_json, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO profile_batch_jobs (
+                guild_id, status, user_ids_json, next_index, total, stats_json, kind, deadline_at, heartbeat_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
             (
                 guild_id,
@@ -190,6 +201,9 @@ def upsert_job(
                 next_index if next_index is not None else 0,
                 total if total is not None else 0,
                 stats_json,
+                kind or "manual",
+                deadline_at or None,
+                heartbeat_at,
             ),
         )
     else:
@@ -210,6 +224,15 @@ def upsert_job(
         if stats_json is not None:
             parts.append("stats_json = ?")
             params.append(stats_json)
+        if kind is not None:
+            parts.append("kind = ?")
+            params.append(kind)
+        if deadline_at is not None:
+            parts.append("deadline_at = ?")
+            params.append(deadline_at or None)
+        if heartbeat_at is not None:
+            parts.append("heartbeat_at = ?")
+            params.append(heartbeat_at)
         if not parts:
             return
         parts.append("updated_at = CURRENT_TIMESTAMP")
@@ -225,34 +248,3 @@ def delete_job(conn: sqlite3.Connection, guild_id: int) -> None:
     cur = conn.cursor()
     cur.execute("DELETE FROM profile_batch_jobs WHERE guild_id = ?", (guild_id,))
     conn.commit()
-
-
-async def cancel_profile_task(guild_id: int) -> None:
-    t = _PROFILE_TASKS.pop(guild_id, None)
-    if t is not None and not t.done():
-        t.cancel()
-        try:
-            await t
-        except asyncio.CancelledError:
-            pass
-
-
-def spawn_profile_worker(
-    guild_id: int,
-    worker_coro_factory: Callable[[int], Any],
-) -> None:
-    """Start worker if not already running for this guild."""
-    existing = _PROFILE_TASKS.get(guild_id)
-    if existing is not None and not existing.done():
-        return
-    task = asyncio.create_task(worker_coro_factory(guild_id))
-    _PROFILE_TASKS[guild_id] = task
-
-
-def forget_profile_task(guild_id: int) -> None:
-    _PROFILE_TASKS.pop(guild_id, None)
-
-
-def profile_task_running(guild_id: int) -> bool:
-    t = _PROFILE_TASKS.get(guild_id)
-    return t is not None and not t.done()

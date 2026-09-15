@@ -91,6 +91,7 @@ SOFTWARE.
 #   Standard library imports
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -125,6 +126,8 @@ from PIL import Image
 from timezonefinder import TimezoneFinder
 
 from soupy import prompts as soupy_prompts
+from soupy.llm_gate import gate_busy as llm_gate_busy
+from soupy.llm_gate import llm_turn, note_chat_activity
 from soupy.settings import openai_client
 from soupy_database import process_scan_triggers, setup_scan_command
 from soupy_database.helpers import extract_url_content, extract_urls
@@ -145,6 +148,7 @@ from soupy_database.self_context import (
 from soupy_database.self_context import (
     reflect_and_update as self_md_reflect,
 )
+from soupy_database.user_profiles import profile_jobs_loop
 
 # Initialize colorama
 colorama.init(autoreset=True)
@@ -626,13 +630,23 @@ class ChatQueue(_WorkQueue):
     different machines. This queue is still single-consumer, though — one
     reply at a time keeps replies ordered and stops N concurrent best-of-
     CHAT_NUM_CANDIDATES fan-outs from stampeding LM Studio.
+
+    Each reply holds `llm_turn` from start to finish, so a profile-build pass
+    (which sizes itself close to LM Studio's whole context window) can never
+    run alongside it. If a pass is mid-flight the reply waits for it, with the
+    typing indicator already showing.
     """
 
     async def process_queue(self):
         while not self._shutdown:
             try:
                 item = await self.get()
-                await process_chat_message(item["message"], item["image_descriptions"])
+                note_chat_activity()
+                message = item["message"]
+                typing = message.channel.typing() if llm_gate_busy() else contextlib.nullcontext()
+                async with typing, llm_turn():
+                    await process_chat_message(message, item["image_descriptions"])
+                note_chat_activity()
             except Exception as e:
                 logger.error(f"Error processing chat queue item: {e}")
 
@@ -980,6 +994,7 @@ timer_state = {
     "archive_scan": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "rag_reindex": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "self_reflect": {"last_run": None, "next_run": None, "interval": None, "enabled": False},
+    "profile_nightly": {"last_run": None, "next_run": None, "interval": None, "enabled": False},
     "musings": {
         "last_run": None,
         "next_run": None,
@@ -2099,7 +2114,7 @@ async def soupyself_command(
         try:
             from soupy_database.rag import embed_texts_lm_studio
 
-            async with aiohttp.ClientSession() as embed_session:
+            async with llm_turn(), aiohttp.ClientSession() as embed_session:
                 result = await self_md_reflect(
                     guild_id=guild_id,
                     llm_func=async_chat_completion,
@@ -3273,6 +3288,13 @@ async def on_ready():
     bot.loop.create_task(_dashboard_status_writer(bot))
     if is_self_md_enabled():
         bot.loop.create_task(_self_md_reflection_loop(bot))
+    bot.loop.create_task(
+        profile_jobs_loop(
+            lambda: [g.id for g in bot.guilds],
+            get_excluded_user_ids=lambda: [bot.user.id] if bot.user else [],
+            timer=timer_state["profile_nightly"],
+        )
+    )
 
     # Sync slash commands GLOBALLY ONLY.
     #
@@ -3347,6 +3369,8 @@ async def on_guild_join(guild: discord.Guild):
 # `archive_auto_scan_loop` periodically backfills new messages into SQLite.
 # `rag_reindex_loop` re-embeds messages whose embedding model changed.
 # `_self_md_reflection_loop` runs the self-knowledge reflection cycle.
+# `profile_jobs_loop` (soupy_database.user_profiles) runs dashboard profile
+# batches and queues the nightly profile refresh.
 # ---------------------------------------------------------------------------
 
 
@@ -3569,7 +3593,7 @@ async def _self_md_reflection_loop(bot_instance):
                 )
                 from soupy_database.rag import embed_texts_lm_studio
 
-                async with aiohttp.ClientSession() as embed_session:
+                async with llm_turn(), aiohttp.ClientSession() as embed_session:
                     await self_md_reflect(
                         guild_id=gid,
                         llm_func=async_chat_completion,

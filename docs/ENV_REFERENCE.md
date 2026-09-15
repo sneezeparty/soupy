@@ -196,6 +196,27 @@ alongside the `FLUX_MODEL` already loaded.
 - **`RAG_LOG_FULL_CONTENT`** — `0` — Deep RAG debug: dump full retrieved chunk/profile content. Off by default.
 - **`RAG_LOG_VERBOSE`** — `1` — Per-hit RAG details on INFO. Set to `0` for one-line retrieval summaries.
 
+## User Profiles
+
+Dated member profiles built from the archive by the bot (never the web panel), one LLM call at a time. See `soupy_database/user_profiles.py`.
+
+- **`USER_PROFILES_IN_RAG`** — `1` — Put the relevant slice of the member's profile into chat replies.
+- **`RAG_PROFILE_MAX_CHARS`** — `4000` — Cap on the profile block in a chat reply, header included.
+- **`RAG_PROFILE_MAX_CHARS_PER_USER`** — `3000` — Cap on one member's profile in a chat reply. Items relevant to the message are picked first; nothing is cut mid-item.
+- **`USER_PROFILE_MIN_MESSAGES`** — `8` — Members with fewer usable messages get no profile.
+- **`USER_PROFILES_BATCH_MAX_USERS`** — `80` — How many top posters a Database-tab batch covers.
+- **`USER_PROFILE_CONTEXT_SAFETY`** — `0.85` — Share (0.5–0.95) of LM Studio's loaded context window a build pass may use for prompt + output. The window is read from LM Studio; hitting its ceiling takes LM Studio down.
+- **`USER_PROFILE_LLM_N_CTX`** — *(unset)* — Optional cap on that window. It can only make it smaller.
+- **`USER_PROFILE_MAX_TOKENS`** — `4000` — Output tokens reserved per pass for the edit list.
+- **`USER_PROFILE_PASS_MAX_MESSAGES`** — `150` — Messages read per pass. Smaller passes catch more facts; larger ones finish sooner.
+- **`USER_PROFILE_BUSY_PASS_MESSAGES`** — `40` — Messages per pass while chat was active in the last 10 minutes, so replies never wait long behind a pass.
+- **`USER_PROFILE_LATELY_DAYS`** — `90` — A "lately" item not confirmed for this many days moves to life events (`0` turns this off).
+- **`USER_PROFILE_LLM_TIMEOUT`** — `600` — Seconds (minimum 60) before a build call times out; the pass is then split in half.
+- **`USER_PROFILE_NIGHTLY_ENABLED`** — `true` — Update profiles overnight: members with enough new messages first, then any without a current profile.
+- **`USER_PROFILE_NIGHTLY_HOUR`** — `4` — Local hour (0–23) the nightly refresh starts; it may start up to 3 hours late.
+- **`USER_PROFILE_NIGHTLY_MAX_MINUTES`** — `180` — Time limit per night. Every pass saves, so unfinished members continue the next night.
+- **`USER_PROFILE_NIGHTLY_MIN_NEW_MESSAGES`** — `10` — New messages a member needs before the nightly refresh updates them.
+
 ## Self-Context (`self.md`)
 
 - **`SELF_MD_ENABLED`** — `true` — Enable the running self-knowledge document and reflection cycle.

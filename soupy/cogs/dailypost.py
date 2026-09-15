@@ -16,7 +16,8 @@ Flow:
 Cross-module:
 
 * Imports ``ensure_user_profile_schema`` and ``_load_structured_profiles`` from
-  ``soupy_database.user_profiles`` to read top-poster interests.
+  ``soupy_database.user_profiles`` (and ``section_texts`` from
+  ``soupy_database.profile_document``) to read top-poster interests.
 * Imports ``_post_url`` and ``_fetch_og_image`` from ``soupy.cogs.bluesky`` for
   the optional cross-post step.
 * ``_extract_date_from_html`` is *exported* (imported by ``soupy.cogs.bluesky``
@@ -55,9 +56,11 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from soupy import prompts as soupy_prompts
+from soupy.llm_gate import llm_turn
 from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
+from soupy_database.profile_document import section_texts
 from soupy_database.user_profiles import _load_structured_profiles, ensure_user_profile_schema
 
 logger = logging.getLogger(__name__)
@@ -246,7 +249,8 @@ async def _llm_call(
             max_tokens=max_tokens,
         )
 
-    response = await asyncio.to_thread(_sync)
+    async with llm_turn():
+        response = await asyncio.to_thread(_sync)
     return response.choices[0].message.content.strip()
 
 
@@ -986,15 +990,10 @@ class DailyPostCog(commands.Cog):
             parts: List[str] = []
             topics_for_log: List[str] = []
             for key in interest_keys:
-                val = structured.get(key)
-                if val:
-                    if isinstance(val, list):
-                        items_str = ", ".join(str(v)[:60] for v in val[:5])
-                        parts.append(f"{key}: {', '.join(str(v) for v in val)}")
-                        topics_for_log.append(f"{key}: {items_str}")
-                    else:
-                        parts.append(f"{key}: {val}")
-                        topics_for_log.append(f"{key}: {str(val)[:80]}")
+                texts = section_texts(structured, key)
+                if texts:
+                    parts.append(f"{key}: {', '.join(texts)}")
+                    topics_for_log.append(f"{key}: {', '.join(t[:60] for t in texts[:5])}")
             if parts:
                 profile_lines.append(f"- {nick}: {'; '.join(parts)}")
             # Name at INFO so it's visible in the console; full structured

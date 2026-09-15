@@ -95,7 +95,10 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | [web/services/log_stream.py](web/services/log_stream.py) | WebSocket fan-out for live log streaming |
 | [soupy_database/database.py](soupy_database/database.py) | SQLite schema + per-guild DB operations |
 | [soupy_database/rag.py](soupy_database/rag.py) | RAG embeddings and cosine similarity retrieval |
-| [soupy_database/user_profiles.py](soupy_database/user_profiles.py) | LLM-generated structured user profiles |
+| [soupy_database/user_profiles.py](soupy_database/user_profiles.py) | Member profiles: pass loop, profile jobs + nightly refresh, chat-time profile prefix |
+| [soupy_database/profile_document.py](soupy_database/profile_document.py) | Profile document v2: sections, dated items, edits, caps, rendering |
+| [soupy_database/profile_llm.py](soupy_database/profile_llm.py) | Profile-build prompt, edit-list schema, context budget from LM Studio |
+| [soupy/llm_gate.py](soupy/llm_gate.py) | One-big-LLM-call-at-a-time gate shared by chat, profiles, reflection, cogs |
 | [soupy_database/self_context.py](soupy_database/self_context.py) | Self-knowledge document reflection cycles |
 | [soupy_database/runtime_flags.py](soupy_database/runtime_flags.py) | Shared bot↔web feature toggles |
 | [.env-stable](.env-stable) | Master configuration |
@@ -123,6 +126,7 @@ Critical variables — the bot will not start without `DISCORD_TOKEN`:
 | `MUSING_ENABLED` / `MUSING_CHANNEL_ID` / `MUSING_HOUR_MIN` / `MUSING_HOUR_MAX` | Autonomous musings — one per day, at a random time in the local-hour window |
 | `BLUESKY_HANDLE` / `BLUESKY_APP_PASSWORD` / `BLUESKY_AUTO_REPLY` | Bluesky integration |
 | `SELF_MD_ENABLED` / `SELF_MD_REFLECT_HOUR` | Self-knowledge reflection (runs once a day at the given local hour, default 3 AM) |
+| `USER_PROFILE_NIGHTLY_ENABLED` / `USER_PROFILE_NIGHTLY_HOUR` | Nightly member-profile refresh (default on, 4 AM local, `USER_PROFILE_NIGHTLY_MAX_MINUTES` time limit) |
 | `SOUPY_WEB_HOST` / `SOUPY_WEB_PORT` | Web panel binding (default: `0.0.0.0:4941`) |
 | `SOUPY_AUTOSTART_BOT` | Set by `run_all.py`; `0` to launch the web panel without the bot |
 | `SOUPY_BOT_ENTRY` | Override bot entrypoint resolution |
@@ -208,6 +212,7 @@ Under `data/`:
 - `data/self_md/guild_<id>.md` + `_core.md` + `_archive.md` — per-guild self-knowledge documents
 - `data/musings_archive.jsonl` — musings history
 - `data/musings_daily_state.json` — today's rolled musing time + whether the day has been handled
+- `data/profile_nightly_state.json` — local date the nightly profile refresh was last queued
 - `data/daily_post_history.json` / `daily_post_schedule.json` — daily-post state
 - `data/bluesky_engage_history.json` / `bluesky_schedule.json` — Bluesky engagement state
 
@@ -217,6 +222,7 @@ Under `data/`:
 
 - **Cog architecture** — five extensions loaded at `on_ready` (see Architecture). Editing a cog requires only a bot restart, not a web-panel restart.
 - **Async/await throughout** — all I/O is non-blocking
+- **One big LLM call at a time** — chat replies, profile-build passes, SELF.MD reflection, and the cogs' LLM calls all take `soupy.llm_gate.llm_turn()`. Profile passes use most of LM Studio's loaded context window, and hitting that ceiling takes LM Studio down, so large prompts must never overlap. Profile jobs run only in the bot process (the web panel just queues them) for the same reason.
 - **Two single-consumer work queues** — `SDQueue` serializes image generation so the SD/flux backend isn't overloaded; `ChatQueue` serializes chat replies. Keep them separate: they were one queue once, and since each consumer awaits a job to completion, a single `/flux` blocked every reply bot-wide with no typing indicator anywhere. Both derive from `_WorkQueue`.
 - **Per-user rate limiting** — 10 searches/minute
 - **URL content caching** — 1-hour TTL to avoid repeated fetches

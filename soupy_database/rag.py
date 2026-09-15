@@ -713,9 +713,9 @@ def _assemble_rag_bundle(
     profile_len = 0
     if prof:
         try:
-            pmax = int(os.getenv("RAG_PROFILE_MAX_CHARS", "2500"))
+            pmax = int(os.getenv("RAG_PROFILE_MAX_CHARS", "4000"))
         except ValueError:
-            pmax = 2500
+            pmax = 4000
         if len(prof) > pmax:
             prof = prof[: pmax - 1] + "…"
         chunks.append(prof)
@@ -1532,7 +1532,7 @@ async def fetch_rag_context_for_query(
         _display_query = query_text or ""
         if "Current message:\n" in _display_query:
             _display_query = _display_query.split("Current message:\n")[-1].strip()
-        _prof_names = re.findall(r"^— (.+?) \(id \d+\):", profile_pfx or "", re.MULTILINE)
+        _prof_names = re.findall(r"^— (.+?) \(id \d+\)", profile_pfx or "", re.MULTILINE)
         _prof_summary = f"{', '.join(_prof_names)} → {len(profile_pfx)} chars" if _prof_names else "none"
         logger.info(
             "[RAG] user=%s | query: %s\n  profile  : %s",

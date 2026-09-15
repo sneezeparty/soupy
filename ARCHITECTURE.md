@@ -101,11 +101,17 @@ Per-guild SQLite plus the RAG / profile / self-knowledge machinery:
   race guard.
 - `rag.py` — chunk → embed → retrieve, with a per-guild reindex lock and a global
   embedding semaphore.
-- `user_profiles.py` — structured + summary per-member profiles.
+- `user_profiles.py` — per-member profiles: the build/update pass loop, profile jobs
+  (dashboard batches + the nightly refresh, both run by the bot), and the chat-time
+  profile prefix.
+- `profile_document.py` — the version-2 profile document: sections, dated items, edit
+  application, caps, and rendering (pure functions).
+- `profile_llm.py` — the profile-build prompt, edit-list JSON schema, and the context
+  budget read from LM Studio's loaded window.
 - `self_context.py` — the evolving self-knowledge document (anchor/core/full/archive
   tiers) and the reflection accumulator.
 - `runtime_flags.py` — the mtime-cached bot↔web feature-toggle channel.
-- `profile_batch.py` — supervisor for background profile-rebuild jobs.
+- `profile_batch.py` — job-row and job-log state for profile jobs (the web queues, the bot runs).
 
 ---
 
@@ -229,6 +235,15 @@ set (without a strong reference, asyncio garbage-collects a running task mid-awa
 | `rag_reindex_loop` | `RAG_REINDEX_INTERVAL_HOURS` (6) | Consolidate + re-embed RAG chunks |
 | `_dashboard_status_writer` | 15 s | Writes `data/bot_dashboard.json` for the web panel |
 | `_self_md_reflection_loop` | daily at `SELF_MD_REFLECT_HOUR` local (3) | Runs a self-knowledge reflection cycle when enough interactions have accumulated |
+| `profile_jobs_loop` | 20 s poll; nightly at `USER_PROFILE_NIGHTLY_HOUR` local (4) | Runs profile jobs queued from the Database tab, and queues the nightly profile refresh (time-limited, resumable) |
+
+**One big LLM call at a time.** `soupy/llm_gate.py` holds a single async lock that chat
+replies (for the whole reply), profile-build passes, SELF.MD reflection, and the
+musings / dailypost / bluesky / search LLM calls all take. Profile passes size
+themselves close to LM Studio's loaded context window, and a single request can use
+the whole window, so two large prompts at once could hit the ceiling and take LM Studio
+down. New code that sends a large prompt to `LOCAL_CHAT` from the bot must take
+`llm_turn()`. The lock is re-entrant per task, so nesting is safe.
 
 Each cog additionally runs its own `@tasks.loop` (dailypost, musings, bluesky). All
 of them re-read their enable flag per tick so they can be toggled live from the
@@ -250,6 +265,7 @@ Markdown documents, each owned by exactly one module.
 | `data/self_md/accumulator.jsonl` | `self_context.py` | Pending interactions awaiting reflection (survives restart) |
 | `data/daily_post_history.json` / `daily_post_schedule.json` | dailypost cog | Posted-article history + next-fire schedule |
 | `data/musings_archive.jsonl` | musings cog | Last ~200 musings + topic tags for dedup |
+| `data/profile_nightly_state.json` | `user_profiles.py` | Local date the nightly profile refresh was last queued |
 | `data/bluesky_engage_history.json` | bluesky cog | Replies/likes/follows + daily counters |
 | `.env-stable` | `env_store.py` (write) / bot (read on start) | All configuration |
 | `media/images/`, `media/thumbs/` | main bot | Generated images |
@@ -288,7 +304,7 @@ so a crash mid-write can't truncate it. New code that persists state must do the
 ## 8. Bot ↔ web IPC
 
 The two processes share state through the filesystem only — there is no socket or
-RPC between them. Five channels:
+RPC between them. Six channels:
 
 1. **`.env-stable`** — web writes (comment-preserving, with a timestamped backup);
    bot reads on next start. Configuration.
@@ -301,6 +317,9 @@ RPC between them. Five channels:
    picks it up. Manual scan requests.
 5. **Bot stdout/stderr** — captured by `BotRunner` via PTY, ANSI-stripped, fanned
    out to browsers over `/ws/logs`.
+6. **`profile_batch_jobs` (per-guild SQLite)** — web writes the job row (queue, pause,
+   resume, cancel); the bot's `profile_jobs_loop` polls it, runs the job, and writes
+   progress, `heartbeat_at`, and `profile_job_log_lines` back for the panel.
 
 Plus the web app reads the per-guild SQLite databases directly for stats, profile,
 and RAG status endpoints.

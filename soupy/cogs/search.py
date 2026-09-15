@@ -42,6 +42,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from soupy import prompts as soupy_prompts
+from soupy.llm_gate import llm_turn
 from soupy.settings import openai_client, settings
 from soupy.url_fetch import FetchResult, fetch_url
 
@@ -174,8 +175,9 @@ client = openai_client()
 
 
 async def async_chat_completion(*args, **kwargs):
-    """Wraps the OpenAI chat completion in an async context."""
-    return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
+    """Wraps the OpenAI chat completion in an async context (one LM Studio call at a time; see soupy.llm_gate)."""
+    async with llm_turn():
+        return await asyncio.to_thread(client.chat.completions.create, *args, **kwargs)
 
 
 class SearchBackendError(Exception):

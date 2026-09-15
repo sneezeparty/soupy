@@ -1501,7 +1501,7 @@ def create_app() -> FastAPI:
         return JSONResponse({"ok": True, **merged})
 
     # -----------------------------------------------------------------------
-    # RAG + user profile management — trigger reindex, rebuild, batch jobs.
+    # RAG + user profile management — trigger reindex; queue/pause/cancel profile jobs (the bot runs them).
     # All operations are per-guild.
     # -----------------------------------------------------------------------
 
@@ -1555,39 +1555,15 @@ def create_app() -> FastAPI:
             return JSONResponse(stats, status_code=404)
         return JSONResponse(stats)
 
-    @app.post("/api/profiles/rebuild/{guild_id}")
-    async def api_profiles_rebuild(guild_id: str):
-        """Legacy one-shot batch (blocking). Prefer /api/profiles/batch/start + pause/resume."""
-        from soupy_database import get_stats
-        from soupy_database.user_profiles import refresh_profiles_for_guild_limited
-
-        try:
-            gid = int(guild_id)
-        except ValueError:
-            return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
-        st = get_stats(gid)
-        if not st.get("exists"):
-            return JSONResponse({"ok": False, "message": "Database not found"}, status_code=404)
-        try:
-            result = await refresh_profiles_for_guild_limited(gid)
-            if not result.get("ok"):
-                return JSONResponse({"ok": False, **result}, status_code=500)
-            return JSONResponse({"ok": True, **result})
-        except Exception as exc:
-            logging.exception("Profile rebuild failed")
-            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
-
     @app.post("/api/profiles/reset/{guild_id}")
     async def api_profiles_reset(guild_id: str):
-        """Delete all stored profiles and batch job state for a guild."""
-        from soupy_database.profile_batch import cancel_profile_task
+        """Delete all stored profiles and batch job state for a guild (the bot's worker stops on its next check)."""
         from soupy_database.user_profiles import clear_stored_profiles
 
         try:
             gid = int(guild_id)
         except ValueError:
             return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
-        await cancel_profile_task(gid)
         result = clear_stored_profiles(gid)
         if not result.get("ok"):
             return JSONResponse(result, status_code=404)
@@ -1595,14 +1571,13 @@ def create_app() -> FastAPI:
 
     @app.post("/api/profiles/batch/start/{guild_id}")
     async def api_profiles_batch_start(guild_id: str):
-        from soupy_database.profile_batch import cancel_profile_task
+        """Queue a profile batch; the bot process runs it (see soupy_database.user_profiles.profile_jobs_loop)."""
         from soupy_database.user_profiles import start_profile_batch_job
 
         try:
             gid = int(guild_id)
         except ValueError:
             return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
-        await cancel_profile_task(gid)
         result = start_profile_batch_job(gid)
         if not result.get("ok"):
             return JSONResponse(result, status_code=400)

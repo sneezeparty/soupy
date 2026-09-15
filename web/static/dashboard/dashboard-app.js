@@ -1663,6 +1663,9 @@
         setEnvToggles({
           DAILY_POST_ENABLED: (vars.DAILY_POST_ENABLED || "").toLowerCase() === "true",
           BLUESKY_AUTO_REPLY: (vars.BLUESKY_AUTO_REPLY || "").toLowerCase() === "true",
+          // Defaults on when unset (matches the bot).
+          USER_PROFILE_NIGHTLY_ENABLED:
+            ["0", "false", "no", "off"].indexOf((vars.USER_PROFILE_NIGHTLY_ENABLED || "true").toLowerCase()) === -1,
         });
       } catch (err) {
         console.error("Failed to load env toggles:", err);
@@ -1848,7 +1851,7 @@
       if (!dbGuild) return;
       if (
         !window.confirm(
-          "Start profile batch? One LLM call per user (LOCAL_CHAT). You can pause, resume, and cancel. Logs appear below."
+          "Queue a profile batch? The bot builds each member in several passes (LOCAL_CHAT), one call at a time, and must be running. You can pause, resume, and cancel. Logs appear below."
         )
       )
         return;
@@ -1890,7 +1893,7 @@
 
     async function profileBatchCancel() {
       if (!dbGuild) return;
-      if (!window.confirm("Cancel the profile worker? Current user may still finish.")) return;
+      if (!window.confirm("Cancel the profile job? The bot stops after the current pass; progress so far is saved.")) return;
       try {
         await readJson("/api/profiles/batch/cancel/" + encodeURIComponent(dbGuild), { method: "POST" });
         setProfBatchPollEpoch(function (n) {
@@ -2585,6 +2588,20 @@
             runNowTitle: pendingTitle
           }),
           loopCard({
+            key: "loop-profile-nightly",
+            title: "Profile Refresh",
+            on: !!envToggles.USER_PROFILE_NIGHTLY_ENABLED,
+            onToggle: function () { toggleEnvVar("USER_PROFILE_NIGHTLY_ENABLED"); },
+            toggleHint: "Nightly update of member profiles from new messages. Toggling writes .env-stable; takes effect on next bot restart.",
+            nextRunIso: (timers.profile_nightly || {}).next_run,
+            lastRunIso: (timers.profile_nightly || {}).last_run,
+            intervalLabel: (timers.profile_nightly || {}).interval || null,
+            todayLine: null,
+            runNowDisabled: !dbGuild,
+            runNowOnClick: function () { setTab("database"); },
+            runNowTitle: !dbGuild ? "Pick a guild in Knobs → RAG" : "Open Database → Profile batch"
+          }),
+          loopCard({
             key: "loop-musings",
             title: "Musings",
             on: !!envToggles.MUSING_ENABLED,
@@ -2712,7 +2729,7 @@
             " should point at your server. Profile batch uses ",
             e("span", { className: "mono" }, "LOCAL_CHAT"), ", ",
             e("span", { className: "mono" }, "USER_PROFILES_BATCH_MAX_USERS"), ", ",
-            e("span", { className: "mono" }, "USER_PROFILE_SAMPLE_MESSAGES"),
+            e("span", { className: "mono" }, "USER_PROFILE_PASS_MAX_MESSAGES"),
             " (see ", e("span", { className: "mono" }, ".env-stable"), ").")
         );
 
@@ -3542,9 +3559,11 @@
             e(
               "p",
               { className: "muted", style: { maxWidth: "52rem", marginTop: "0.35rem" } },
-              "Builds structured profiles (topics, tone, channels, ",
+              "Builds dated member profiles (personality, what's going on lately, how they treat Soupy, family, work, opinions, ",
               e("strong", null, "relationships with other members"),
-              ") from the archive. Pause stops before the next user; Resume continues. The activity log below shows each step (archive read → LLM call → save)."
+              " and more) from the archive. The bot runs the job one saved pass at a time and never alongside a chat reply, so Pause and Cancel take effect after the current pass and Resume picks up where it stopped. Profiles in the old format are rebuilt from scratch (the old rows are kept in ",
+              e("span", { className: "mono" }, "user_profile_summaries_v1"),
+              "). A nightly refresh keeps them current."
             ),
             e(
               "p",
@@ -3605,7 +3624,19 @@
                             " failed"
                         );
                       }
-                      return parts.join(" · ") + (profBatchStatus.task_running ? " · worker running" : "");
+                      if (profBatchStatus.kind && profBatchStatus.kind !== "manual") {
+                        parts.unshift(profBatchStatus.kind + " run");
+                      }
+                      return (
+                        parts.join(" · ") +
+                        (!status.running && profBatchStatus.status === "running"
+                          ? " · the bot is stopped, so this job is on hold"
+                          : profBatchStatus.task_running
+                            ? " · worker running"
+                            : profBatchStatus.waiting_for_bot
+                              ? " · queued; the bot picks it up when it's free (it runs one guild's job at a time)"
+                              : "")
+                      );
                     })()
                   )
                 )
@@ -3657,9 +3688,11 @@
               { className: "muted", style: { fontSize: "0.82rem", marginTop: "0.35rem" } },
               e("span", { className: "mono" }, "USER_PROFILES_BATCH_MAX_USERS"),
               ", ",
-              e("span", { className: "mono" }, "USER_PROFILE_SAMPLE_MESSAGES"),
+              e("span", { className: "mono" }, "USER_PROFILE_PASS_MAX_MESSAGES"),
               ", ",
-              e("span", { className: "mono" }, "USER_PROFILE_MAX_TOKENS"),
+              e("span", { className: "mono" }, "USER_PROFILE_NIGHTLY_HOUR"),
+              ", ",
+              e("span", { className: "mono" }, "USER_PROFILE_CONTEXT_SAFETY"),
               " — see ",
               e("span", { className: "mono" }, ".env-stable"),
               "."
@@ -3693,7 +3726,7 @@
                   : e(
                       "div",
                       { className: "profile-batch-console-empty" },
-                      "Start a batch to see step-by-step progress: sampling messages, calling LOCAL_CHAT, saving the profile row."
+                      "Start a batch to see step-by-step progress: reading messages in passes, calling LOCAL_CHAT, saving after each pass."
                     )
               )
             )

@@ -54,6 +54,7 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from soupy.llm_gate import llm_turn
 from soupy.scheduling import (
     load_json_state,
     parse_aware,
@@ -266,7 +267,8 @@ async def _llm_call(system: str, user: str, temperature: float = 0.7, max_tokens
             max_tokens=max_tokens,
         )
 
-    response = await asyncio.to_thread(_sync)
+    async with llm_turn():
+        response = await asyncio.to_thread(_sync)
     return response.choices[0].message.content.strip()
 
 

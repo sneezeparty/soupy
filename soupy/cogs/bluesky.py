@@ -54,6 +54,7 @@ from ddgs import DDGS
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from soupy.llm_gate import llm_turn
 from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
 
@@ -85,7 +86,9 @@ async def _llm_call(
         )
 
     try:
-        response = await asyncio.wait_for(asyncio.to_thread(_sync), timeout=timeout_seconds)
+        # Waiting for the gate doesn't count against the timeout.
+        async with llm_turn():
+            response = await asyncio.wait_for(asyncio.to_thread(_sync), timeout=timeout_seconds)
     except asyncio.TimeoutError:
         logger.error("🦋 LLM call timed out after %ds", timeout_seconds)
         return ""
