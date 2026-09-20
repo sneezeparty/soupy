@@ -135,10 +135,6 @@ without changing the default experience.
 
 ## Polish — low urgency, nice to have
 
-- **Self-knowledge size cap (S).** `self_context` builds the injected document; add
-  an explicit ceiling so a large core can never push the system prompt past the
-  context window. (The anchor tier mostly addresses this, but a hard cap is cheap
-  insurance.)
 - **Code-block-aware message splitting (S).** `split_message` splits on newlines and
   can break a fenced ```code block``` across two Discord messages.
 - **Log hygiene (S).** Standardize levels per subsystem (some cogs are chatty, some

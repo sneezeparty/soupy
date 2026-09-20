@@ -108,8 +108,11 @@ Per-guild SQLite plus the RAG / profile / self-knowledge machinery:
   application, caps, and rendering (pure functions).
 - `profile_llm.py` — the profile-build prompt, edit-list JSON schema, and the context
   budget read from LM Studio's loaded window.
-- `self_context.py` — the evolving self-knowledge document (anchor/core/full/archive
-  tiers) and the reflection accumulator.
+- `self_profile.py` — Soupy's memory of itself: dated items from its own messages (with
+  what members said just before), built with the member-profile pass loop at the end of
+  each profile job, rendered into the SELF.MD files, and embedded per item for chat.
+- `self_context.py` — the SELF.MD files (anchor/core/full/archive) and the chat-time
+  identity anchor.
 - `runtime_flags.py` — the mtime-cached bot↔web feature-toggle channel.
 - `profile_batch.py` — job-row and job-log state for profile jobs (the web queues, the bot runs).
 
@@ -165,7 +168,6 @@ process_chat_message  (runs one-at-a-time off the queue)
   8. generate_parallel_candidates  (N completions at varied temperatures)
   9. judge_best_of_candidates       (LLM scores; skipped if N == 1)
  10. clean_response → split_message → send → archive_sent_message
- 11. add_notable_interaction  (feeds the self-knowledge accumulator)
 ```
 
 Key design decisions worth preserving:
@@ -181,9 +183,11 @@ Key design decisions worth preserving:
   chars deep inside a single user turn (the same-role merge that strict-alternation
   models require). Heavy visual fences keep the trigger findable. Don't remove them.
 - **Self-knowledge: anchor, not core.** `get_self_md_for_injection` injects the
-  small (~600-char) *anchor* into every system prompt; the larger *core* and *full*
-  documents are retrieved on demand via self-knowledge RAG. This keeps the per-reply
-  system prompt around 6–7 K chars instead of ~12 K.
+  small (~600-char) *anchor* (the memory's first-person overview) into every system
+  prompt. The rest of Soupy's memory arrives through RAG: how it gets along with the
+  asker and the member being discussed, plus the items closest to the message by
+  embedding or shared words (`self_profile.self_block_for_chat`). Unrelated memories
+  never fill the budget: an unprompted opinion reads as a non sequitur.
 
 ### Triggering
 
@@ -234,16 +238,23 @@ set (without a strong reference, asyncio garbage-collects a running task mid-awa
 | `archive_auto_scan_loop` | ~45 s poll | Incremental message archival per guild on its configured interval |
 | `rag_reindex_loop` | `RAG_REINDEX_INTERVAL_HOURS` (6) | Consolidate + re-embed RAG chunks |
 | `_dashboard_status_writer` | 15 s | Writes `data/bot_dashboard.json` for the web panel |
-| `_self_md_reflection_loop` | daily at `SELF_MD_REFLECT_HOUR` local (3) | Runs a self-knowledge reflection cycle when enough interactions have accumulated |
-| `profile_jobs_loop` | 20 s poll; nightly at `USER_PROFILE_NIGHTLY_HOUR` local (4) | Runs profile jobs queued from the Database tab, and queues the nightly profile refresh (time-limited, resumable) |
+| `profile_jobs_loop` | 20 s poll; nightly at `USER_PROFILE_NIGHTLY_HOUR` local (4) | Runs profile jobs queued from the Database tab, queues the nightly profile refresh (time-limited, resumable), and updates Soupy's memory at the end of each job or on request |
 
 **One big LLM call at a time.** `soupy/llm_gate.py` holds a single async lock that chat
-replies (for the whole reply), profile-build passes, SELF.MD reflection, and the
-musings / dailypost / bluesky / search LLM calls all take. Profile passes size
+replies (for the whole reply), profile-build passes (members and Soupy's own memory),
+and the musings / dailypost / bluesky / search LLM calls all take. Profile passes size
 themselves close to LM Studio's loaded context window, and a single request can use
 the whole window, so two large prompts at once could hit the ceiling and take LM Studio
 down. New code that sends a large prompt to `LOCAL_CHAT` from the bot must take
 `llm_turn()`. The lock is re-entrant per task, so nesting is safe.
+
+Chat goes first. A lock alone alternates fairly, so a burst of replies each waited
+behind a whole profile pass. `ChatQueue` counts replies that are queued or running
+(`note_chat_queued` / `note_chat_done`), and before every LLM call the profile builder
+calls `wait_for_chat_to_clear()`: it waits until that count is zero and no reply has
+finished in the last 60 s, giving up after 15 minutes (safe, since it still queues on
+the lock). A pass already in flight is never aborted, because LM Studio may keep
+generating after the client disconnects, and then the reply would overlap it.
 
 Each cog additionally runs its own `@tasks.loop` (dailypost, musings, bluesky). All
 of them re-read their enable flag per tick so they can be toggled live from the
@@ -261,8 +272,10 @@ Markdown documents, each owned by exactly one module.
 | `soupy_database/databases/guild_<id>.db` | `database.py` | Messages, channels, `rag_chunks`, `user_profile_summaries`, self-chunks, profile-batch jobs, scan metadata |
 | `data/runtime_flags.json` | `runtime_flags.py` | RAG enable + per-command disable toggles (bot↔web) |
 | `data/bot_dashboard.json` | bot (write) / web (read) | Uptime, model, service health, loop timers |
-| `data/self_md/guild_<id>{,_core,_anchor,_archive}.md` | `self_context.py` | Self-knowledge tiers |
-| `data/self_md/accumulator.jsonl` | `self_context.py` | Pending interactions awaiting reflection (survives restart) |
+| `data/self_md/guild_<id>_self.json` | `self_profile.py` | Soupy's memory (source of truth) and its read cursor |
+| `data/self_md/guild_<id>{,_core,_anchor}.md` | `self_profile.py` (write) / `self_context.py` (read) | Views of the memory: full, compact summary, identity anchor |
+| `data/self_md/guild_<id>_archive.md`, `v1_backup/` | — | The old reflection's pruned entries and pre-memory SELF.MD files (read-only) |
+| `data/self_md/refresh_requests.json` | `self_profile.py` | Memory refreshes asked for by `/soupyself refresh` or the dashboard |
 | `data/daily_post_history.json` / `daily_post_schedule.json` | dailypost cog | Posted-article history + next-fire schedule |
 | `data/musings_archive.jsonl` | musings cog | Last ~200 musings + topic tags for dedup |
 | `data/profile_nightly_state.json` | `user_profiles.py` | Local date the nightly profile refresh was last queued |
@@ -293,8 +306,6 @@ so a crash mid-write can't truncate it. New code that persists state must do the
   external resource), while a *per-guild* `_reindex_lock` prevents two reindexes
   from racing on one guild's `rag_chunks` table. Reindexing guild A never blocks
   retrieval or reindex of guild B.
-- **The self-knowledge accumulator** is guarded by `_acc_lock` and disk-backed so
-  in-flight interactions survive a restart.
 - **The OpenAI client is intentionally not shared.** Each cog calls
   `openai_client()` for its own instance — the SDK is cheap to build and sharing one
   across event loops/threads is unsafe.

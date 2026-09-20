@@ -1352,18 +1352,22 @@ def create_app() -> FastAPI:
         except Exception:
             logger.debug("Could not read daily_post_history.json for dashboard", exc_info=True)
 
-        # Self-knowledge pending (accumulator file is on disk)
+        # Soupy's memory, per guild (data/self_md/guild_<id>_self.json, written by the bot's profile worker)
         try:
-            acc_path = os.path.join("data", "self_md", "accumulator.jsonl")
-            if os.path.exists(acc_path):
-                lines = [ln for ln in open(acc_path).read().splitlines() if ln.strip()]
-                data["self_md_pending"] = len(lines)
-            from soupy_database.runtime_flags import read_runtime_flags
+            from soupy_database import self_context
+            from soupy_database.self_profile import memory_summary
 
-            _flags = read_runtime_flags()
+            memories = {}
+            if self_context.SELF_MD_DIR.is_dir():
+                for p in self_context.SELF_MD_DIR.glob("guild_*_self.json"):
+                    gid = p.name[len("guild_") : -len("_self.json")]
+                    summary = memory_summary(int(gid)) if gid.isdigit() else None
+                    if summary:
+                        memories[gid] = {"items": summary["items"], "updated_at": summary["updated_at"]}
+            data["self_memory"] = memories
             data["self_md_enabled"] = bool(settings.self_md_enabled)
         except Exception:
-            logger.debug("Could not read self-knowledge accumulator for dashboard", exc_info=True)
+            logger.debug("Could not read Soupy's memory for dashboard", exc_info=True)
 
         return JSONResponse(data)
 
@@ -1541,6 +1545,18 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logging.exception("RAG reindex failed")
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+
+    @app.post("/api/self-memory/refresh/{guild_id}")
+    async def api_self_memory_refresh(guild_id: str):
+        """Ask the bot to refresh Soupy's memory for a guild; its profile worker runs it at the next chance."""
+        from soupy_database.self_profile import request_self_refresh
+
+        try:
+            gid = int(guild_id)
+        except ValueError:
+            return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
+        request_self_refresh(gid)
+        return JSONResponse({"ok": True, "queued": True})
 
     @app.get("/api/profiles/status/{guild_id}")
     async def api_profiles_status(guild_id: str):

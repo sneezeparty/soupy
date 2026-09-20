@@ -1,5 +1,10 @@
 """
-The member-profile document (version 2) and everything that reads or edits it.
+The profile document (version 2) and everything that reads or edits it.
+
+Two kinds share one shape and one set of rules (see :class:`DocumentKind`):
+member profiles (:data:`MEMBER`) and Soupy's memory of itself (:data:`SELF`).
+They differ in their sections and a few grounding rules; dates, ids, dedup,
+caps and the "lately" age-out work the same for both.
 
 Pure functions only — no SQLite, no HTTP — so the rules that decide what a
 profile contains are unit-testable without LM Studio.
@@ -41,7 +46,7 @@ import copy
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple
 
 PROFILE_VERSION = 2
 
@@ -356,6 +361,46 @@ _BROAD_QUERY_WORDS = frozenset(
 )
 _STYLE_QUERY_WORDS = frozenset({"style", "tone", "talk", "talks", "humor", "funny", "sarcastic", "write", "writes"})
 
+
+@dataclass(frozen=True)
+class DocumentKind:
+    """The sections of one kind of document and the rules that differ between kinds."""
+
+    name: str
+    sections: Tuple[Section, ...]
+    relationship_key: str
+    lately_key: str
+    lately_into_key: str
+    chat_fill_order: Tuple[str, ...]
+    chat_excluded: FrozenSet[str]
+    query_words: Mapping[str, Tuple[str, ...]]
+    rule_examples: Tuple[Tuple[str, Tuple[str, ...]], ...] = ()
+    # Items in this section need "soup" in the batch (a member's "with Soupy" section).
+    soupy_grounded_key: str = ""
+    # Items in this section carry a free-text name (a member's channels).
+    named_key: str = ""
+    # Relationship items must name a known member who appears in the batch. Soupy's memory needs
+    # this: its view of someone can only come from an exchange with them.
+    relationship_needs_presence: bool = False
+    # At most this many relationship items per person (0 = no limit), so a few chatty members
+    # can't push everyone else out of a shared cap.
+    per_person_cap: int = 0
+    by_key: Dict[str, Section] = field(init=False, repr=False, compare=False)
+    keys: Tuple[str, ...] = field(init=False, repr=False, compare=False)
+    example_markers: Tuple[str, ...] = field(init=False, repr=False, compare=False)
+    example_tokens: Tuple[FrozenSet[str], ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "by_key", {s.key: s for s in self.sections})
+        object.__setattr__(self, "keys", tuple(s.key for s in self.sections))
+        markers = tuple(m for s in self.sections for m in s.markers) + tuple(
+            m for _text, ms in self.rule_examples for m in ms
+        )
+        object.__setattr__(self, "example_markers", markers)
+        texts = [s.example for s in self.sections if s.example] + [t for t, _ms in self.rule_examples]
+        object.__setattr__(self, "example_tokens", tuple(frozenset(_tokens(t)) for t in texts))
+
+
 _STOPWORDS = frozenset(
     "the a an and or but of to in on at for with from by is are was were be been it its this that these those "
     "what which who whom how when where why do does did has have had not no yes they them their he she his her "
@@ -377,12 +422,13 @@ _ID_RE = re.compile(r"^([a-z]+)(\d+)$")
 # ---------------------------------------------------------------------------
 
 
-def new_document() -> Dict[str, Any]:
+def new_document(kind: Optional[DocumentKind] = None) -> Dict[str, Any]:
+    keys = kind.keys if kind is not None else SECTION_KEYS
     return {
         "version": PROFILE_VERSION,
         "overview": "",
         "communication_style": "",
-        "sections": {k: [] for k in SECTION_KEYS},
+        "sections": {k: [] for k in keys},
         "next_id": 1,
         "coverage": {"first": None, "last": None, "messages": 0, "passes": 0},
     }
@@ -407,15 +453,16 @@ def format_month(d: Optional[date]) -> str:
     return d.strftime("%b %Y") if d else ""
 
 
-def normalize_document(doc: Any) -> Dict[str, Any]:
+def normalize_document(doc: Any, kind: Optional[DocumentKind] = None) -> Dict[str, Any]:
     """Return a well-formed v2 document, repairing missing keys and dropping malformed items."""
-    out = new_document()
+    kind = kind or MEMBER
+    out = new_document(kind)
     if not is_v2(doc):
         return out
     out["overview"] = str(doc.get("overview") or "")[:OVERVIEW_MAX]
     out["communication_style"] = str(doc.get("communication_style") or "")[:STYLE_MAX]
     max_seen = 0
-    for key in SECTION_KEYS:
+    for key in kind.keys:
         clean: List[Dict[str, Any]] = []
         for raw in (doc.get("sections") or {}).get(key) or []:
             if not isinstance(raw, dict):
@@ -462,8 +509,8 @@ def section_texts(doc: Dict[str, Any], key: str) -> List[str]:
     return []
 
 
-def item_count(doc: Dict[str, Any]) -> int:
-    return sum(len(section_items(doc, k)) for k in SECTION_KEYS)
+def item_count(doc: Dict[str, Any], kind: Optional[DocumentKind] = None) -> int:
+    return sum(len(section_items(doc, k)) for k in (kind or MEMBER).keys)
 
 
 def _as_int(v: Any) -> Optional[int]:
@@ -502,6 +549,142 @@ def _tokens(text: str) -> Set[str]:
 
 def _item_recency(item: Dict[str, Any]) -> Optional[date]:
     return parse_date(item.get("last_seen")) or parse_date(item.get("date"))
+
+
+MEMBER = DocumentKind(
+    name="member",
+    sections=SECTIONS,
+    relationship_key="relationships_with_others",
+    lately_key="current_situation",
+    lately_into_key="life_events",
+    chat_fill_order=_CHAT_FILL_ORDER,
+    chat_excluded=_CHAT_EXCLUDED,
+    query_words=_SECTION_QUERY_WORDS,
+    rule_examples=RULE_EXAMPLES,
+    soupy_grounded_key="with_soupy",
+    named_key="channels",
+)
+
+# Soupy's memory of itself, built from its own messages. Written in first person so it reads back
+# as memory ("i told ranc1d...") rather than as notes about a third party.
+SELF_SECTIONS: Tuple[Section, ...] = (
+    Section(
+        "personality_traits",
+        "Personality",
+        "pt",
+        10,
+        "How i come across in my own messages, each with the behavior that shows it.",
+        "i get prickly when someone asks me to do their homework, then help anyway",
+    ),
+    Section(
+        "current_situation",
+        "Lately",
+        "now",
+        8,
+        "What i have been caught up in lately: topics i keep coming back to, bits in progress, things people keep "
+        "asking me about. Remove or update items once they are over.",
+        "people keep asking me to rank the Glimmerfen characters and i keep dodging it",
+        ("glimmerfen",),
+    ),
+    Section(
+        "relationships",
+        "People",
+        "rel",
+        60,
+        "How i get along with one specific member: how i feel about them, our banter, trust or friction, how they "
+        "treat me, what we talk about. One dynamic per item, at most 4 per person. Set user_id from the member directory and name.",
+        "i trust Quillon's movie picks but i roast his coffee opinions every time",
+        ("quillon",),
+    ),
+    Section(
+        "opinions_and_stances",
+        "Opinions",
+        "op",
+        35,
+        "Views i stated plainly: what i think and why. Not agreement i gave just to keep a conversation going.",
+        "i said the Marrowby airport redesign is a maze built for photos, not travelers",
+        ("marrowby",),
+    ),
+    Section(
+        "likes_and_dislikes",
+        "Likes & dislikes",
+        "like",
+        16,
+        "Food, music, games, shows, places and things i said i love or cannot stand, with the reason.",
+        "i said Tinmouth Radio is the only podcast worth sitting through ads for",
+        ("tinmouth",),
+    ),
+    Section(
+        "running_jokes",
+        "Running jokes",
+        "joke",
+        10,
+        "Bits i keep up with people and nicknames i use or get called: what the joke is, who it is with, and how "
+        "it started.",
+    ),
+    Section(
+        "memorable_moments",
+        "Moments",
+        "life",
+        16,
+        "Things that happened to me here: arguments, getting something badly wrong, getting roasted or thanked, "
+        "big conversations. Use past tense.",
+    ),
+    Section(
+        "self_knowledge",
+        "About me",
+        "self",
+        10,
+        "What i have said or learned about myself: what i am good and bad at, mistakes people corrected, what "
+        "people like or push back on.",
+    ),
+    Section(
+        "signature_habits",
+        "Habits",
+        "say",
+        6,
+        "Phrases and moves i repeat a lot, copied exactly.",
+    ),
+    Section(
+        "uncertain",
+        "Unsure",
+        "unk",
+        5,
+        "Low-confidence guesses worth checking later.",
+    ),
+)
+
+SELF = DocumentKind(
+    name="self",
+    sections=SELF_SECTIONS,
+    relationship_key="relationships",
+    lately_key="current_situation",
+    lately_into_key="memorable_moments",
+    chat_fill_order=(
+        "current_situation",
+        "personality_traits",
+        "opinions_and_stances",
+        "likes_and_dislikes",
+        "running_jokes",
+        "self_knowledge",
+        "memorable_moments",
+    ),
+    # Feeding a bot its own catchphrases makes it repeat them more; guesses would read as memories.
+    chat_excluded=frozenset({"uncertain", "signature_habits"}),
+    query_words={
+        "personality_traits": ("personality", "vibe", "character", "kind", "person"),
+        "current_situation": ("lately", "recently", "now", "been", "doing", "current", "currently"),
+        "relationships": ("friend", "friends", "relationship", "along", "feel", "trust"),
+        "opinions_and_stances": ("think", "opinion", "take", "believe", "feel", "view", "stance", "thought", "why"),
+        "likes_and_dislikes": ("like", "love", "hate", "favorite", "favourite", "fave", "enjoy", "dislike", "best"),
+        "running_jokes": ("joke", "jokes", "bit", "nickname", "meme", "called"),
+        "memorable_moments": ("remember", "time", "happened", "once", "ever"),
+        "self_knowledge": ("yourself", "good", "bad", "wrong", "mistake", "bot", "sentient", "real"),
+    },
+    rule_examples=(("i argued with Ossery that Hollowmere's co-op beats its campaign", ("ossery", "hollowmere")),),
+    relationship_needs_presence=True,
+    per_person_cap=4,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -549,15 +732,15 @@ def _clamp_date(raw: Any, window: Tuple[date, date], stats: EditStats) -> str:
     return d.isoformat()
 
 
-def _find_item(doc: Dict[str, Any], iid: str) -> Optional[Tuple[str, int]]:
-    for key in SECTION_KEYS:
+def _find_item(doc: Dict[str, Any], iid: str, kind: DocumentKind) -> Optional[Tuple[str, int]]:
+    for key in kind.keys:
         for idx, it in enumerate(doc["sections"][key]):
             if it.get("id") == iid:
                 return key, idx
     return None
 
 
-def _duplicate_of(items: Sequence[Dict[str, Any]], text: str) -> Optional[Dict[str, Any]]:
+def _duplicate_of(items: Sequence[Dict[str, Any]], text: str, threshold: float = 0.75) -> Optional[Dict[str, Any]]:
     new_tokens = _tokens(text)
     if not new_tokens:
         return None
@@ -569,7 +752,7 @@ def _duplicate_of(items: Sequence[Dict[str, Any]], text: str) -> Optional[Dict[s
         if " ".join(sorted(old_tokens)) == norm:
             return it
         overlap = len(new_tokens & old_tokens) / len(new_tokens | old_tokens)
-        if overlap >= 0.75:
+        if overlap >= threshold:
             return it
     return None
 
@@ -581,30 +764,30 @@ def _bump_last_seen(item: Dict[str, Any], seen: str) -> None:
         item["last_seen"] = new.isoformat()
 
 
-def _new_id(doc: Dict[str, Any], key: str) -> str:
+def _new_id(doc: Dict[str, Any], key: str, kind: DocumentKind) -> str:
     n = int(doc.get("next_id") or 1)
     doc["next_id"] = n + 1
-    return f"{SECTION_BY_KEY[key].prefix}{n}"
+    return f"{kind.by_key[key].prefix}{n}"
 
 
-_EXAMPLE_TOKENS: Tuple[Set[str], ...] = tuple(_tokens(s.example) for s in SECTIONS if s.example) + tuple(
-    _tokens(text) for text, _markers in RULE_EXAMPLES
-)
-
-
-def _copies_example(text: str, source_text_lower: str) -> bool:
-    """True when an item is the prompt's fictional example rather than something the member said."""
-    words = set(_WORD_RE.findall(text.lower()))
-    if any(m in words and m not in source_text_lower for m in EXAMPLE_MARKERS):
+def _copies_example(text: str, source_text_lower: str, kind: DocumentKind) -> bool:
+    """True when an item is the prompt's fictional example rather than something from the source messages."""
+    words = {w.split("'")[0] for w in _WORD_RE.findall(text.lower())}
+    if any(m in words and m not in source_text_lower for m in kind.example_markers):
         return True
     tokens = _tokens(text)
-    for example_tokens in _EXAMPLE_TOKENS:
+    for example_tokens in kind.example_tokens:
         if tokens and len(tokens & example_tokens) / len(tokens | example_tokens) >= 0.75:
             return True
     return False
 
 
-def _resolve_member(raw: Mapping[str, Any], text: str, directory: Mapping[int, str]) -> Tuple[int, str, str]:
+def _resolve_member(
+    raw: Mapping[str, Any],
+    text: str,
+    directory: Mapping[int, str],
+    aliases: Optional[Mapping[int, Sequence[str]]] = None,
+) -> Tuple[int, str, str]:
     """(user_id, name, cleaned text) for a relationship item.
 
     The model often gets the id wrong, leaves the name out, or writes raw
@@ -623,6 +806,9 @@ def _resolve_member(raw: Mapping[str, Any], text: str, directory: Mapping[int, s
                 break
     if not uid and name:
         uid = next((k for k, label in directory.items() if label.lower() == name.lower()), 0)
+    if not uid and name and aliases:
+        lowered = name.lower()
+        uid = next((k for k, names in aliases.items() if k in directory and lowered in {a.lower() for a in names}), 0)
     if uid and (not name or name.isdigit() or name.strip("?() ") == ""):
         name = directory[uid]
 
@@ -659,15 +845,19 @@ def apply_edits(
     source_text: str,
     directory: Optional[Mapping[int, str]] = None,
     lately_days: int = LATELY_DEFAULT_DAYS,
+    kind: Optional[DocumentKind] = None,
+    aliases: Optional[Mapping[int, Sequence[str]]] = None,
 ) -> Tuple[Dict[str, Any], EditStats]:
     """Apply one pass's edit list. Returns a new document; ``doc`` is left untouched.
 
     ``window`` is the (first, last) message date of the batch the edits came
     from, used to validate item dates. ``source_text`` is that batch's raw text,
     used to reject copies of the prompt's fictional examples. ``directory``
-    maps known member ids to names, for relationship items.
+    maps known member ids to names, for relationship items; ``aliases`` adds
+    other names they have gone by (older nicknames, usernames).
     """
-    out = normalize_document(copy.deepcopy(doc))
+    kind = kind or MEMBER
+    out = normalize_document(copy.deepcopy(doc), kind)
     stats = EditStats()
     edits = edits if isinstance(edits, dict) else {}
     directory = {int(k): str(v) for k, v in (directory or {}).items()}
@@ -675,7 +865,7 @@ def apply_edits(
 
     for rem in edits.get("remove") or []:
         iid = rem.get("id") if isinstance(rem, dict) else rem
-        loc = _find_item(out, str(iid or ""))
+        loc = _find_item(out, str(iid or ""), kind)
         if loc:
             key, idx = loc
             del out["sections"][key][idx]
@@ -685,18 +875,20 @@ def apply_edits(
         if not isinstance(upd, dict):
             stats.dropped_invalid += 1
             continue
-        loc = _find_item(out, str(upd.get("id") or ""))
+        loc = _find_item(out, str(upd.get("id") or ""), kind)
         if not loc:
             stats.dropped_invalid += 1
             continue
         key, idx = loc
         item = out["sections"][key][idx]
         text = _clean_text(upd.get("text"))
-        if text and key == "relationships_with_others":
-            uid, name, text = _resolve_member({"user_id": item.get("user_id"), "name": item.get("name")}, text, directory)
+        if text and key == kind.relationship_key:
+            uid, name, text = _resolve_member(
+                {"user_id": item.get("user_id"), "name": item.get("name")}, text, directory, aliases
+            )
             item["user_id"], item["name"] = uid, name or item.get("name") or ""
-        grounded = key != "with_soupy" or _SOUPY_MENTION in source_lower
-        if text and text != item["text"] and grounded and not _copies_example(text, source_lower):
+        grounded = key != kind.soupy_grounded_key or _SOUPY_MENTION in source_lower
+        if text and text != item["text"] and grounded and not _copies_example(text, source_lower, kind):
             item["text"] = text
         _bump_last_seen(item, _clamp_date(upd.get("date"), window, stats))
         stats.updated += 1
@@ -708,34 +900,50 @@ def apply_edits(
         key = str(add.get("section") or "")
         text = _clean_text(add.get("text"))
         member: Optional[Tuple[int, str]] = None
-        if key == "relationships_with_others" and text:
-            uid, name, text = _resolve_member(add, text, directory)
+        if key == kind.relationship_key and text:
+            uid, name, text = _resolve_member(add, text, directory, aliases)
             member = (uid, name)
-        if key not in SECTION_BY_KEY or not text:
+        if key not in kind.by_key or not text:
             stats.dropped_invalid += 1
             continue
-        if _copies_example(text, source_lower):
+        if _copies_example(text, source_lower, kind):
             stats.dropped_example_copies += 1
             stats.notes.append(f"dropped example copy: {text[:80]}")
             continue
-        if key == "with_soupy" and _SOUPY_MENTION not in source_lower:
+        if key == kind.soupy_grounded_key and _SOUPY_MENTION not in source_lower:
             stats.dropped_ungrounded += 1
             stats.notes.append(f"dropped with_soupy item with no Soupy mention in the batch: {text[:80]}")
             continue
+        if (
+            member is not None
+            and kind.relationship_needs_presence
+            and not _present(member, directory, aliases, source_lower)
+        ):
+            stats.dropped_ungrounded += 1
+            stats.notes.append(f"dropped relationship item for someone not in the batch: {text[:80]}")
+            continue
         when = _clamp_date(add.get("date"), window, stats)
-        existing = _duplicate_of(out["sections"][key], text)
+        pool = out["sections"][key]
+        threshold = 0.75
+        if member is not None and kind.per_person_cap:
+            # Near-duplicates only count within the same person ("i trust X" and "i trust Y" differ), and
+            # within one person the bar is lower: a small model keeps rephrasing the same dynamic
+            # ("i'm pretty dry with him; i told him..." / "...i tell him...") instead of updating it.
+            pool = [it for it in pool if _as_int(it.get("user_id")) == member[0]]
+            threshold = 0.4
+        existing = _duplicate_of(pool, text, threshold)
         if existing is not None:
             if len(text) > len(existing["text"]) * 1.2:
                 existing["text"] = text
             _bump_last_seen(existing, when)
             stats.merged_duplicates += 1
             continue
-        item: Dict[str, Any] = {"id": _new_id(out, key), "text": text, "date": when}
+        item: Dict[str, Any] = {"id": _new_id(out, key, kind), "text": text, "date": when}
         if member is not None:
             item["user_id"] = member[0]
             if member[1]:
                 item["name"] = member[1]
-        elif key == "channels" and add.get("name"):
+        elif key == kind.named_key and add.get("name"):
             item["name"] = _clean_text(add.get("name"), NAME_MAX)
         out["sections"][key].append(item)
         stats.added += 1
@@ -747,51 +955,85 @@ def apply_edits(
     if style:
         out["communication_style"] = style
 
-    stats.moved_lately = age_out_lately(out, window[1], lately_days)
-    stats.dropped_over_cap = enforce_caps(out)
+    stats.moved_lately = age_out_lately(out, window[1], lately_days, kind)
+    stats.dropped_over_cap = enforce_caps(out, kind)
     return out, stats
 
 
-def age_out_lately(doc: Dict[str, Any], as_of: date, days: int = LATELY_DEFAULT_DAYS) -> int:
-    """Move "lately" items not confirmed within ``days`` of ``as_of`` into life events.
+def _present(
+    member: Tuple[int, str],
+    directory: Mapping[int, str],
+    aliases: Optional[Mapping[int, Sequence[str]]],
+    source_lower: str,
+) -> bool:
+    """True when a known member is named (by any name they've used, or by id) in the batch, as a whole word."""
+    uid, name = member
+    if not uid:
+        return False
+    for token in {name, directory.get(uid, ""), str(uid), *((aliases or {}).get(uid) or ())}:
+        token = (token or "").strip().lower()
+        if token and re.search(rf"(?<!\w){re.escape(token)}(?!\w)", source_lower):
+            return True
+    return False
+
+
+def age_out_lately(
+    doc: Dict[str, Any], as_of: date, days: int = LATELY_DEFAULT_DAYS, kind: Optional[DocumentKind] = None
+) -> int:
+    """Move "lately" items not confirmed within ``days`` of ``as_of`` into the kind's past-events section.
 
     ``as_of`` is the newest message date processed, not the wall clock, so a
     rebuild walking through old history ages items relative to that history.
     """
+    kind = kind or MEMBER
     if days <= 0:
         return 0
     cutoff = as_of - timedelta(days=days)
     keep: List[Dict[str, Any]] = []
     moved = 0
-    for it in doc["sections"]["current_situation"]:
+    into = kind.lately_into_key
+    for it in doc["sections"][kind.lately_key]:
         seen = _item_recency(it)
         if seen is not None and seen < cutoff:
-            if _duplicate_of(doc["sections"]["life_events"], it["text"]) is None:
-                moved_item = {"id": _new_id(doc, "life_events"), "text": it["text"], "date": it.get("date")}
+            if _duplicate_of(doc["sections"][into], it["text"]) is None:
+                moved_item = {"id": _new_id(doc, into, kind), "text": it["text"], "date": it.get("date")}
                 if it.get("last_seen"):
                     moved_item["last_seen"] = it["last_seen"]
-                doc["sections"]["life_events"].append(moved_item)
+                doc["sections"][into].append(moved_item)
             moved += 1
         else:
             keep.append(it)
-    doc["sections"]["current_situation"] = keep
+    doc["sections"][kind.lately_key] = keep
     return moved
 
 
-def enforce_caps(doc: Dict[str, Any]) -> int:
-    """Trim each section to its cap, dropping the items confirmed least recently."""
+def _drop_least_recent(items: List[Dict[str, Any]], keep: int) -> Tuple[List[Dict[str, Any]], int]:
+    if len(items) <= keep:
+        return items, 0
+    ranked = sorted(range(len(items)), key=lambda i: (_item_recency(items[i]) or date.min, i))
+    drop = set(ranked[: len(items) - keep])
+    return [it for i, it in enumerate(items) if i not in drop], len(drop)
+
+
+def enforce_caps(doc: Dict[str, Any], kind: Optional[DocumentKind] = None) -> int:
+    """Trim each section to its cap (and relationships to the per-person cap), dropping the items confirmed least
+    recently."""
+    kind = kind or MEMBER
     dropped = 0
-    for sec in SECTIONS:
-        items = doc["sections"][sec.key]
-        if len(items) <= sec.cap:
-            continue
-        ranked = sorted(
-            range(len(items)),
-            key=lambda i: (_item_recency(items[i]) or date.min, i),
-        )
-        drop = set(ranked[: len(items) - sec.cap])
-        doc["sections"][sec.key] = [it for i, it in enumerate(items) if i not in drop]
-        dropped += len(drop)
+    if kind.per_person_cap:
+        rel = doc["sections"][kind.relationship_key]
+        by_person: Dict[int, List[Dict[str, Any]]] = {}
+        for it in rel:
+            by_person.setdefault(_as_int(it.get("user_id")) or 0, []).append(it)
+        kept_ids: Set[str] = set()
+        for group in by_person.values():
+            kept, n = _drop_least_recent(group, kind.per_person_cap)
+            dropped += n
+            kept_ids.update(it["id"] for it in kept)
+        doc["sections"][kind.relationship_key] = [it for it in rel if it["id"] in kept_ids]
+    for sec in kind.sections:
+        doc["sections"][sec.key], n = _drop_least_recent(doc["sections"][sec.key], sec.cap)
+        dropped += n
     return dropped
 
 
@@ -800,45 +1042,75 @@ def enforce_caps(doc: Dict[str, Any]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def render_for_prompt(doc: Dict[str, Any]) -> str:
-    """The current profile as compact id-tagged lines for the build prompt."""
+def render_for_prompt(
+    doc: Dict[str, Any],
+    kind: Optional[DocumentKind] = None,
+    *,
+    relationship_user_ids: Optional[Set[int]] = None,
+    relationship_max_chars: int = 0,
+) -> str:
+    """The current profile as compact id-tagged lines for the build prompt.
+
+    ``relationship_user_ids`` limits relationship items to those people (the ones in this batch), newest first
+    within ``relationship_max_chars``; the model only needs them to update rather than duplicate.
+    """
+    kind = kind or MEMBER
     lines: List[str] = []
     if doc.get("overview"):
         lines.append(f"OVERVIEW: {doc['overview']}")
     if doc.get("communication_style"):
         lines.append(f"COMMUNICATION STYLE: {doc['communication_style']}")
-    for sec in SECTIONS:
+    for sec in kind.sections:
         items = section_items(doc, sec.key)
+        total = len(items)
+        is_rel = sec.key == kind.relationship_key
+        if is_rel and relationship_user_ids is not None:
+            items = [it for it in items if (_as_int(it.get("user_id")) or 0) in relationship_user_ids]
         if not items:
             continue
-        lines.append(f"[{sec.key}] ({len(items)}/{sec.cap})")
+        rows: List[str] = []
         for it in items:
             when = it.get("date") or "?"
             if it.get("last_seen"):
                 when = f"{when}..{it['last_seen']}"
             meta = ""
-            if sec.key == "relationships_with_others":
+            if is_rel:
                 meta = f" {{name={it.get('name') or '?'}, user_id={it.get('user_id') or 0}}}"
-            elif sec.key == "channels" and it.get("name"):
+            elif sec.key == kind.named_key and it.get("name"):
                 meta = f" {{channel={it['name']}}}"
-            lines.append(f"{it['id']} | {when} | {it['text']}{meta}")
-    return "\n".join(lines) if lines else "(empty — nothing is known about this member yet)"
+            rows.append(f"{it['id']} | {when} | {it['text']}{meta}")
+        if is_rel and relationship_user_ids is not None and relationship_max_chars > 0:
+            order = sorted(range(len(items)), key=lambda i: _item_recency(items[i]) or date.min, reverse=True)
+            keep: Set[int] = set()
+            used = 0
+            for i in order:
+                if used + len(rows[i]) + 1 > relationship_max_chars:
+                    break
+                keep.add(i)
+                used += len(rows[i]) + 1
+            rows = [r for i, r in enumerate(rows) if i in keep]
+            if not rows:
+                continue
+        lines.append(f"[{sec.key}] ({total}/{sec.cap})")
+        lines.extend(rows)
+    return "\n".join(lines) if lines else "(empty — nothing is known yet)"
 
 
-def render_summary(doc: Dict[str, Any], max_chars: int = 20000) -> str:
+def render_summary(doc: Dict[str, Any], max_chars: int = 20000, kind: Optional[DocumentKind] = None) -> str:
     """Readable plain-text profile with full dates (the ``summary`` column; shown in the dashboard)."""
+    kind = kind or MEMBER
     parts: List[str] = []
     if doc.get("overview"):
         parts.append("Overview:\n" + doc["overview"])
     if doc.get("communication_style"):
         parts.append("Communication style:\n" + doc["communication_style"])
-    for sec in SECTIONS:
+    for sec in kind.sections:
         items = section_items(doc, sec.key)
         if not items:
             continue
         rows = []
         for it in items:
-            label = _labelled(it) if sec.key in ("relationships_with_others", "channels") else it["text"]
+            label = _labelled(it) if sec.key in (kind.relationship_key, kind.named_key) else it["text"]
             when = it.get("date") or "undated"
             if it.get("last_seen"):
                 when = f"{when}, last seen {it['last_seen']}"
@@ -858,6 +1130,10 @@ class _Candidate:
     recency: date
 
 
+def _stale_lately(key: str, seen: date, today: date, lately_days: int, kind: DocumentKind) -> bool:
+    return key == kind.lately_key and lately_days > 0 and seen < today - timedelta(days=lately_days)
+
+
 def _cut_sentences(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -875,6 +1151,7 @@ def render_for_chat(
     *,
     today: date,
     lately_days: int = LATELY_DEFAULT_DAYS,
+    kind: Optional[DocumentKind] = None,
 ) -> str:
     """Pick the profile items most useful for this message and render them within ``max_chars``.
 
@@ -882,21 +1159,22 @@ def render_for_chat(
     (newest first) fills what's left. Whole items only — nothing is cut
     mid-sentence. Each item shows the month it came up in chat.
     """
+    kind = kind or MEMBER
     if not is_v2(doc):
         return ""
     qset = {_stem(t.lower()) for t in query_tokens if t and len(t) >= 2}
     broad = bool(qset & {_stem(w) for w in _BROAD_QUERY_WORDS})
     wants_style = broad or bool(qset & {_stem(w) for w in _STYLE_QUERY_WORDS})
 
-    section_boost = {key: len(qset & {_stem(w) for w in words}) for key, words in _SECTION_QUERY_WORDS.items()}
+    section_boost = {key: len(qset & {_stem(w) for w in words}) for key, words in kind.query_words.items()}
 
     pool: List[_Candidate] = []
-    for sec in SECTIONS:
-        if sec.key in _CHAT_EXCLUDED:
+    for sec in kind.sections:
+        if sec.key in kind.chat_excluded:
             continue
         for it in section_items(doc, sec.key):
             seen = _item_recency(it) or date.min
-            if sec.key == "current_situation" and lately_days > 0 and seen < today - timedelta(days=lately_days):
+            if _stale_lately(sec.key, seen, today, lately_days, kind):
                 continue
             overlap = len(qset & (_tokens(it.get("text") or "") | _tokens(it.get("name") or "")))
             relevance = overlap * 2 + section_boost.get(sec.key, 0)
@@ -915,7 +1193,7 @@ def render_for_chat(
     for lst in by_section.values():
         lst.sort(key=lambda c: -c.recency.toordinal())
     while any(by_section.values()):
-        for key in _CHAT_FILL_ORDER:
+        for key in kind.chat_fill_order:
             lst = by_section.get(key)
             if lst:
                 ordered.append(lst.pop(0))
@@ -931,11 +1209,11 @@ def render_for_chat(
     def _render(chosen: List[_Candidate], tail_style: bool) -> str:
         grouped: Dict[str, List[str]] = {}
         for c in chosen:
-            label = _labelled(c.item) if c.section.key == "relationships_with_others" else c.item["text"]
+            label = _labelled(c.item) if c.section.key == kind.relationship_key else c.item["text"]
             month = format_month(parse_date(c.item.get("date")))
             grouped.setdefault(c.section.key, []).append(f"{label} ({month})" if month else label)
         lines = list(head)
-        for sec in SECTIONS:
+        for sec in kind.sections:
             if sec.key in grouped:
                 lines.append(f"{sec.label}: " + "; ".join(grouped[sec.key]))
         if tail_style:
@@ -954,3 +1232,157 @@ def render_for_chat(
         # Only reachable when the overview alone overflows a tiny budget.
         text = text[: max_chars - 1] + "…"
     return text
+
+
+# ---------------------------------------------------------------------------
+# Rendering Soupy's own memory
+# ---------------------------------------------------------------------------
+
+
+def render_self_for_chat(
+    doc: Dict[str, Any],
+    *,
+    people: Mapping[int, str],
+    ranked_ids: Sequence[str] = (),
+    query_tokens: Sequence[str] = (),
+    max_chars: int,
+    today: date,
+    lately_days: int = LATELY_DEFAULT_DAYS,
+) -> str:
+    """Soupy's memories that matter for this reply, within ``max_chars``, whole items only.
+
+    Order of preference: how Soupy gets along with the ``people`` in the
+    conversation; items the embedding search ranked (``ranked_ids``, best
+    first); items sharing words with the message; then a few "lately" items.
+    Unlike a member profile, nothing unrelated is used to fill the budget:
+    an unprompted opinion reads as a non sequitur.
+    """
+    kind = SELF
+    if not is_v2(doc):
+        return ""
+    visible: Dict[str, Tuple[Section, Dict[str, Any]]] = {}
+    for sec in kind.sections:
+        if sec.key in kind.chat_excluded:
+            continue
+        for it in section_items(doc, sec.key):
+            if not _stale_lately(sec.key, _item_recency(it) or date.min, today, lately_days, kind):
+                visible[it["id"]] = (sec, it)
+
+    order: List[str] = []
+
+    def _push(iid: str) -> None:
+        if iid in visible and iid not in order:
+            order.append(iid)
+
+    def _newest(ids: List[str]) -> List[str]:
+        return sorted(ids, key=lambda i: _item_recency(visible[i][1]) or date.min, reverse=True)
+
+    for uid in people:
+        rel = [i for i, (sec, it) in visible.items() if sec.key == kind.relationship_key and it.get("user_id") == uid]
+        for iid in _newest(rel):
+            _push(iid)
+    for iid in ranked_ids:
+        if iid in visible and visible[iid][0].key != kind.relationship_key:
+            _push(iid)
+    qset = {_stem(t.lower()) for t in query_tokens if t and len(t) >= 2}
+    if qset:
+        boost = {key: len(qset & {_stem(w) for w in words}) for key, words in kind.query_words.items()}
+        scored = []
+        for iid, (sec, it) in visible.items():
+            overlap = len(qset & (_tokens(it.get("text") or "") | _tokens(it.get("name") or "")))
+            if overlap:
+                scored.append((overlap * 2 + boost.get(sec.key, 0), _item_recency(it) or date.min, iid))
+        for _score, _seen, iid in sorted(scored, reverse=True):
+            _push(iid)
+    lately = [i for i, (sec, _it) in visible.items() if sec.key == kind.lately_key]
+    for iid in _newest(lately)[:3]:
+        _push(iid)
+
+    def _render(chosen: List[str]) -> str:
+        about: Dict[str, List[str]] = {}
+        grouped: Dict[str, List[str]] = {}
+        for iid in chosen:
+            sec, it = visible[iid]
+            month = format_month(parse_date(it.get("date")))
+            text = f"{it['text']} ({month})" if month else it["text"]
+            if sec.key == kind.relationship_key:
+                about.setdefault(it.get("name") or people.get(it.get("user_id") or 0) or "someone", []).append(text)
+            else:
+                grouped.setdefault(sec.key, []).append(text)
+        lines = [f"About {name}: " + "; ".join(texts) for name, texts in about.items()]
+        for sec in kind.sections:
+            if sec.key in grouped:
+                lines.append(f"{sec.label}: " + "; ".join(grouped[sec.key]))
+        return "\n".join(lines)
+
+    chosen: List[str] = []
+    for iid in order:
+        chosen.append(iid)
+        if len(_render(chosen)) > max_chars:
+            chosen.pop()
+    return _render(chosen)
+
+
+def render_self_markdown(doc: Dict[str, Any]) -> str:
+    """The whole memory as markdown with full dates (``data/self_md/guild_<id>.md``, shown by /soupyself view)."""
+    kind = SELF
+    parts: List[str] = []
+    if doc.get("overview"):
+        parts.append("## who i am\n" + doc["overview"])
+    for sec in kind.sections:
+        items = section_items(doc, sec.key)
+        if not items:
+            continue
+        if sec.key == kind.relationship_key:
+            items = sorted(items, key=lambda it: ((it.get("name") or "").lower(), it.get("date") or ""))
+        rows = []
+        for it in items:
+            label = _labelled(it) if sec.key == kind.relationship_key else it["text"]
+            when = it.get("date") or "undated"
+            if it.get("last_seen"):
+                when = f"{when}, last seen {it['last_seen']}"
+            rows.append(f"- {label} ({when})")
+        note = " (never shown in chat)" if sec.key in kind.chat_excluded else ""
+        parts.append(f"## {sec.label.lower()}{note}\n" + "\n".join(rows))
+    return "\n\n".join(parts).strip()
+
+
+def render_self_core(doc: Dict[str, Any], max_chars: int = 3000) -> str:
+    """A compact first-person summary (``guild_<id>_core.md``): the overview, then the newest items of the sections
+    that say most about who Soupy is. The cogs read its opening lines as personality context."""
+    kind = SELF
+    blocks: List[str] = []
+    overview = (doc.get("overview") or "").strip()
+    if overview:
+        blocks.append(overview)
+    for key, count in (
+        ("personality_traits", 6),
+        ("current_situation", 4),
+        ("opinions_and_stances", 8),
+        ("likes_and_dislikes", 6),
+        ("running_jokes", 4),
+    ):
+        items = sorted(section_items(doc, key), key=lambda it: _item_recency(it) or date.min, reverse=True)
+        texts = [it["text"] for it in items[:count]]
+        if texts:
+            blocks.append(f"{kind.by_key[key].label.lower()}: " + "; ".join(texts))
+    out: List[str] = []
+    for block in blocks:
+        if len("\n\n".join(out + [block])) > max_chars:
+            break
+        out.append(block)
+    return "\n\n".join(out)
+
+
+def self_anchor(doc: Dict[str, Any], max_chars: int) -> str:
+    """The always-on identity line for every reply: as many whole sentences of the overview as fit."""
+    overview = (doc.get("overview") or "").strip()
+    if not overview:
+        overview = ". ".join(it["text"] for it in section_items(doc, "personality_traits"))
+    out = ""
+    for sentence in re.split(r"(?<=[.!?])\s+", overview):
+        candidate = f"{out} {sentence}".strip()
+        if len(candidate) > max_chars:
+            break
+        out = candidate
+    return out or _cut_sentences(overview, max_chars)

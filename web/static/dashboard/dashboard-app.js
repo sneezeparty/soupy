@@ -1663,6 +1663,9 @@
         setEnvToggles({
           DAILY_POST_ENABLED: (vars.DAILY_POST_ENABLED || "").toLowerCase() === "true",
           BLUESKY_AUTO_REPLY: (vars.BLUESKY_AUTO_REPLY || "").toLowerCase() === "true",
+          // These two cards' pills read here too; without them they always loaded as off.
+          SELF_MD_ENABLED: ["1", "true", "yes"].indexOf((vars.SELF_MD_ENABLED || "").toLowerCase()) !== -1,
+          MUSING_ENABLED: ["1", "true", "yes", "y", "on"].indexOf((vars.MUSING_ENABLED || "").toLowerCase()) !== -1,
           // Defaults on when unset (matches the bot).
           USER_PROFILE_NIGHTLY_ENABLED:
             ["0", "false", "no", "off"].indexOf((vars.USER_PROFILE_NIGHTLY_ENABLED || "true").toLowerCase()) === -1,
@@ -1786,6 +1789,24 @@
         setRuntimeFlags(data || { rag_enabled: false });
       } catch (_err) {
         setRuntimeFlags({ rag_enabled: false });
+      }
+    }
+
+    async function refreshSelfMemory() {
+      if (!dbGuild) return;
+      setBusy(true);
+      setNotice("Queueing a refresh of Soupy's memory…");
+      setNoticeError(false);
+      try {
+        await readJson("/api/self-memory/refresh/" + encodeURIComponent(dbGuild), { method: "POST" });
+        setNotice(
+          "Queued. The bot reads Soupy's new messages at its next chance (between members if a profile job is running); progress shows in the Database tab's profile log."
+        );
+      } catch (err) {
+        setNotice("Could not queue the refresh: " + err.message);
+        setNoticeError(true);
+      } finally {
+        setBusy(false);
       }
     }
 
@@ -2338,6 +2359,7 @@
         }
 
         var pendingTitle = "Manual trigger plumbing not yet implemented (planned).";
+        var selfMemory = ((dashStatus.self_memory || {})[dbGuild]) || {};
 
         // ---------- Band 0 — Sticky status bar ----------
         var stickyBar = e(
@@ -2573,19 +2595,22 @@
             runNowTitle: !dbGuild ? "Pick a guild in Knobs → RAG" : null
           }),
           loopCard({
-            key: "loop-self-reflect",
-            title: "Self-Reflection",
+            key: "loop-self-memory",
+            title: "Soupy's Memory",
             on: !!envToggles.SELF_MD_ENABLED,
             onToggle: function () { toggleEnvVar("SELF_MD_ENABLED"); },
-            toggleHint: "Toggling writes .env-stable; takes effect on next bot restart.",
-            nextRunIso: (timers.self_reflect || {}).next_run,
-            lastRunIso: (timers.self_reflect || {}).last_run,
-            intervalLabel: (timers.self_reflect || {}).interval || null,
-            todayLine: dashStatus.self_md_pending != null
-              ? dashStatus.self_md_pending + " interactions pending"
-              : null,
-            runNowDisabled: true,
-            runNowTitle: pendingTitle
+            toggleHint: "Soupy's memory of itself, built from its own messages at the end of each profile refresh. Toggling writes .env-stable; takes effect on next bot restart.",
+            nextRunIso: (timers.profile_nightly || {}).next_run,
+            lastRunIso: selfMemory.updated_at || null,
+            intervalLabel: "after each profile refresh",
+            todayLine: !dbGuild
+              ? null
+              : selfMemory.items != null
+                ? fmtNum(selfMemory.items) + " memories"
+                : "not built yet",
+            runNowDisabled: !dbGuild || busy,
+            runNowOnClick: refreshSelfMemory,
+            runNowTitle: !dbGuild ? "Pick a guild in Knobs → RAG" : "Queue a refresh; the bot runs it between profile members"
           }),
           loopCard({
             key: "loop-profile-nightly",
@@ -2769,8 +2794,8 @@
                 keys: ["BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD", "BLUESKY_AUTO_REPLY", "BLUESKY_REPLIES_MIN", "BLUESKY_REPLIES_MAX", "BLUESKY_REPOSTS_PER_DAY", "BLUESKY_POSTS_PER_DAY", "BLUESKY_MIN_GAP_MINUTES", "BLUESKY_MAX_LIKES_PER_DAY", "BLUESKY_MAX_FOLLOWS_PER_DAY", "BLUESKY_ARTICLE_FRESHNESS_DAYS"],
               },
               soupyself: {
-                desc: "Self-knowledge and reflection system",
-                keys: ["SELF_MD_ENABLED", "SELF_MD_REFLECT_INTERVAL_HOURS", "SELF_MD_MIN_INTERACTIONS", "SELF_MD_MAX_WORDS", "SELF_MD_CORE_MAX_WORDS", "SELF_MD_ARCHIVE_MAX_CHARS", "SELF_MD_MAX_ACCUMULATED", "SELF_MD_REFLECT_TEMPERATURE", "SELF_MD_REFLECT_MAX_TOKENS", "SELF_MD_CORE_TEMPERATURE", "SELF_MD_CORE_MAX_TOKENS"],
+                desc: "Soupy's memory of itself — built from its own messages with the profile refresh",
+                keys: ["SELF_MD_ENABLED", "SELF_MD_ANCHOR_MAX_CHARS", "SELF_MD_ANCHOR_FALLBACK_CHARS", "RAG_SELF_KNOWLEDGE_MIN_SIM", "RAG_SELF_KNOWLEDGE_MAX_CHARS", "RAG_SELF_KNOWLEDGE_TOP_K"],
               },
               soupyscan: {
                 desc: "Archive channel messages to database",
@@ -2848,16 +2873,11 @@
               MUSING_HOUR_MIN: "6",
               MUSING_HOUR_MAX: "20",
               SELF_MD_ENABLED: "false",
-              SELF_MD_REFLECT_INTERVAL_HOURS: "24",
-              SELF_MD_MIN_INTERACTIONS: "3",
-              SELF_MD_MAX_WORDS: "15000",
-              SELF_MD_CORE_MAX_WORDS: "800",
-              SELF_MD_ARCHIVE_MAX_CHARS: "50000",
-              SELF_MD_MAX_ACCUMULATED: "60",
-              SELF_MD_REFLECT_TEMPERATURE: "0.7",
-              SELF_MD_REFLECT_MAX_TOKENS: "4000",
-              SELF_MD_CORE_TEMPERATURE: "0.5",
-              SELF_MD_CORE_MAX_TOKENS: "1500",
+              SELF_MD_ANCHOR_MAX_CHARS: "600",
+              SELF_MD_ANCHOR_FALLBACK_CHARS: "600",
+              RAG_SELF_KNOWLEDGE_MIN_SIM: "0.3",
+              RAG_SELF_KNOWLEDGE_MAX_CHARS: "2500",
+              RAG_SELF_KNOWLEDGE_TOP_K: "5",
               SOUPY_DB_DIR: "soupy_database/databases",
               SCAN_EXCLUDE_CHANNEL_IDS: "(none)",
               FIRST_SCAN_LOOKBACK_DAYS: "365",

@@ -217,13 +217,18 @@ Dated member profiles built from the archive by the bot (never the web panel), o
 - **`USER_PROFILE_NIGHTLY_MAX_MINUTES`** — `180` — Time limit per night. Every pass saves, so unfinished members continue the next night.
 - **`USER_PROFILE_NIGHTLY_MIN_NEW_MESSAGES`** — `10` — New messages a member needs before the nightly refresh updates them.
 
-## Self-Context (`self.md`)
+## Soupy's Memory (`SELF_MD_*`)
 
-- **`SELF_MD_ENABLED`** — `true` — Enable the running self-knowledge document and reflection cycle.
-- **`SELF_MD_ANCHOR_MAX_CHARS`** — `600` — Size cap on the always-on identity slug.
-- **`SELF_MD_ANCHOR_TEMPERATURE`** — `0.5` — Distillation temperature for the anchor.
-- **`SELF_MD_ANCHOR_MAX_TOKENS`** — `400` — Token cap for the anchor distillation step.
-- **`SELF_MD_ANCHOR_FALLBACK_CHARS`** — `600` — Character cap on the truncated-core fallback used before the first reflection completes.
+Soupy's memory of itself is built from its own messages with the member-profile machinery, at the end of each profile refresh, so the `USER_PROFILE_*` pass, nightly and time-limit settings apply to it too.
+
+- **`SELF_MD_ENABLED`** — `true` — Build and use Soupy's memory, and put its identity line in every reply.
+- **`SELF_MD_ANCHOR_MAX_CHARS`** — `600` — Length of the identity line (the memory's first-person overview, whole sentences).
+- **`SELF_MD_ANCHOR_FALLBACK_CHARS`** — `600` — Truncation cap when a server has no anchor file.
+- **`RAG_SELF_KNOWLEDGE_MAX_CHARS`** — `2500` — Characters of Soupy's memories in a reply's context.
+- **`RAG_SELF_KNOWLEDGE_MIN_SIM`** — `0.3` — Minimum embedding similarity for a memory to count as related to the message.
+- **`RAG_SELF_KNOWLEDGE_TOP_K`** — `5` — Old SELF.MD chunks retrieved for a server whose memory hasn't been built yet.
+
+Retired with the nightly reflection: `SELF_MD_REFLECT_HOUR`, `SELF_MD_MIN_INTERACTIONS`, `SELF_MD_MAX_WORDS`, `SELF_MD_CORE_MAX_WORDS`, `SELF_MD_ARCHIVE_MAX_CHARS`, `SELF_MD_MAX_ACCUMULATED`, `SELF_MD_REFLECT_TEMPERATURE`, `SELF_MD_REFLECT_MAX_TOKENS`, `SELF_MD_CORE_TEMPERATURE`, `SELF_MD_CORE_MAX_TOKENS`, `SELF_MD_ANCHOR_TEMPERATURE`, `SELF_MD_ANCHOR_MAX_TOKENS`.
 
 ## Daily Article Posts (Discord)
 

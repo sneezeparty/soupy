@@ -20,6 +20,13 @@ import asyncio
 import pytest
 
 import soupy_remastered_stablediffusion as bot
+from soupy import llm_gate
+
+
+@pytest.fixture(autouse=True)
+def quiet_chat(monkeypatch):
+    monkeypatch.setattr(llm_gate, "_chat_pending", 0)
+    monkeypatch.setattr(llm_gate, "_last_chat_activity", 0.0)
 
 
 async def _drain(queue, timeout=2.0):
@@ -123,6 +130,30 @@ def test_a_failing_reply_does_not_kill_the_consumer(monkeypatch):
 
     asyncio.run(scenario())
     assert handled == ["after"]
+
+
+def test_pending_chat_count_covers_queued_and_running_replies(monkeypatch):
+    """The profile builder steps aside while this is non-zero, so it must balance even when a reply fails."""
+    seen = []
+
+    async def fake_chat(message, image_descriptions):
+        seen.append((message, llm_gate.chat_pending()))
+        await asyncio.sleep(0.02)
+        if message == "boom":
+            raise RuntimeError("LM Studio is down")
+
+    monkeypatch.setattr(bot, "process_chat_message", fake_chat)
+
+    async def scenario():
+        q = bot.ChatQueue()
+        for msg in ("boom", "after"):
+            await q.put({"type": "chat", "message": msg, "image_descriptions": []})
+        assert llm_gate.chat_pending() == 2
+        await _drain(q)
+
+    asyncio.run(scenario())
+    assert seen == [("boom", 2), ("after", 1)], "a running reply still counts as pending"
+    assert llm_gate.chat_pending() == 0
 
 
 # ---------------------------------------------------------------------------

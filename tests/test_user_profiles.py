@@ -16,6 +16,7 @@ pytest-asyncio isn't a dependency, so coroutines run under ``asyncio.run``.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import re
 import sqlite3
@@ -29,6 +30,13 @@ from soupy_database import profile_document as pdoc
 from soupy_database import profile_llm, user_profiles
 
 WINDOW = (date(2025, 3, 1), date(2025, 3, 20))
+
+
+@pytest.fixture(autouse=True)
+def quiet_chat(monkeypatch):
+    """Start every test with no chat pending: other test modules drive ChatQueue, and the gate is module state."""
+    monkeypatch.setattr(llm_gate, "_chat_pending", 0)
+    monkeypatch.setattr(llm_gate, "_last_chat_activity", 0.0)
 
 
 def _doc_with(edits, window=WINDOW, source="", **kw):
@@ -72,7 +80,9 @@ def test_dates_outside_the_batch_are_replaced_with_the_batch_end():
 
 
 def test_update_confirms_with_last_seen_and_remove_deletes():
-    doc, _ = _doc_with({"add": [{"section": "work_and_education", "text": "works in hospital IT", "date": "2025-03-02"}]})
+    doc, _ = _doc_with(
+        {"add": [{"section": "work_and_education", "text": "works in hospital IT", "date": "2025-03-02"}]}
+    )
     iid = pdoc.section_items(doc, "work_and_education")[0]["id"]
 
     later = (date(2025, 6, 1), date(2025, 6, 30))
@@ -112,10 +122,20 @@ def test_invalid_sections_and_unknown_relationship_ids_are_handled():
         {
             "add": [
                 {"section": "made_up_section", "text": "x", "date": "2025-03-05"},
-                {"section": "relationships_with_others", "text": "rivals at trivia", "date": "2025-03-05",
-                 "user_id": 999, "name": "bob"},
-                {"section": "relationships_with_others", "text": "plays co-op games together", "date": "2025-03-05",
-                 "user_id": 42, "name": "amy"},
+                {
+                    "section": "relationships_with_others",
+                    "text": "rivals at trivia",
+                    "date": "2025-03-05",
+                    "user_id": 999,
+                    "name": "bob",
+                },
+                {
+                    "section": "relationships_with_others",
+                    "text": "plays co-op games together",
+                    "date": "2025-03-05",
+                    "user_id": 42,
+                    "name": "amy",
+                },
             ]
         },
         directory={42: "amy"},
@@ -131,10 +151,18 @@ def test_relationship_items_get_names_and_lose_raw_ids():
         {
             "add": [
                 # The two shapes gemma actually produced in the first sample build.
-                {"section": "relationships_with_others", "text": "user 0 (?): user 109839305987338240; lives in Barrie",
-                 "date": "2025-03-05", "user_id": 0},
-                {"section": "relationships_with_others", "text": "met up with them in Yelapa",
-                 "date": "2025-03-06", "user_id": 555245126172278785},
+                {
+                    "section": "relationships_with_others",
+                    "text": "user 0 (?): user 109839305987338240; lives in Barrie",
+                    "date": "2025-03-05",
+                    "user_id": 0,
+                },
+                {
+                    "section": "relationships_with_others",
+                    "text": "met up with them in Yelapa",
+                    "date": "2025-03-06",
+                    "user_id": 555245126172278785,
+                },
             ]
         },
         directory=directory,
@@ -152,8 +180,15 @@ def test_relationship_items_get_names_and_lose_raw_ids():
     iid = rels[0]["id"]
     doc, _ = pdoc.apply_edits(
         doc,
-        {"update": [{"id": iid, "date": "2025-03-10",
-                     "text": "fellow Canadian near Barrie {name=ohsmitt, user_id=109839305987338240}"}]},
+        {
+            "update": [
+                {
+                    "id": iid,
+                    "date": "2025-03-10",
+                    "text": "fellow Canadian near Barrie {name=ohsmitt, user_id=109839305987338240}",
+                }
+            ]
+        },
         window=WINDOW,
         source_text="",
         directory=directory,
@@ -389,6 +424,49 @@ def test_llm_turn_serializes_tasks():
     assert peak == 1
 
 
+def test_wait_for_chat_returns_at_once_when_nothing_is_pending():
+    waited = asyncio.run(llm_gate.wait_for_chat_to_clear(grace_seconds=60, max_wait_seconds=5, poll_seconds=0.01))
+    assert waited < 0.5
+
+
+def test_wait_for_chat_holds_until_the_reply_is_done_plus_grace():
+    marks = {}
+
+    async def scenario():
+        llm_gate.note_chat_queued()
+        waiter = asyncio.create_task(
+            llm_gate.wait_for_chat_to_clear(grace_seconds=0.1, max_wait_seconds=5, poll_seconds=0.01)
+        )
+        await asyncio.sleep(0.15)
+        marks["still_waiting"] = not waiter.done()
+        llm_gate.note_chat_done()
+        await asyncio.sleep(0.05)
+        marks["waiting_in_grace"] = not waiter.done()
+        return await waiter
+
+    waited = asyncio.run(scenario())
+    assert marks == {"still_waiting": True, "waiting_in_grace": True}
+    assert 0.25 <= waited < 1.5
+    assert llm_gate.chat_pending() == 0
+
+
+def test_wait_for_chat_gives_up_on_a_stuck_counter_and_keeps_heartbeating():
+    ticks = []
+    llm_gate.note_chat_queued()
+    waited = asyncio.run(
+        llm_gate.wait_for_chat_to_clear(
+            grace_seconds=0, max_wait_seconds=0.2, poll_seconds=0.01, tick=lambda: ticks.append(1), tick_seconds=0.05
+        )
+    )
+    assert 0.2 <= waited < 1.0
+    assert ticks, "a long wait must keep the job heartbeat fresh"
+
+
+def test_chat_done_never_goes_negative():
+    llm_gate.note_chat_done()
+    assert llm_gate.chat_pending() == 0
+
+
 # ---------------------------------------------------------------------------
 # The pass loop, against a throwaway archive
 # ---------------------------------------------------------------------------
@@ -450,7 +528,7 @@ def _message_count(prompt: str) -> int:
 def _fake_llm(monkeypatch, behaviour):
     calls = []
 
-    async def fake(system_prompt, user_prompt, *, max_tokens, progress=None):
+    async def fake(system_prompt, user_prompt, *, max_tokens, progress=None, kind=None):
         n = _message_count(user_prompt)
         first_date = re.search(r"\n\[(\d{4}-\d{2}-\d{2}) #", user_prompt).group(1)
         calls.append(n)
@@ -510,6 +588,29 @@ def test_recent_chat_shrinks_passes(archive, monkeypatch):
     monkeypatch.setattr(user_profiles, "seconds_since_chat_activity", lambda: 30.0)
     asyncio.run(user_profiles.refresh_user_profile(1, 1))
     assert calls == [6, 6, 6, 6, 6]
+
+
+def test_passes_wait_while_a_chat_reply_is_pending(archive, monkeypatch):
+    calls = _fake_llm(monkeypatch, _one_add)
+    monkeypatch.setattr(user_profiles, "_CHAT_GRACE_SEC", 0.05)
+    monkeypatch.setattr(
+        user_profiles,
+        "wait_for_chat_to_clear",
+        functools.partial(llm_gate.wait_for_chat_to_clear, poll_seconds=0.01),
+    )
+    seen = {}
+
+    async def scenario():
+        llm_gate.note_chat_queued()
+        build = asyncio.create_task(user_profiles.refresh_user_profile(1, 1))
+        await asyncio.sleep(0.2)
+        seen["calls_while_chat_pending"] = len(calls)
+        llm_gate.note_chat_done()
+        return await asyncio.wait_for(build, 5)
+
+    result = asyncio.run(scenario())
+    assert seen["calls_while_chat_pending"] == 0
+    assert result["passes"] == 3 and calls == [10, 10, 10]
 
 
 def test_stop_and_resume_continue_from_the_saved_pass(archive, monkeypatch):

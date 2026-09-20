@@ -15,9 +15,11 @@ Modes (weights in ``_MODE_WEIGHTS``):
 Cross-module:
 
 * Reads message archive via ``soupy_database.database.get_db_path`` (SQLite).
-* When ``SELF_MD_ENABLED`` is set, calls
-  ``soupy_database.self_context.add_notable_interaction`` to feed *synthesis*
-  musings (only) into the reflection accumulator. See ``_SELF_FEEDBACK_MODES``.
+* When ``SELF_MD_ENABLED`` is set, ``random_thought`` seeds from Soupy's memory
+  (``soupy_database.self_profile.memory_seed_lines``), and the other modes read
+  its core summary. Musings themselves never reach the memory: it is built from
+  the message archive, and posted musings aren't archived. That also keeps the
+  old echo loop (a musing becomes a memory, which seeds the next musing) closed.
 * When ``RAG_EMBEDDING_MODEL`` is set, uses
   ``soupy_database.rag.embed_texts_lm_studio`` for similarity dedupe.
 
@@ -64,7 +66,7 @@ from soupy.scheduling import (
 )
 from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
-from soupy_database.self_context import add_notable_interaction, is_self_md_enabled
+from soupy_database.self_context import is_self_md_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +99,6 @@ RECENT_TOPIC_WINDOW = 15
 # said." Higher = stricter (only catches near-duplicates). 0.88 is conservative
 # enough that genuinely fresh thoughts pass even if they share vocabulary.
 EMBED_SIMILARITY_THRESHOLD = 0.88
-
-# Modes whose musings get fed back into the self-reflection accumulator. Other
-# modes are quick reactions — feeding them in turned the self-doc into an echo
-# chamber that then re-seeded future musings via random_thought.
-_SELF_FEEDBACK_MODES: Set[str] = {"synthesis"}
-
 
 # ---------------------------------------------------------------------------
 # File I/O helpers
@@ -970,36 +966,7 @@ class MusingsCog(commands.Cog):
                         for old_ts in sorted_ts[:-RECENT_TOPIC_WINDOW]:
                             self._musing_embeddings.pop(old_ts, None)
 
-            await self._feed_musing_into_self(guild_id, mode, thought, source_hint)
             return thought
-
-    async def _feed_musing_into_self(
-        self, guild_id: int, mode: str, thought: str, source_hint: str
-    ) -> None:
-        """Route a synthesis musing into the self-reflection accumulator.
-
-        Restricted to synthesis-mode musings only. The other modes are quick
-        reactions to specific external triggers, and feeding all of them into
-        self-reflection created an echo loop — past musings would surface in
-        ``self_md``, then reappear as seeds for ``random_thought``, which the
-        keyword dedupe couldn't catch (different wording, same idea).
-        """
-        if mode not in _SELF_FEEDBACK_MODES:
-            return
-        if not is_self_md_enabled():
-            return
-        try:
-            trigger = (source_hint or "(no specific source)")[:400]
-            await add_notable_interaction(
-                guild_id=guild_id,
-                user_display_name="(self)",
-                user_message=f"[unprompted musing — mode={mode} — triggered by: {trigger}]",
-                bot_reply=thought,
-                conversation_context="",
-            )
-            logger.debug("💭 Fed %s-mode musing into self-reflection accumulator", mode)
-        except Exception as exc:  # never let self-context break musing
-            logger.debug("💭 Failed to feed musing into self-reflection: %s", exc)
 
     # ------------------------------------------------------------------
     # Thought generation
@@ -1416,34 +1383,35 @@ class MusingsCog(commands.Cog):
         seed: Optional[str] = None
         try:
             from soupy_database.self_context import load_self_md
+            from soupy_database.self_profile import memory_seed_lines
 
             if is_self_md_enabled():
-                full_doc = load_self_md(guild_id)
-                if full_doc:
+                lines = memory_seed_lines(guild_id)
+                if lines is None:  # no memory built yet: the old SELF.MD
                     lines = [
-                        ln.strip() for ln in full_doc.split("\n")
+                        ln.strip() for ln in load_self_md(guild_id).split("\n")
                         if ln.strip() and not ln.startswith("##")
                     ]
-                    if lines:
-                        # Try a few times to find a seed that doesn't overlap
-                        # recent banned subjects. If all picks collide, drop
-                        # the seed and fall through to a generic prompt.
-                        random.shuffle(lines)
-                        for candidate in lines[:8]:
-                            if not _candidate_overlaps(candidate, banned_kws):
-                                seed = candidate
-                                break
-                        if seed:
-                            self_context = (
-                                f"\nSomething from your memory: {seed}\n"
-                                f"If you build on this, work in a concrete handle "
-                                f"(a phrase, a name, the specific topic) so the "
-                                f"connection is visible."
-                            )
-                        else:
-                            logger.debug(
-                                "💭 random_thought: every self_md seed overlapped banned subjects"
-                            )
+                if lines:
+                    # Try a few times to find a seed that doesn't overlap
+                    # recent banned subjects. If all picks collide, drop
+                    # the seed and fall through to a generic prompt.
+                    random.shuffle(lines)
+                    for candidate in lines[:8]:
+                        if not _candidate_overlaps(candidate, banned_kws):
+                            seed = candidate
+                            break
+                    if seed:
+                        self_context = (
+                            f"\nSomething from your memory: {seed}\n"
+                            f"If you build on this, work in a concrete handle "
+                            f"(a phrase, a name, the specific topic) so the "
+                            f"connection is visible."
+                        )
+                    else:
+                        logger.debug(
+                            "💭 random_thought: every self_md seed overlapped banned subjects"
+                        )
         except Exception:
             pass
 

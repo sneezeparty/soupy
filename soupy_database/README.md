@@ -9,7 +9,8 @@ Handles message storage, RAG retrieval, user profiles, and self-knowledge for th
 | `database.py` | Core schema, message storage, scan operations |
 | `rag.py` | RAG embeddings, cosine similarity search, chunk indexing |
 | `user_profiles.py` | Structured user profile generation via LLM |
-| `self_context.py` | Self-knowledge reflection, core summaries, archives |
+| `self_profile.py` | Soupy's memory of itself, built from its own messages like a member profile |
+| `self_context.py` | SELF.MD files and the identity anchor injected into replies |
 | `runtime_flags.py` | Shared runtime state (command toggles, flags) |
 | `profile_batch.py` | Batch profile generation worker |
 | `helpers.py` | Image description and URL summarization helpers |
@@ -57,13 +58,13 @@ Each guild gets a database at `databases/guild_{guild_id}.db` (or `SOUPY_DB_DIR`
 
 ### User Profiles (`user_profiles.py`)
 - `_load_structured_profiles()` — Bulk-load profiles for a list of user IDs
-- `_chunked_profile_build()` — Multi-pass profile generation from full archives
+- `refresh_user_profile()` — Fold a member's unread messages into their profile, one saved pass at a time (`run_edit_passes()` is the loop, shared with Soupy's memory)
 - `ensure_user_profile_schema()` — Create profile tables if missing
 
-### Self-Knowledge (`self_context.py`)
-- Reflection cycles: accumulate interactions → LLM reflects → update core + archive
-- Core document: compressed summary of personality, opinions, relationships
-- Archive: older material pruned from core, RAG-indexed
+### Soupy's Memory (`self_profile.py`, `self_context.py`)
+- Built from Soupy's archived messages (with what members said just before) in passes, at the end of each profile job
+- Dated, sectioned items: personality, lately, people, opinions, likes & dislikes, running jokes, moments, about me
+- Rendered into `data/self_md/guild_<id>.md` / `_core.md` / `_anchor.md`; items embedded into `self_chunks` for chat
 
 ## Usage
 

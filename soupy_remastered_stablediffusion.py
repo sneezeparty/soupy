@@ -20,8 +20,8 @@ Cross-module imports worth knowing:
 
 * ``soupy_database.rag`` — RAG retrieval (``build_rag_retrieval_query``,
   ``fetch_rag_context_for_query``, gate-word stripping).
-* ``soupy_database.self_context`` — self-knowledge document; ``add_notable_interaction``
-  is called from chat path to seed the next reflection cycle.
+* ``soupy_database.self_context`` — the identity anchor injected into every reply;
+  ``soupy_database.self_profile`` builds Soupy's memory behind it (in the profile worker).
 * ``soupy_database.runtime_flags`` — ``is_rag_enabled``, command-disable
   toggles. mtime-cached; updates from the web panel are picked up without
   a bot restart.
@@ -127,7 +127,7 @@ from timezonefinder import TimezoneFinder
 
 from soupy import prompts as soupy_prompts
 from soupy.llm_gate import gate_busy as llm_gate_busy
-from soupy.llm_gate import llm_turn, note_chat_activity
+from soupy.llm_gate import llm_turn, note_chat_activity, note_chat_done, note_chat_queued
 from soupy.settings import openai_client
 from soupy_database import process_scan_triggers, setup_scan_command
 from soupy_database.helpers import extract_url_content, extract_urls
@@ -139,14 +139,9 @@ from soupy_database.rag import (
 )
 from soupy_database.runtime_flags import is_rag_enabled
 from soupy_database.self_context import (
-    add_notable_interaction,
     get_self_md_for_injection,
     is_self_md_enabled,
     load_self_md,
-    pending_interaction_count,
-)
-from soupy_database.self_context import (
-    reflect_and_update as self_md_reflect,
 )
 from soupy_database.user_profiles import profile_jobs_loop
 
@@ -635,20 +630,30 @@ class ChatQueue(_WorkQueue):
     (which sizes itself close to LM Studio's whole context window) can never
     run alongside it. If a pass is mid-flight the reply waits for it, with the
     typing indicator already showing.
+
+    `put` and the consumer also keep the gate's pending-chat count, which the
+    profile builder checks before each pass: it stays out of the way while
+    any reply is queued or running. Every `note_chat_queued` must be balanced
+    by exactly one `note_chat_done`, hence the `finally`.
     """
+
+    async def put(self, item):
+        note_chat_queued()
+        await super().put(item)
 
     async def process_queue(self):
         while not self._shutdown:
+            item = await self.get()
             try:
-                item = await self.get()
                 note_chat_activity()
                 message = item["message"]
                 typing = message.channel.typing() if llm_gate_busy() else contextlib.nullcontext()
                 async with typing, llm_turn():
                     await process_chat_message(message, item["image_descriptions"])
-                note_chat_activity()
             except Exception as e:
                 logger.error(f"Error processing chat queue item: {e}")
+            finally:
+                note_chat_done()
 
 
 # Then your bot initialization can use the SoupyBot class
@@ -993,7 +998,6 @@ chat_functions_online = True  # Assume online at start
 timer_state = {
     "archive_scan": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
     "rag_reindex": {"last_run": None, "next_run": None, "interval": None, "enabled": True},
-    "self_reflect": {"last_run": None, "next_run": None, "interval": None, "enabled": False},
     "profile_nightly": {"last_run": None, "next_run": None, "interval": None, "enabled": False},
     "musings": {
         "last_run": None,
@@ -1995,16 +1999,16 @@ async def sync_commands(ctx, scope: Literal["global", "guild", "clear-guild"] = 
         logger.error(f"Error syncing commands by {ctx.author}: {str(e)}")
 
 
-@bot.tree.command(name="soupyself", description="View or manage Soupy's self-knowledge document (owner only).")
+@bot.tree.command(name="soupyself", description="View or manage Soupy's memory of itself (owner only).")
 @app_commands.describe(
-    action="What to do: view (default), core (view core summary), archive (view pruned entries), reflect (force reflection now), or reset"
+    action="view (default), core (identity line + summary), archive (old SELF.MD pruned entries), refresh, or reset"
 )
 @app_commands.choices(
     action=[
         app_commands.Choice(name="view", value="view"),
         app_commands.Choice(name="core", value="core"),
         app_commands.Choice(name="archive", value="archive"),
-        app_commands.Choice(name="reflect", value="reflect"),
+        app_commands.Choice(name="refresh", value="refresh"),
         app_commands.Choice(name="reset", value="reset"),
     ]
 )
@@ -2030,117 +2034,77 @@ async def soupyself_command(
         )
         return
 
-    if act == "view":
-        from soupy_database.self_context import load_self_archive
+    from soupy_database import self_profile
 
+    async def _send_paged(header: str, content: str) -> None:
+        # Discord has a 2000 char limit per message — split into pages
+        max_per_msg = 1900
+        first_max = max_per_msg - len(header)
+        await interaction.response.send_message(header + content[:first_max], ephemeral=True)
+        remaining = content[first_max:]
+        while remaining:
+            await interaction.followup.send(remaining[:max_per_msg], ephemeral=True)
+            remaining = remaining[max_per_msg:]
+
+    if act == "view":
+        summary = self_profile.memory_summary(guild_id)
         content = load_self_md(guild_id)
-        pending = pending_interaction_count(guild_id)
-        archive = load_self_archive(guild_id)
-        if not content:
-            await interaction.response.send_message(
-                f"no self-document yet for this server. {pending} interaction(s) pending reflection.",
-                ephemeral=True,
-            )
-        else:
-            header = (
-                f"**SELF.MD** (full={len(content)} chars, archive={len(archive)} chars, "
-                f"{pending} interactions pending)\n"
-            )
-            # Discord has a 2000 char limit per message — split into pages
-            max_per_msg = 1900
-            first_max = max_per_msg - len(header)
-            if len(content) <= first_max:
-                await interaction.response.send_message(header + content, ephemeral=True)
+        if summary is None:
+            note = "no memory built yet for this server — it builds at the end of the next profile job."
+            if content:
+                await _send_paged(f"**SELF.MD (old, until the memory is built)** — {note}\n", content)
             else:
-                await interaction.response.send_message(header + content[:first_max], ephemeral=True)
-                remaining = content[first_max:]
-                while remaining:
-                    chunk = remaining[:max_per_msg]
-                    remaining = remaining[max_per_msg:]
-                    await interaction.followup.send(chunk, ephemeral=True)
+                await interaction.response.send_message(note, ephemeral=True)
+            return
+        cov = summary["coverage"]
+        header = (
+            f"**Soupy's memory** — {summary['items']} items from {cov.get('messages', 0)} exchanges "
+            f"({cov.get('first') or '?'} → {cov.get('last') or '?'}), updated {summary['updated_at'] or '?'}\n"
+        )
+        await _send_paged(header, content or "(empty)")
 
     elif act == "core":
-        from soupy_database.self_context import load_self_core
+        from soupy_database.self_context import load_self_anchor, load_self_core
 
-        core = load_self_core(guild_id)
-        if not core:
-            await interaction.response.send_message(
-                "no core summary yet. run `/soupyself reflect` first.",
-                ephemeral=True,
-            )
-        else:
-            header = f"**SELF.MD CORE** ({len(core)} chars — always in system prompt)\n"
-            max_per_msg = 1900
-            first_max = max_per_msg - len(header)
-            if len(core) <= first_max:
-                await interaction.response.send_message(header + core, ephemeral=True)
-            else:
-                await interaction.response.send_message(header + core[:first_max], ephemeral=True)
-                remaining = core[first_max:]
-                while remaining:
-                    chunk = remaining[:max_per_msg]
-                    remaining = remaining[max_per_msg:]
-                    await interaction.followup.send(chunk, ephemeral=True)
+        anchor, core = load_self_anchor(guild_id), load_self_core(guild_id)
+        if not anchor and not core:
+            await interaction.response.send_message("no core yet.", ephemeral=True)
+            return
+        await _send_paged(
+            "**Identity line** (in every reply's system prompt)\n",
+            f"{anchor or '(none)'}\n\n**Core** (personality context for musings and bluesky)\n{core or '(none)'}",
+        )
 
     elif act == "archive":
         from soupy_database.self_context import load_self_archive
 
         archive = load_self_archive(guild_id)
         if not archive:
-            await interaction.response.send_message("no archive yet.", ephemeral=True)
+            await interaction.response.send_message("no archive.", ephemeral=True)
         else:
-            header = f"**SELF.MD ARCHIVE** ({len(archive)} chars — pruned entries, searchable via RAG)\n"
-            max_per_msg = 1900
-            first_max = max_per_msg - len(header)
-            if len(archive) <= first_max:
-                await interaction.response.send_message(header + archive, ephemeral=True)
-            else:
-                await interaction.response.send_message(header + archive[:first_max], ephemeral=True)
-                remaining = archive[first_max:]
-                while remaining:
-                    chunk = remaining[:max_per_msg]
-                    remaining = remaining[max_per_msg:]
-                    await interaction.followup.send(chunk, ephemeral=True)
+            await _send_paged(f"**OLD SELF.MD ARCHIVE** ({len(archive)} chars, read-only)\n", archive)
 
-    elif act == "reflect":
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        pending = pending_interaction_count(guild_id)
-        logger.info(
-            "🪞 /soupyself reflect invoked by %s for guild %s (%d pending interaction(s))",
-            interaction.user,
-            guild_id,
-            pending,
+    elif act == "refresh":
+        self_profile.request_self_refresh(guild_id)
+        logger.info("🪞 /soupyself refresh requested by %s for guild %s", interaction.user, guild_id)
+        await interaction.response.send_message(
+            "queued. the profile worker reads my new messages at its next chance (between members if a profile "
+            "job is running). progress shows in the Database tab's profile log.",
+            ephemeral=True,
         )
-        try:
-            from soupy_database.rag import embed_texts_lm_studio
-
-            async with llm_turn(), aiohttp.ClientSession() as embed_session:
-                result = await self_md_reflect(
-                    guild_id=guild_id,
-                    llm_func=async_chat_completion,
-                    model=os.getenv("LOCAL_CHAT"),
-                    embed_func=embed_texts_lm_studio,
-                    embed_session=embed_session,
-                )
-            from soupy_database.self_context import load_self_core
-
-            core = load_self_core(guild_id)
-            core_len = len(core) if core else 0
-            await interaction.followup.send(
-                f"reflection complete ({pending} interactions processed).\n"
-                f"full doc: {len(result)} chars | core: {core_len} chars",
-                ephemeral=True,
-            )
-        except Exception as exc:
-            await interaction.followup.send(f"reflection failed: {exc}", ephemeral=True)
 
     elif act == "reset":
-        from soupy_database.self_context import save_self_core, save_self_md
-
-        save_self_md(guild_id, "")
-        save_self_core(guild_id, "")
-        await interaction.response.send_message("self-document and core cleared.", ephemeral=True)
-        logger.info("SELF.MD reset by %s for guild %s", interaction.user, guild_id)
+        had = self_profile.reset_self_memory(guild_id)
+        logger.info("Soupy's memory reset by %s for guild %s", interaction.user, guild_id)
+        await interaction.response.send_message(
+            (
+                "memory set aside (saved in data/self_md/v1_backup/). it rebuilds from the whole archive at the end "
+                "of the next profile job, or run `/soupyself refresh`."
+            )
+            if had
+            else "there was no memory to reset.",
+            ephemeral=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -3286,8 +3250,6 @@ async def on_ready():
     bot.loop.create_task(archive_auto_scan_loop(bot))
     bot.loop.create_task(rag_reindex_loop(bot))
     bot.loop.create_task(_dashboard_status_writer(bot))
-    if is_self_md_enabled():
-        bot.loop.create_task(_self_md_reflection_loop(bot))
     bot.loop.create_task(
         profile_jobs_loop(
             lambda: [g.id for g in bot.guilds],
@@ -3368,9 +3330,9 @@ async def on_guild_join(guild: discord.Guild):
 # `scan_trigger_loop` watches for /soupyscan-triggered files.
 # `archive_auto_scan_loop` periodically backfills new messages into SQLite.
 # `rag_reindex_loop` re-embeds messages whose embedding model changed.
-# `_self_md_reflection_loop` runs the self-knowledge reflection cycle.
 # `profile_jobs_loop` (soupy_database.user_profiles) runs dashboard profile
-# batches and queues the nightly profile refresh.
+# batches, queues the nightly profile refresh, and builds Soupy's own memory
+# (soupy_database.self_profile) at the end of each job.
 # ---------------------------------------------------------------------------
 
 
@@ -3539,70 +3501,6 @@ async def rag_reindex_loop(bot):
                     )
             except Exception as exc:
                 logger.warning("RAG incremental index failed guild=%s: %s", gid, exc)
-
-
-async def _self_md_reflection_loop(bot_instance):
-    """Reflect on accumulated interactions and update per-guild SELF.MD files
-    once per day, at SELF_MD_REFLECT_HOUR local time (default 03:00).
-
-    Only triggers when at least SELF_MD_MIN_INTERACTIONS notable interactions have
-    accumulated for a guild.
-    """
-    await bot_instance.wait_until_ready()
-
-    try:
-        reflect_hour = int(os.getenv("SELF_MD_REFLECT_HOUR", "3"))
-    except ValueError:
-        reflect_hour = 3
-    reflect_hour = max(0, min(23, reflect_hour))
-
-    try:
-        min_interactions = int(os.getenv("SELF_MD_MIN_INTERACTIONS", "3"))
-    except ValueError:
-        min_interactions = 3
-
-    timer_state["self_reflect"]["interval"] = f"daily at {reflect_hour:02d}:00 local"
-    timer_state["self_reflect"]["enabled"] = True
-    logger.info(
-        "SELF.MD reflection loop started (daily at %02d:00 local, min %d interactions)",
-        reflect_hour,
-        min_interactions,
-    )
-
-    while not bot_instance.is_closed():
-        now_local = datetime.now().astimezone()
-        next_local = now_local.replace(hour=reflect_hour, minute=0, second=0, microsecond=0)
-        if next_local <= now_local:
-            next_local = next_local + timedelta(days=1)
-        sleep_sec = (next_local - now_local).total_seconds()
-        timer_state["self_reflect"]["next_run"] = next_local.astimezone(timezone.utc).isoformat()
-        await asyncio.sleep(sleep_sec)
-
-        for guild in list(bot_instance.guilds):
-            gid = guild.id
-            count = pending_interaction_count(gid)
-            if count < min_interactions:
-                continue
-            try:
-                timer_state["self_reflect"]["last_run"] = datetime.now(timezone.utc).isoformat()
-                logger.info(
-                    "SELF.MD reflecting for guild %s (%s) — %d interactions pending",
-                    gid,
-                    guild.name,
-                    count,
-                )
-                from soupy_database.rag import embed_texts_lm_studio
-
-                async with llm_turn(), aiohttp.ClientSession() as embed_session:
-                    await self_md_reflect(
-                        guild_id=gid,
-                        llm_func=async_chat_completion,
-                        model=os.getenv("LOCAL_CHAT"),
-                        embed_func=embed_texts_lm_studio,
-                        embed_session=embed_session,
-                    )
-            except Exception as exc:
-                logger.warning("SELF.MD reflection failed guild=%s: %s", gid, exc)
 
 
 # Regex to capture a bot-like name prefix at the start (short word/name followed by colon)
@@ -4170,25 +4068,6 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 await asyncio.sleep(RATE_LIMIT)
             logger.info(f"✅ Successfully sent reply to {message.author}")
 
-            # Accumulate interaction for SELF.MD reflection
-            if message.guild and is_self_md_enabled():
-                try:
-                    # Include brief conversation context so reflection knows the broader topic
-                    _ctx_lines = []
-                    for _rm in recent_messages[-6:]:  # last few messages for context
-                        _rc = (_rm.get("content") or "")[:200]
-                        if _rc:
-                            _ctx_lines.append(_rc)
-                    _context_hint = "\n".join(_ctx_lines) if _ctx_lines else ""
-                    await add_notable_interaction(
-                        guild_id=message.guild.id,
-                        user_display_name=message.author.display_name,
-                        user_message=message.content or "",
-                        bot_reply=reply,
-                        conversation_context=_context_hint,
-                    )
-                except Exception:
-                    pass  # never let self-context tracking break chat
         except Exception as e:
             logger.error(f"❌ Error generating AI response for {message.author}: {format_error_message(e)}")
 

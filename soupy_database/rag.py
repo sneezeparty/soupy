@@ -23,8 +23,10 @@ Cross-module:
   the public surface used by the main bot's chat path.
 * :func:`embed_texts_lm_studio` is also called by the musings cog
   for similarity dedupe between candidate musings and the recent window.
-* ``self_context`` has its own ``self_chunks`` RAG table but reuses
-  ``embed_texts_lm_studio`` here.
+* ``self_profile`` (Soupy's memory) embeds its items into the ``self_chunks``
+  table with ``embed_texts_lm_studio`` and supplies the self-knowledge block via
+  ``self_block_for_chat``; guilds without a memory yet fall back to the old
+  SELF.MD chunks through ``self_context.search_self_chunks``.
 
 Gotchas:
 
@@ -1641,14 +1643,36 @@ async def fetch_rag_context_for_query(
                     )
 
         # --- Self-knowledge retrieval (reuse query embedding) ---
+        # Soupy's memory (self_profile) when this guild has one: how it gets along with the asker and
+        # the member being discussed, plus the items closest to the message. Until the first build,
+        # the old SELF.MD chunks.
         _self_hits: List[Tuple[float, str, str]] = []
-        if qv is not None:
-            try:
-                from .self_context import is_self_md_enabled, search_self_chunks
+        try:
+            from .self_context import is_self_md_enabled, search_self_chunks
 
-                if is_self_md_enabled():
+            if is_self_md_enabled():
+                from .self_profile import self_block_for_chat
+
+                _self_min_sim = float(os.getenv("RAG_SELF_KNOWLEDGE_MIN_SIM", "0.3"))
+                _self_max = int(os.getenv("RAG_SELF_KNOWLEDGE_MAX_CHARS", "2500"))
+                _people = {int(author_user_id): _user_profiles._latest_name(conn, int(author_user_id))}
+                if _subject_uid is not None:
+                    _people[int(_subject_uid)] = _user_profiles._latest_name(conn, int(_subject_uid))
+                _memory = self_block_for_chat(
+                    conn,
+                    guild_id,
+                    people=_people,
+                    query_vec=qv,
+                    query_tokens=_extract_query_tokens(normalize_rag_query_text(_cur_for_subject)),
+                    max_chars=_self_max,
+                    min_sim=_self_min_sim,
+                )
+                if _memory is not None:
+                    if _memory:
+                        _self_hits = [(1.0, _memory, "memory")]
+                    logger.info("  memory   : %d chars", len(_memory))
+                elif qv is not None:
                     _self_top_k = int(os.getenv("RAG_SELF_KNOWLEDGE_TOP_K", "5"))
-                    _self_min_sim = float(os.getenv("RAG_SELF_KNOWLEDGE_MIN_SIM", "0.3"))
                     _self_hits_raw = search_self_chunks(conn, qv, top_k=_self_top_k)
                     _self_hits = [(s, t, sec) for s, t, sec in _self_hits_raw if s >= _self_min_sim]
                     if _self_hits:
@@ -1659,8 +1683,8 @@ async def fetch_rag_context_for_query(
                         )
                         for i, (sc, txt, sec) in enumerate(_self_hits, 1):
                             logger.debug("  self #%-2d sim=%.3f  [%s]  %s", i, sc, sec, _preview_for_log(txt, 80))
-            except Exception as exc:
-                logger.debug("self-knowledge retrieval skipped: %s", exc)
+        except Exception as exc:
+            logger.debug("self-knowledge retrieval skipped: %s", exc)
     finally:
         conn.close()
 

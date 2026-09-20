@@ -22,7 +22,8 @@ How a profile is built:
 * A row that predates version 2 is copied to ``user_profile_summaries_v1`` and
   rebuilt from scratch.
 * Every LLM call runs inside :func:`soupy.llm_gate.llm_turn`, so a pass never
-  overlaps a chat reply.
+  overlaps a chat reply. Before taking the gate it also waits out any queued
+  or running reply plus a short grace period, so chat goes first.
 
 Where it runs:
 
@@ -57,11 +58,11 @@ import os
 import re
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple
 
 import pytz
 
-from soupy.llm_gate import llm_turn, seconds_since_chat_activity
+from soupy.llm_gate import llm_turn, seconds_since_chat_activity, wait_for_chat_to_clear
 from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import _env_bool, _env_int, settings
 
@@ -75,7 +76,9 @@ from .profile_batch import (
     upsert_job,
 )
 from .profile_document import (
+    MEMBER,
     SECTION_KEYS,
+    DocumentKind,
     EditStats,
     apply_edits,
     is_v2,
@@ -109,6 +112,12 @@ _MIN_SPLIT_MESSAGES = 4
 _MIN_MESSAGE_CHARS = 1500
 # Chat within this many seconds counts as "busy": passes read fewer messages so replies wait less.
 _BUSY_WINDOW_SEC = 600
+# Before each LLM call the builder waits until no reply is queued or running and none finished in
+# this long, so a quick follow-up doesn't land behind a fresh pass.
+_CHAT_GRACE_SEC = 60
+# A reply that never reports done (or a stuck counter) can't stall the builder longer than this.
+# Proceeding is safe: the pass still queues on the gate.
+_CHAT_MAX_WAIT_SEC = 15 * 60
 # A running job whose heartbeat is older than this is shown as waiting for the bot
 # (never shorter than one slow LLM call, or a long pass would look like a dead bot).
 _HEARTBEAT_STALE_MIN_SEC = 15 * 60
@@ -455,28 +464,108 @@ async def refresh_user_profile(
         finally:
             conn.close()
 
-    def _user_prompt(lines: List[str]) -> str:
+    def _user_prompt(chunk: Sequence[PassUnit], current: Dict[str, Any]) -> str:
         return build_user_prompt(
             member_label=label,
             member_id=user_id,
-            profile_render=render_for_prompt(doc),
-            empty_sections=[k for k in SECTION_KEYS if k != "uncertain" and not doc["sections"].get(k)],
+            profile_render=render_for_prompt(current),
+            empty_sections=[k for k in SECTION_KEYS if k != "uncertain" and not current["sections"].get(k)],
             directory_lines=directory_lines,
             peer_lines=peer_lines,
-            message_lines=lines,
+            message_lines=[m[2] for m in chunk],
         )
 
     _p(
         f"user_id={user_id} ({label}) · {mode} · {len(messages)} message(s) to read "
         f"({messages[0][1]} → {messages[-1][1]}) · profile has {item_count(doc)} items"
     )
+    run = await run_edit_passes(
+        doc=doc,
+        units=messages,
+        system_prompt=system_prompt,
+        user_prompt=_user_prompt,
+        save=_save,
+        kind=MEMBER,
+        directory_names=directory_names,
+        lately_days=lately_days,
+        pass_max_messages=pass_max_messages,
+        busy_pass_messages=busy_pass_messages,
+        what=f"profile for user_id={user_id}",
+        progress=progress,
+        should_stop=should_stop,
+        heartbeat=heartbeat,
+    )
+    logger.info(
+        "user profile %s guild=%s user_id=%s passes=%s processed=%s/%s skipped=%s stopped=%s",
+        mode,
+        guild_id,
+        user_id,
+        run["passes"],
+        run["processed"],
+        len(messages),
+        run["skipped"],
+        run["stopped"],
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "mode": mode,
+        "passes": run["passes"],
+        "messages_processed": run["processed"],
+        "messages_remaining": len(messages) - run["processed"],
+        "messages_skipped": run["skipped"],
+        "stopped": run["stopped"],
+        "items": item_count(run["doc"]),
+    }
 
+
+# A unit of source for one pass: (last message_id it covers, YYYY-MM-DD, prompt text).
+PassUnit = Tuple[int, str, str]
+
+
+async def run_edit_passes(
+    *,
+    doc: Dict[str, Any],
+    units: Sequence[PassUnit],
+    system_prompt: str,
+    user_prompt: Callable[[Sequence[PassUnit], Dict[str, Any]], str],
+    save: Callable[[Dict[str, Any], int], None],
+    kind: DocumentKind,
+    directory_names: Mapping[int, str],
+    lately_days: int,
+    pass_max_messages: int,
+    busy_pass_messages: int,
+    what: str,
+    reserve_chars: int = 0,
+    max_passes: int = 0,
+    aliases: Optional[Mapping[int, Sequence[str]]] = None,
+    progress: Optional[Callable[[str], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
+    heartbeat: Optional[Callable[[], None]] = None,
+) -> Dict[str, Any]:
+    """The pass loop shared by member profiles and Soupy's memory.
+
+    Each pass takes as many units as fit the context budget, asks the LLM for
+    edits, applies them, and calls ``save(doc, cursor)`` (in a thread) so a stop
+    loses at most one pass. Failures halve the pass instead of growing it.
+    ``user_prompt(chunk, doc)`` must not grow with the chunk beyond the units'
+    own text plus ``reserve_chars``, which is held back from the budget for it.
+    ``max_passes`` (0 = no limit) ends the loop early, as a stop.
+
+    Returns ``{"doc", "passes", "processed", "skipped", "stopped"}``.
+    """
+
+    def _p(msg: str) -> None:
+        if progress:
+            progress(msg)
+
+    loop = asyncio.get_running_loop()
     pos = 0
     passes = 0
-    skipped_messages = 0
+    skipped_units = 0
     stopped = False
-    while pos < len(messages):
-        if should_stop and should_stop():
+    while pos < len(units):
+        if (should_stop and should_stop()) or (max_passes and passes >= max_passes):
             stopped = True
             break
         if heartbeat:
@@ -484,18 +573,17 @@ async def refresh_user_profile(
         since_chat = seconds_since_chat_activity()
         busy = since_chat is not None and since_chat < _BUSY_WINDOW_SEC
         budget = await compute_budget()
-        fixed_chars = len(system_prompt) + len(_user_prompt([]))
+        fixed_chars = len(system_prompt) + len(user_prompt([], doc)) + reserve_chars
         available = budget.prompt_chars - fixed_chars
         if available < _MIN_MESSAGE_CHARS:
             raise RuntimeError(
-                f"profile for user_id={user_id} leaves no room for messages ({budget.describe()}, "
-                f"fixed prompt≈{fixed_chars} chars)"
+                f"{what} leaves no room for messages ({budget.describe()}, fixed prompt≈{fixed_chars} chars)"
             )
 
         limit = min(pass_max_messages, busy_pass_messages) if busy else pass_max_messages
         take, used = 0, 0
-        while pos + take < len(messages) and take < limit:
-            size = len(messages[pos + take][2]) + 1
+        while pos + take < len(units) and take < limit:
+            size = len(units[pos + take][2]) + 2
             if take and used + size > available:
                 break
             used += size
@@ -503,31 +591,35 @@ async def refresh_user_profile(
 
         passes += 1
         _p(
-            f"  ▸ Pass {passes}: messages {pos + 1}–{pos + take} of {len(messages)} · {budget.describe()}"
+            f"  ▸ Pass {passes}: messages {pos + 1}–{pos + take} of {len(units)} · {budget.describe()}"
             + (" · chat busy, smaller pass" if busy else "")
         )
 
         reply = None
         updated: Optional[Dict[str, Any]] = None
-        chunk = messages[pos : pos + take]
+        chunk = units[pos : pos + take]
         while True:
-            chunk = messages[pos : pos + take]
-            lines = [m[2] for m in chunk]
-            user_prompt = _user_prompt(lines)
+            chunk = units[pos : pos + take]
+            prompt = user_prompt(chunk, doc)
             failure = ""
+            waited = await wait_for_chat_to_clear(
+                grace_seconds=_CHAT_GRACE_SEC, max_wait_seconds=_CHAT_MAX_WAIT_SEC, tick=heartbeat
+            )
+            if waited >= 1:
+                _p(f"    waited {waited:.0f}s for chat replies to finish")
             try:
                 async with llm_turn():
                     if heartbeat:
                         heartbeat()
                     reply = await request_edits(
-                        system_prompt, user_prompt, max_tokens=budget.max_output_tokens, progress=_p
+                        system_prompt, prompt, max_tokens=budget.max_output_tokens, progress=_p, kind=kind
                     )
             except ContextOverflowError:
                 failure = "context overflow"
             except asyncio.TimeoutError:
                 failure = "timeout"
             if reply is not None and not failure:
-                observe_prompt_tokens(len(system_prompt) + len(user_prompt), reply.prompt_tokens)
+                observe_prompt_tokens(len(system_prompt) + len(prompt), reply.prompt_tokens)
                 if reply.edits is None:
                     failure = "truncated output" if reply.finish_reason == "length" else "invalid JSON"
                 else:
@@ -536,9 +628,11 @@ async def refresh_user_profile(
                         doc,
                         reply.edits,
                         window=(chunk_days[0], chunk_days[-1]),
-                        source_text="\n".join(lines),
+                        source_text="\n".join(m[2] for m in chunk),
                         directory=directory_names,
                         lately_days=lately_days,
+                        kind=kind,
+                        aliases=aliases,
                     )
                     if not _looks_repetitive(stats):
                         break
@@ -552,10 +646,10 @@ async def refresh_user_profile(
             _p(f"    {failure} — retrying with the first {take} messages of this pass")
 
         if reply is None:
-            skipped_messages += len(chunk)
+            skipped_units += len(chunk)
             _p(f"    ❌ could not process messages {pos + 1}–{pos + len(chunk)} ({failure}); skipping them")
             pos += len(chunk)
-            await loop.run_in_executor(None, _save, doc, chunk[-1][0])
+            await loop.run_in_executor(None, save, doc, chunk[-1][0])
             continue
 
         doc = updated
@@ -565,37 +659,16 @@ async def refresh_user_profile(
         coverage["messages"] = int(coverage.get("messages") or 0) + len(chunk)
         coverage["passes"] = int(coverage.get("passes") or 0) + 1
         pos += len(chunk)
-        await loop.run_in_executor(None, _save, doc, chunk[-1][0])
+        await loop.run_in_executor(None, save, doc, chunk[-1][0])
         _p(
             f"  ◂ Pass {passes} saved: {chunk[0][1]} → {chunk[-1][1]} · {len(chunk)} msgs · "
             f"prompt {reply.prompt_tokens} tok · output {reply.completion_tokens} tok · {reply.elapsed:.0f}s · "
-            f"edits {stats.summary()} · profile {item_count(doc)} items"
+            f"edits {stats.summary()} · {item_count(doc, kind)} items"
         )
         for note in stats.notes:
             _p(f"    note: {note}")
 
-    logger.info(
-        "user profile %s guild=%s user_id=%s passes=%s processed=%s/%s skipped=%s stopped=%s",
-        mode,
-        guild_id,
-        user_id,
-        passes,
-        pos,
-        len(messages),
-        skipped_messages,
-        stopped,
-    )
-    return {
-        "ok": True,
-        "user_id": user_id,
-        "mode": mode,
-        "passes": passes,
-        "messages_processed": pos,
-        "messages_remaining": len(messages) - pos,
-        "messages_skipped": skipped_messages,
-        "stopped": stopped,
-        "items": item_count(doc),
-    }
+    return {"doc": doc, "passes": passes, "processed": pos, "skipped": skipped_units, "stopped": stopped}
 
 
 # ---------------------------------------------------------------------------
@@ -774,6 +847,8 @@ async def _run_profile_job_step(guild_id: int, db_path: str, excluded: Set[int])
         profile_job_log_append(guild_id, message)
 
     tally = f"saved={stats['saved']} · skipped={stats['skipped']} · failed={stats['failed']}"
+    should_stop = _job_should_stop(db_path, guild_id, deadline)
+    heartbeat = _job_heartbeat(db_path, guild_id)
     if deadline is not None and _utc_now() >= deadline:
         await loop.run_in_executor(
             None,
@@ -783,13 +858,18 @@ async def _run_profile_job_step(guild_id: int, db_path: str, excluded: Set[int])
         )
         return False
     if i >= len(uids):
+        # Soupy's own memory goes last, after every member in the job.
+        if await _refresh_soupy_memory(guild_id, excluded, should_stop, heartbeat):
+            return True
         await loop.run_in_executor(None, _finish, f"━━━ {kind} run complete: {len(uids)} members · {tally} ━━━")
         return False
 
     uid = uids[i]
     if uid in excluded:
         stats["skipped"] += 1
-        profile_job_log_append(guild_id, f"⏭ Skipping user_id={uid}: that's Soupy's own account.")
+        profile_job_log_append(
+            guild_id, f"⏭ Skipping user_id={uid}: that's Soupy's own account (its memory is built at the end)."
+        )
         stats_json = json.dumps(stats)
         await loop.run_in_executor(
             None, _with_job_conn, db_path, lambda c: upsert_job(c, guild_id, next_index=i + 1, stats_json=stats_json)
@@ -801,22 +881,13 @@ async def _run_profile_job_step(guild_id: int, db_path: str, excluded: Set[int])
         f"━━━ Member {i + 1}/{len(uids)}: user_id={uid}{f' ({nick})' if nick else ''} · {kind} · {tally} ━━━",
     )
 
-    def _should_stop() -> bool:
-        r = _with_job_conn(db_path, lambda c: get_job_row(c, guild_id))
-        if r is None or str(r["status"] or "") != "running":
-            return True
-        return deadline is not None and _utc_now() >= deadline
-
-    def _heartbeat() -> None:
-        _with_job_conn(db_path, lambda c: upsert_job(c, guild_id, heartbeat_at=_utc_now().isoformat()))
-
     try:
         result = await refresh_user_profile(
             guild_id,
             uid,
             progress=lambda m: profile_job_log_append(guild_id, m),
-            should_stop=_should_stop,
-            heartbeat=_heartbeat,
+            should_stop=should_stop,
+            heartbeat=heartbeat,
         )
     except Exception as e:
         stats["failed"] += 1
@@ -852,6 +923,106 @@ async def _run_profile_job_step(guild_id: int, db_path: str, excluded: Set[int])
     return True
 
 
+def _job_should_stop(db_path: str, guild_id: int, deadline: Optional[datetime]) -> Callable[[], bool]:
+    def should_stop() -> bool:
+        r = _with_job_conn(db_path, lambda c: get_job_row(c, guild_id))
+        if r is None or str(r["status"] or "") != "running":
+            return True
+        return deadline is not None and _utc_now() >= deadline
+
+    return should_stop
+
+
+def _job_heartbeat(db_path: str, guild_id: int) -> Callable[[], None]:
+    def heartbeat() -> None:
+        _with_job_conn(db_path, lambda c: upsert_job(c, guild_id, heartbeat_at=_utc_now().isoformat()))
+
+    return heartbeat
+
+
+def _soupy_id(soupy_user_ids: Iterable[int]) -> Optional[int]:
+    ids = sorted(int(u) for u in soupy_user_ids)
+    return ids[0] if ids else None
+
+
+async def _refresh_soupy_memory(
+    guild_id: int,
+    soupy_user_ids: Iterable[int],
+    should_stop: Optional[Callable[[], bool]],
+    heartbeat: Optional[Callable[[], None]],
+    *,
+    sample_passes: int = 0,
+    force: bool = False,
+) -> bool:
+    """Bring Soupy's memory for this guild up to date if it's due (or ``force``). Returns True if it stopped part-way.
+
+    Errors are logged, not raised: a failed memory build must not wedge the member job it runs after.
+    """
+    from .self_context import is_self_md_enabled
+    from .self_profile import refresh_self_profile, self_refresh_due
+
+    bot_id = _soupy_id(soupy_user_ids)
+    if bot_id is None or not is_self_md_enabled():
+        return False
+    loop = asyncio.get_running_loop()
+    if not force and not sample_passes:
+        min_new = _env_int("USER_PROFILE_NIGHTLY_MIN_NEW_MESSAGES", 10, minimum=1)
+        if not await loop.run_in_executor(None, self_refresh_due, guild_id, bot_id, min_new):
+            return False
+    try:
+        result = await refresh_self_profile(
+            guild_id,
+            bot_id,
+            progress=lambda m: profile_job_log_append(guild_id, m),
+            should_stop=should_stop,
+            heartbeat=heartbeat,
+            sample_passes=sample_passes,
+        )
+    except Exception as e:
+        profile_job_log_append(guild_id, f"❌ ERROR building Soupy's memory: {str(e).strip() or type(e).__name__}")
+        logger.exception("self profile failed guild=%s", guild_id)
+        return False
+    if result.get("stopped"):
+        profile_job_log_append(
+            guild_id,
+            f"⏸ Soupy's memory stopped after {result.get('passes', 0)} pass(es); "
+            f"{result.get('messages_remaining', 0)} exchange(s) left.",
+        )
+        return True
+    if result.get("ok") and not result.get("skipped"):
+        profile_job_log_append(
+            guild_id,
+            f"✅ Soupy's memory · {result.get('mode')} · {result.get('passes')} pass(es) · "
+            f"{result.get('messages_processed')} exchanges · {result.get('items')} items",
+        )
+    return False
+
+
+async def _run_self_requests(guild_ids: Sequence[int], soupy_user_ids: Iterable[int]) -> None:
+    """Run refreshes asked for with /soupyself refresh (or previews), between members of any running job."""
+    from .self_profile import pop_self_refresh_requests
+
+    requests = pop_self_refresh_requests()
+    for gid, req in requests.items():
+        if gid not in guild_ids or not os.path.exists(get_db_path(gid)):
+            continue
+        sample_passes = int(req.get("sample_passes") or 0)
+        profile_job_log_append(
+            gid,
+            f"━━━ Soupy's memory requested{f' (preview, {sample_passes} passes)' if sample_passes else ''} ━━━",
+        )
+        db_path = get_db_path(gid)
+
+        def _heartbeat(_gid: int = gid, _db: str = db_path) -> None:
+            # Only touch an existing running job's heartbeat, so the dashboard doesn't call it stalled.
+            if _job_status(_gid) == "running":
+                _job_heartbeat(_db, _gid)()
+
+        await _refresh_soupy_memory(
+            gid, soupy_user_ids, None, _heartbeat, sample_passes=sample_passes, force=not sample_passes
+        )
+
+
 def _nightly_run_date(now_local: datetime, tz: Any, hour: int) -> Optional[date]:
     """The local date whose nightly start window contains ``now_local`` (the window may cross midnight)."""
     for day in (now_local.date(), now_local.date() - timedelta(days=1)):
@@ -859,6 +1030,16 @@ def _nightly_run_date(now_local: datetime, tz: Any, hour: int) -> Optional[date]
         if start <= now_local < end:
             return day
     return None
+
+
+async def _soupy_memory_due(guild_id: int, soupy_user_ids: Iterable[int], min_new: int) -> bool:
+    from .self_context import is_self_md_enabled
+    from .self_profile import self_refresh_due
+
+    bot_id = _soupy_id(soupy_user_ids)
+    if bot_id is None or not is_self_md_enabled():
+        return False
+    return await asyncio.get_running_loop().run_in_executor(None, self_refresh_due, guild_id, bot_id, min_new)
 
 
 async def _maybe_schedule_nightly(
@@ -902,7 +1083,8 @@ async def _maybe_schedule_nightly(
         uids = await asyncio.get_running_loop().run_in_executor(
             None, build_nightly_candidate_user_ids, gid, min_new, tuple(exclude_user_ids)
         )
-        if not uids:
+        memory_due = await _soupy_memory_due(gid, exclude_user_ids, min_new)
+        if not uids and not memory_due:
             continue
 
         def _queue(c: sqlite3.Connection, _gid: int = gid, _uids: List[int] = uids) -> None:
@@ -919,11 +1101,12 @@ async def _maybe_schedule_nightly(
             )
 
         _with_job_conn(db_path, _queue)
+        then_memory = ", then Soupy's memory" if memory_due else ""
         profile_job_log_clear(gid)
         profile_job_log_append(
             gid,
-            f"━━━ Nightly refresh queued: {len(uids)} member(s) with new messages or no profile yet · "
-            f"time limit {max_minutes} min ━━━",
+            f"━━━ Nightly refresh queued: {len(uids)} member(s) with new messages or no profile yet"
+            f"{then_memory} · time limit {max_minutes} min ━━━",
         )
 
     save_json_state(
@@ -939,21 +1122,25 @@ async def profile_jobs_loop(
     timer: Optional[Dict[str, Any]] = None,
     poll_seconds: float = 20.0,
 ) -> None:
-    """Bot-side worker: queues the nightly refresh when due and runs any running job. Never returns.
+    """Bot-side worker: queues the nightly refresh when due, runs any running job, and runs requested refreshes of
+    Soupy's memory. Never returns.
 
-    ``get_excluded_user_ids`` returns accounts never to profile (Soupy itself).
+    ``get_excluded_user_ids`` returns Soupy's own account: it never gets a member profile, and its memory is built
+    at the end of each job instead (see :mod:`soupy_database.self_profile`).
     """
     while True:
         try:
             guild_ids = [int(g) for g in get_guild_ids()]
             excluded = tuple(int(u) for u in get_excluded_user_ids())
-            async def _nightly_check(_ids: List[int] = guild_ids, _excluded: Tuple[int, ...] = excluded) -> None:
-                await _maybe_schedule_nightly(_ids, timer, _excluded)
 
-            await _nightly_check()
+            async def _between(_ids: List[int] = guild_ids, _excluded: Tuple[int, ...] = excluded) -> None:
+                await _maybe_schedule_nightly(_ids, timer, _excluded)
+                await _run_self_requests(_ids, _excluded)
+
+            await _between()
             for gid in guild_ids:
                 if _job_status(gid) == "running":
-                    await _run_profile_job(gid, excluded, between_members=_nightly_check)
+                    await _run_profile_job(gid, excluded, between_members=_between)
         except asyncio.CancelledError:
             raise
         except Exception:

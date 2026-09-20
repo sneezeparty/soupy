@@ -45,6 +45,7 @@ from .database import get_db_path
 
 logger = logging.getLogger(__name__)
 
+
 def _profile_log_max_stored() -> int:
     try:
         n = int(os.getenv("PROFILE_JOB_LOG_MAX_LINES", "500"))
@@ -126,8 +127,7 @@ def profile_job_log_lines(guild_id: int, last: int = 300) -> List[str]:
 
 def ensure_profile_job_schema(conn: sqlite3.Connection) -> None:
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS profile_batch_jobs (
             guild_id INTEGER PRIMARY KEY,
             status TEXT NOT NULL DEFAULT 'idle',
@@ -137,22 +137,17 @@ def ensure_profile_job_schema(conn: sqlite3.Connection) -> None:
             stats_json TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
+        """)
     conn.commit()
     cur = conn.cursor()
-    cur.execute(
-        """
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS profile_job_log_lines (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
             line TEXT NOT NULL
         )
-        """
-    )
-    cur.execute(
-        "CREATE INDEX IF NOT EXISTS idx_profile_job_log_guild_id ON profile_job_log_lines(guild_id, id)"
-    )
+        """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_profile_job_log_guild_id ON profile_job_log_lines(guild_id, id)")
     # WHY: same on-connect ALTER pattern as user_profile_summaries — columns
     # added when the worker moved into the bot and gained the nightly run.
     cur.execute("PRAGMA table_info(profile_batch_jobs)")

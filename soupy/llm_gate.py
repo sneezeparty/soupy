@@ -13,7 +13,10 @@ Who takes the gate:
 
 * ``ChatQueue`` — for the whole reply, so a profile pass can't slip in between
   the reply's own LLM calls.
-* The profile builder — per pass, so chat never waits longer than one pass.
+* The profile builder — per LLM call, and before each one it steps aside
+  (:func:`wait_for_chat_to_clear`) while a chat reply is queued, running, or
+  just finished. Without that the lock alternates fairly, so a burst of
+  replies each waited behind a whole pass.
 * SELF.MD reflection and the musings / dailypost / bluesky / search cogs —
   around their LLM calls.
 
@@ -31,12 +34,13 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Callable, Optional
 
 _lock: Optional[asyncio.Lock] = None
 _lock_loop: Optional[asyncio.AbstractEventLoop] = None
 _held: ContextVar[bool] = ContextVar("soupy_llm_gate_held", default=False)
 _last_chat_activity: float = 0.0
+_chat_pending: int = 0
 
 
 def _get_lock() -> asyncio.Lock:
@@ -85,3 +89,55 @@ def seconds_since_chat_activity() -> Optional[float]:
     if _last_chat_activity <= 0:
         return None
     return time.monotonic() - _last_chat_activity
+
+
+def note_chat_queued() -> None:
+    """A chat reply was queued; background work waits until :func:`note_chat_done` balances it."""
+    global _chat_pending
+    _chat_pending += 1
+
+
+def note_chat_done() -> None:
+    """A queued chat reply finished (sent, failed, or dropped)."""
+    global _chat_pending
+    _chat_pending = max(0, _chat_pending - 1)
+    note_chat_activity()
+
+
+def chat_pending() -> int:
+    """Chat replies queued or in progress."""
+    return _chat_pending
+
+
+async def wait_for_chat_to_clear(
+    *,
+    grace_seconds: float,
+    max_wait_seconds: float,
+    poll_seconds: float = 1.0,
+    tick: Optional[Callable[[], None]] = None,
+    tick_seconds: float = 30.0,
+) -> float:
+    """Wait until no chat reply is pending and none finished in the last ``grace_seconds``.
+
+    Returns the seconds waited. Background callers use this before taking the
+    gate so replies go first. It can't pre-empt a call already in flight — an
+    aborted request may keep running inside LM Studio, and then the reply would
+    overlap it — so the worst case for a reply is still one call.
+
+    ``max_wait_seconds`` bounds a stuck counter or a reply that never returns.
+    Giving up is safe: the caller still queues on the gate, so nothing overlaps.
+    """
+    start = time.monotonic()
+    last_tick = start
+    while True:
+        since = seconds_since_chat_activity()
+        if _chat_pending <= 0 and (since is None or since >= grace_seconds):
+            break
+        now = time.monotonic()
+        if now - start >= max_wait_seconds:
+            break
+        if tick is not None and now - last_tick >= tick_seconds:
+            tick()
+            last_tick = now
+        await asyncio.sleep(poll_seconds)
+    return time.monotonic() - start

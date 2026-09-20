@@ -85,7 +85,6 @@ def _base_patches(candidates, *, rag_enabled=False, self_md_enabled=False, rag_b
         "fetch_rag_context_for_query": patch.object(
             bot, "fetch_rag_context_for_query", AsyncMock(return_value=rag_block)
         ),
-        "add_notable_interaction": patch.object(bot, "add_notable_interaction", AsyncMock()),
     }
 
 
