@@ -21,6 +21,10 @@ Cross-module:
   links).
 * ``_post_url`` and ``_fetch_og_image`` are *exported* and imported by
   ``soupy.cogs.dailypost`` for its Bluesky cross-post step.
+* ``soupy.slop`` supplies the anti-slop rules appended to all three writing
+  prompts, and the check that reads the drafts back. Each pipeline writes three
+  candidates; ``_drop_slop`` keeps the ones with the fewest AI tells and the
+  LLM judge then picks between those on substance.
 
 Gotchas:
 
@@ -31,6 +35,8 @@ Gotchas:
   to avoid following the same account twice or replying to the same thread.
 * Owner-only by default; gated on ``BLUESKY_AUTO_REPLY`` for the autonomous
   loop, on ``OWNER_IDS`` for the manual slash command.
+* The slop rules govern shape only. Soupy's politics live in the PERSPECTIVE
+  blocks of the three prompts and are deliberately untouched by them.
 * og:image fetching honours its own UA list and recompresses oversized
   thumbnails — see the per-image WARNING-level logs for fetch failures.
 """
@@ -44,6 +50,7 @@ import os
 import random
 import re as _re
 from datetime import datetime, timedelta, timezone
+from html import unescape as _unescape_html
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -55,8 +62,10 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from soupy.llm_gate import llm_turn
+from soupy.msn import resolve_article_url
 from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
+from soupy.slop import SLOP_RULES, rank_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +245,7 @@ COMMENT_SYSTEM = (
     "- CRITICAL: your reply must be about what the ORIGINAL POST says. the CONTEXT helps you "
     "understand the topic, but do NOT merge separate news stories together. if the post is "
     "about the Fed chair and the context mentions a DOJ investigation, those are different "
-    "stories. reply to what the post actually says.\n"
+    "stories. reply to what the post actually says.\n\n" + SLOP_RULES
 )
 
 
@@ -271,7 +280,7 @@ QUOTE_POST_SYSTEM = (
     "- the quoted post will appear below yours.\n"
     "- if a CONTEXT block is provided, use it to understand the real story. "
     "your commentary should show you get what's happening. but NEVER reference "
-    "articles, searching, URLs, or say 'according to'. just comment like someone who knows.\n"
+    "articles, searching, URLs, or say 'according to'. just comment like someone who knows.\n\n" + SLOP_RULES
 )
 
 ORIGINAL_POST_SYSTEM = (
@@ -308,7 +317,7 @@ ORIGINAL_POST_SYSTEM = (
     "- write in lower case, no quotation marks of any kind.\n"
     "- MAXIMUM 1-2 SHORT sentences. aim for under 200 characters.\n"
     "- FINISH YOUR THOUGHT. do not start a sentence you cannot complete.\n"
-    "- the link will be attached as a card, so do NOT include the URL in your text.\n"
+    "- the link will be attached as a card, so do NOT include the URL in your text.\n\n" + SLOP_RULES
 )
 
 FACT_CHECK_SYSTEM = (
@@ -545,6 +554,34 @@ async def _fetch_page_html(url: str) -> Tuple[Optional[str], str]:
     return None, resolved_url
 
 
+# Meta tags that carry a share image, best first. JSON-LD is handled separately below.
+_IMAGE_META_PATTERNS = (
+    r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+    r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+    r'<meta[^>]+name=["\']twitter:image:src["\'][^>]+content=["\']([^"\']+)["\']',
+    # link rel=image_src as a final fallback
+    r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']',
+)
+
+
+def _extract_image_url(page_html: str, page_url: str) -> Optional[str]:
+    """The share image from a page's meta tags, absolute and entity-decoded.
+
+    The decode matters: an og:image written as ``...jpg?auth=x&amp;width=1200``
+    is fetched verbatim otherwise, and a signed CDN URL (Gray TV, Arc) answers
+    that with HTTP 400, so the card goes out with no thumbnail.
+    """
+    for pattern in _IMAGE_META_PATTERNS:
+        match = _re.search(pattern, page_html or "", _re.IGNORECASE)
+        if match:
+            candidate = _resolve_image_url(_unescape_html(match.group(1)).strip(), page_url)
+            if candidate and len(candidate) > 10:
+                return candidate
+    return None
+
+
 async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
     """Fetch the og:image from a URL. Returns (image_bytes, mime_type) or None.
 
@@ -559,27 +596,9 @@ async def _fetch_og_image(url: str) -> Optional[Tuple[bytes, str]]:
             logger.warning("🦋 og:image: could not fetch page at all for %s", url[:60])
             return None
 
-        # Step 2: Parse image URL from meta tags (try multiple patterns + JSON-LD).
-        import re
+        # Step 2: Parse image URL from meta tags.
 
-        image_url = None
-
-        meta_patterns = [
-            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
-            r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
-            r'<meta[^>]+name=["\']twitter:image:src["\'][^>]+content=["\']([^"\']+)["\']',
-            # link rel=image_src as a final fallback
-            r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']',
-        ]
-        for pattern in meta_patterns:
-            match = re.search(pattern, html, re.IGNORECASE)
-            if match:
-                candidate = _resolve_image_url(match.group(1), resolved_url)
-                if candidate and len(candidate) > 10:
-                    image_url = candidate
-                    break
+        image_url = _extract_image_url(html, resolved_url)
 
         if not image_url:
             logger.debug("🦋 No og:image or twitter:image found for %s", resolved_url[:60])
@@ -675,6 +694,65 @@ def _read_env_value(key: str, default: str = "") -> str:
     except Exception:
         pass
     return os.getenv(key, default)
+
+
+def _drop_slop(candidates: List[str], recent: List[str], label: str) -> List[str]:
+    """Keep the candidates carrying the fewest AI tells (see :mod:`soupy.slop`), for the judge to choose between.
+
+    The judge picks on substance and can't see shape, so this runs first. It
+    never returns nothing: when every candidate has tells, the least sloppy
+    ones go through and the log says what they were.
+    """
+    ranked = rank_candidates(candidates, recent)
+    if not ranked:
+        return list(candidates)
+    for text, tells in ranked:
+        if tells:
+            logger.info("🦋   %s slop (%s): %s", label, ", ".join(tells), text[:70])
+    fewest = len(ranked[0][1])
+    kept = [text for text, tells in ranked if len(tells) == fewest]
+    if fewest:
+        logger.info("🦋   %s: nothing clean, keeping %d draft(s) with %d tell(s)", label, len(kept), fewest)
+    elif len(kept) < len(ranked):
+        logger.info("🦋   %s: %d of %d drafts came back clean", label, len(kept), len(ranked))
+    return kept
+
+
+def _engaged_uris(history: Dict[str, Any]) -> set:
+    """Every post Soupy has already replied to or quote-posted.
+
+    Both kinds count, in both directions. Replies used to be filtered on the
+    comment history alone, so a post Soupy quote-posted was still fair game for
+    a reply: on 2026-09-20 it quote-posted Jacob Soboroff at 15:52 and replied
+    to the same post at 16:03.
+    """
+    uris = set()
+    for bucket in ("comments", "reposts"):
+        for entry in history.get(bucket) or []:
+            if isinstance(entry, dict) and entry.get("post_uri"):
+                uris.add(entry["post_uri"])
+    return uris
+
+
+def _recent_engagement_authors(history: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """(author did, timestamp) for every post Soupy replied to or quote-posted, newest first."""
+    out: List[Tuple[str, str]] = []
+    for bucket in ("comments", "reposts"):
+        for entry in history.get(bucket) or []:
+            if not isinstance(entry, dict):
+                continue
+            uri = str(entry.get("post_uri") or "")
+            parts = uri.split("/")
+            if uri.startswith("at://") and len(parts) > 2 and parts[2]:
+                out.append((parts[2], str(entry.get("ts") or "")))
+    out.sort(key=lambda row: row[1], reverse=True)
+    return out
+
+
+def _recent_texts(history: Dict[str, Any], bucket: str, field: str, limit: int = 8) -> List[str]:
+    """The last few things Soupy posted in one bucket, for the repeated-opener check."""
+    entries = history.get(bucket) or []
+    return [str(e.get(field) or "") for e in entries[-limit:] if isinstance(e, dict)]
 
 
 def _load_history() -> Dict[str, Any]:
@@ -1215,19 +1293,11 @@ class BlueskyEngageCog(commands.Cog):
 
         # --- Apply filters to both pools ---
         our_did = self.bsky.did
-        commented_uris = {c.get("post_uri") for c in self.history.get("comments", [])}
+        engaged_uris = _engaged_uris(self.history)
 
-        # Author recency block
-        recent_comments = self.history.get("comments", [])
-        recent_author_dids = []
-        for c in reversed(recent_comments):
-            puri = c.get("post_uri", "")
-            if puri.startswith("at://"):
-                did = puri.split("/")[2] if len(puri.split("/")) > 2 else ""
-            else:
-                did = ""
-            if did:
-                recent_author_dids.append(did)
+        # Author recency block: the last authors Soupy engaged with, newest first. Quote-posts count
+        # here too, so it doesn't reply to someone minutes after quote-posting them.
+        recent_author_dids = [did for did, _ts in _recent_engagement_authors(self.history)]
         blocked_dids = set(recent_author_dids[:5])
         penalized_dids = set(recent_author_dids[5:15])
 
@@ -1236,7 +1306,7 @@ class BlueskyEngageCog(commands.Cog):
                 c
                 for c in pool
                 if c.get("author", {}).get("did") != our_did
-                and c.get("uri") not in commented_uris
+                and c.get("uri") not in engaged_uris
                 and c.get("author", {}).get("did") not in blocked_dids
             ]
 
@@ -1638,6 +1708,8 @@ class BlueskyEngageCog(commands.Cog):
             candidates_list.append(candidate)
             logger.info("🦋   Candidate %d: %s", i + 1, candidate[:100])
 
+        candidates_list = _drop_slop(candidates_list, _recent_texts(self.history, "comments", "comment"), "Reply")
+
         # Have the LLM pick the best one
         judge_listing = ""
         for i, c in enumerate(candidates_list):
@@ -2009,6 +2081,8 @@ class BlueskyEngageCog(commands.Cog):
             commentaries.append(c)
             logger.info("🦋   Quote candidate %d: %s", i + 1, c[:80])
 
+        commentaries = _drop_slop(commentaries, _recent_texts(self.history, "reposts", "commentary"), "Quote")
+
         # Judge best
         listing = "".join(f"[{i}] {c}\n\n" for i, c in enumerate(commentaries))
         judge_result = await _llm_call(
@@ -2219,7 +2293,7 @@ class BlueskyEngageCog(commands.Cog):
         fetched: List[Dict[str, Any]] = []
         for idx in top_indices:
             a = all_results[idx]
-            a_url = a.get("href", "")
+            a_url = await resolve_article_url(a.get("href", ""))
             a_title = a.get("title", "")
             a_snippet = a.get("body", "")
             full = await _fetch_article(a_url)
@@ -2323,6 +2397,7 @@ class BlueskyEngageCog(commands.Cog):
 
         # If a specific URL was provided, skip all discovery and go straight to fetching
         if article_url:
+            article_url = await resolve_article_url(article_url)
             logger.info("🦋 Fetching provided article: %s", article_url[:80])
             full = await _fetch_article(article_url)
             if full and full.get("content"):
@@ -2408,6 +2483,8 @@ class BlueskyEngageCog(commands.Cog):
                 continue  # Too short after trimming, skip this candidate
             candidates.append(c)
             logger.info("🦋   Post candidate %d (%d chars): %s", i + 1, len(c), c[:80])
+
+        candidates = _drop_slop(candidates, _recent_texts(self.history, "posts", "text"), "Post")
 
         # Judge best
         judge_listing = "".join(f"[{i}] {c}\n\n" for i, c in enumerate(candidates))

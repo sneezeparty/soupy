@@ -57,6 +57,7 @@ from discord.ext import commands, tasks
 
 from soupy import prompts as soupy_prompts
 from soupy.llm_gate import llm_turn
+from soupy.msn import resolve_article_url
 from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
 from soupy_database.database import get_db_path
@@ -1613,7 +1614,9 @@ class DailyPostCog(commands.Cog):
                     }
                 )
             else:
-                # News article — fetch full content
+                # News article — fetch full content. An msn.com link is a syndicated copy that
+                # serves no content, image or date to a crawler, so swap in the original first.
+                url = await resolve_article_url(url)
                 result = await _fetch_article_content(url)
                 if result:
                     content = result["content"]

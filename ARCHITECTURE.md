@@ -78,6 +78,13 @@ Small, well-factored, and **unit-tested** (unlike the main file). This is the
 - `soupy/triggers.py` — pure predicates deciding whether the bot should respond
   (`message_contains_trigger_keyword`, `should_randomly_respond`). Reads env on
   **every call** so dashboard keyword edits take effect without restart.
+- `soupy/msn.py` — resolves an msn.com link to the original publisher's article through
+  MSN's content endpoint. MSN serves crawlers a JS shell with no og:image, no date and no
+  text, so both article cogs resolve at discovery and carry the original from there.
+- `soupy/slop.py` — the anti-slop rules appended to every Bluesky writing prompt, and
+  the detector the cog runs over its three drafts before the LLM judge picks one. Tuned
+  for 300-character posts; shape only, so Soupy's politics stay in the cog's PERSPECTIVE
+  blocks.
 - `soupy/log.py` — the single `ColoredFormatter` used by both processes.
 
 ### Tier 2 — web control panel (`web/`)

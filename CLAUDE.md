@@ -86,6 +86,8 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | [soupy/cogs/bluesky.py](soupy/cogs/bluesky.py) | Cog — autonomous Bluesky replies, quote-posts, original posts |
 | [soupy/settings.py](soupy/settings.py) | Typed, cached config accessors over `.env-stable` |
 | [soupy/prompts.py](soupy/prompts.py) | Prompt loader (env → custom file → default → fallback) |
+| [soupy/msn.py](soupy/msn.py) | Resolves an msn.com link to the article it was syndicated from |
+| [soupy/slop.py](soupy/slop.py) | Anti-slop rules for Bluesky drafts: the prompt block and the tell detector |
 | [soupy/triggers.py](soupy/triggers.py) | Pure respond/don't-respond predicates |
 | [soupy/scheduling.py](soupy/scheduling.py) | Shared local-time windows + atomic JSON state files for the autonomous loops |
 | [run_all.py](run_all.py) | Launcher: starts uvicorn with `SOUPY_AUTOSTART_BOT=1` |
