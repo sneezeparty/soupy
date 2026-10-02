@@ -469,6 +469,17 @@ class Settings:
     def bluesky_article_freshness_days(self) -> int:
         return _env_int("BLUESKY_ARTICLE_FRESHNESS_DAYS", 14)
 
+    @cached_property
+    def bluesky_topic_dedup_sim(self) -> float:
+        """Cosine-similarity threshold (0-1) above which a candidate article is
+        treated as the same topic as one Soupy already posted today."""
+        return _env_float("BLUESKY_TOPIC_DEDUP_SIM", 0.80, minimum=0.0, maximum=1.0)
+
+    @cached_property
+    def bluesky_topic_dedup_days(self) -> int:
+        """Look-back window in local days for topic de-dup (1 = same calendar day)."""
+        return _env_int("BLUESKY_TOPIC_DEDUP_DAYS", 1, minimum=1)
+
     # ----- Stock data (Finnhub) ------------------------------------------
 
     @cached_property

@@ -2791,7 +2791,7 @@
               },
               soupysky: {
                 desc: "Bluesky engagement — replies, reposts, original posts, likes, follows",
-                keys: ["BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD", "BLUESKY_AUTO_REPLY", "BLUESKY_REPLIES_MIN", "BLUESKY_REPLIES_MAX", "BLUESKY_REPOSTS_PER_DAY", "BLUESKY_POSTS_PER_DAY", "BLUESKY_MIN_GAP_MINUTES", "BLUESKY_MAX_LIKES_PER_DAY", "BLUESKY_MAX_FOLLOWS_PER_DAY", "BLUESKY_ARTICLE_FRESHNESS_DAYS"],
+                keys: ["BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD", "BLUESKY_AUTO_REPLY", "BLUESKY_REPLIES_MIN", "BLUESKY_REPLIES_MAX", "BLUESKY_REPOSTS_PER_DAY", "BLUESKY_POSTS_PER_DAY", "BLUESKY_MIN_GAP_MINUTES", "BLUESKY_MAX_LIKES_PER_DAY", "BLUESKY_MAX_FOLLOWS_PER_DAY", "BLUESKY_ARTICLE_FRESHNESS_DAYS", "BLUESKY_TOPIC_DEDUP_SIM", "BLUESKY_TOPIC_DEDUP_DAYS"],
               },
               soupyself: {
                 desc: "Soupy's memory of itself — built from its own messages with the profile refresh",

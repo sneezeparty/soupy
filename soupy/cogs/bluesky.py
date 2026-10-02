@@ -443,6 +443,111 @@ async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
         return None
 
 
+def _dedup_url_key(url: str) -> str:
+    """Canonical key for de-duplicating article URLs.
+
+    Collapses shorteners-after-resolution, redirects, and tracking-param
+    differences to one value: lowercased host (sans ``www.``) + path, with no
+    scheme, query, or fragment. So ``apnews.com/article/x?utm_source=bluesky``
+    and ``apnews.com/article/x?taid=123`` both key to ``apnews.com/article/x``.
+    """
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlsplit
+
+        p = urlsplit(url)
+        host = (p.netloc or "").lower()
+        if host.startswith("www."):
+            host = host[4:]
+        path = (p.path or "").rstrip("/")
+        return f"{host}{path}" if host else url.strip().lower()
+    except Exception:
+        return url.strip().lower()
+
+
+def _norm_title(title: str) -> str:
+    """Normalize an article title for de-dup comparison (lowercase, collapse WS)."""
+    if not title:
+        return ""
+    return " ".join(title.lower().split())
+
+
+async def _topic_is_duplicate_today(
+    history: Dict[str, Any],
+    title: str,
+    snippet: str,
+    *,
+    sim_threshold: float,
+    days: int,
+) -> bool:
+    """True if the candidate is the same topic as something posted recently.
+
+    Embeds the candidate (title + snippet) against the titles of posts from the
+    last ``days`` local days and returns True when the max cosine similarity
+    meets ``sim_threshold`` — so the same story from a different outlet/URL is
+    still caught. Degrades to False (never blocks posting) when there are no
+    recent posts or the embedder errors/times out; the exact-match layer still
+    stands in that case.
+    """
+    posts = history.get("posts", []) or []
+    if not posts:
+        return False
+
+    # Resolve the local day boundary (matches the autonomous scheduler's zone).
+    tz = None
+    try:
+        import pytz
+
+        tz = pytz.timezone(settings.timezone)
+    except Exception:
+        tz = None
+    today_local = (datetime.now(tz) if tz else datetime.now(timezone.utc)).date()
+
+    recent_titles: List[str] = []
+    for p in posts:
+        t = (p.get("title") or "").strip()
+        ts = p.get("ts")
+        if not t or not ts:
+            continue
+        try:
+            dt = datetime.fromisoformat(ts)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            local_date = (dt.astimezone(tz) if tz else dt).date()
+            if (today_local - local_date).days < days:
+                recent_titles.append(t)
+        except Exception:
+            continue
+
+    if not recent_titles:
+        return False
+
+    cand_text = f"{title}. {(snippet or '')[:300]}"
+    try:
+        from soupy_database.rag import _cosine, embed_texts_lm_studio
+
+        async def _embed():
+            async with aiohttp.ClientSession() as session:
+                return await embed_texts_lm_studio(session, [cand_text] + recent_titles)
+
+        vectors = await asyncio.wait_for(_embed(), timeout=20)
+    except Exception as exc:
+        logger.debug("🦋 Topic dedup embedding failed, skipping check: %s", exc)
+        return False
+
+    if not vectors or len(vectors) < 2:
+        return False
+
+    cand_vec = vectors[0]
+    max_sim = max((_cosine(cand_vec, v) for v in vectors[1:]), default=0.0)
+    if max_sim >= sim_threshold:
+        logger.info("🦋 Topic dedup: MATCH (sim=%.3f) — same topic posted recently: %s", max_sim, title[:60])
+        return True
+    logger.debug("🦋 Topic dedup: no match (top sim=%.3f): %s", max_sim, title[:60])
+    return False
+
+
 # ---------------------------------------------------------------------------
 # OG image extraction
 # ---------------------------------------------------------------------------
@@ -2152,12 +2257,22 @@ class BlueskyEngageCog(commands.Cog):
         Returns (article_url, title, snippet, content) or (None, '', '', '').
         """
         seen_urls: set = set()
-        posted_urls = {p.get("url") for p in self.history.get("posts", [])}
+        _posted = self.history.get("posts", [])
+        posted_urls = {p.get("url") for p in _posted}
+        # Canonical keys + titles guard against the same article recurring under a
+        # different URL form (bit.ly vs the resolved apnews.com link, tracking
+        # params, etc.) — raw-string matching alone misses those.
+        posted_url_keys = {_dedup_url_key(p.get("url")) for p in _posted}
+        posted_url_keys.discard("")
+        posted_titles = {_norm_title(p.get("title")) for p in _posted}
+        posted_titles.discard("")
         current_year = datetime.now().year
         all_results: List[Dict] = []
 
         def _add_article(url: str, title: str, description: str, likes: int = 0) -> None:
             if not url or url in seen_urls or url in posted_urls:
+                return
+            if _dedup_url_key(url) in posted_url_keys or _norm_title(title) in posted_titles:
                 return
             if not url.startswith("http"):
                 return
@@ -2319,6 +2434,13 @@ class BlueskyEngageCog(commands.Cog):
                 title = a_title
                 pub_date = None
                 final_url = a_url
+            # Re-check against already-posted after resolution: a candidate's raw
+            # URL (e.g. a bit.ly link) only becomes the canonical apnews.com URL
+            # once _fetch_article follows the redirect, so this is where a repeat
+            # of an already-posted article is actually catchable.
+            if _dedup_url_key(final_url) in posted_url_keys or _norm_title(title) in posted_titles:
+                logger.info("🦋   [%d] ⏭ Already posted, skipping: %s", idx, title[:60])
+                continue
             # Check article age using shared estimator (also include title/snippet).
             # Use the post-redirect URL so a date-in-URL heuristic can read the
             # real publisher link, not a bit.ly/twp.ai shortener.
@@ -2336,6 +2458,18 @@ class BlueskyEngageCog(commands.Cog):
             freshness_days = settings.bluesky_article_freshness_days
             if age > freshness_days:
                 logger.info("🦋   [%d] ⏭ Too old (~%d days): %s", idx, age, title[:60])
+                continue
+            # Topic-level de-dup: don't post the same story twice in a day, even
+            # from a different outlet/URL. Checked after freshness so we never
+            # embed an article we'd reject for age anyway.
+            if await _topic_is_duplicate_today(
+                self.history,
+                title,
+                a_snippet,
+                sim_threshold=settings.bluesky_topic_dedup_sim,
+                days=settings.bluesky_topic_dedup_days,
+            ):
+                logger.info("🦋   [%d] ⏭ Same topic already posted today, skipping: %s", idx, title[:60])
                 continue
             fetched.append({"url": final_url, "title": title, "snippet": a_snippet, "content": content})
             logger.info("🦋   [%d] %s (date=%s, %d chars)", idx, title[:60], pub_date or "?", len(content))
