@@ -396,17 +396,29 @@ async def _ddg_search(query: str, timelimit: str = "d", max_results: int = 8) ->
 
 
 async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
-    """Fetch article content via trafilatura.
+    """Fetch article content via the browser/crawler User-Agent chain + trafilatura.
 
-    Falls back to HTML meta tag extraction if trafilatura doesn't find a date.
+    Fetches the page HTML through ``_fetch_page_html`` (which retries the
+    ``_OG_USER_AGENTS`` chain before falling back to bare trafilatura), so sites
+    that 403 trafilatura's default UA — AP News, and bit.ly/twp.ai shorteners
+    that redirect to them — still resolve. Trafilatura extraction then runs on
+    that HTML. Falls back to HTML meta tag extraction if trafilatura doesn't find
+    a date. ``resolved_url`` is the final URL after redirects (a shortener
+    resolves to the real publisher).
     """
+    # Fetch HTML via the UA fallback chain. Cap at 20s to preserve the old
+    # latency bound — _fetch_page_html can otherwise try several UAs (15s each)
+    # plus a trafilatura fallback, and the discovery/URL paths have no outer cap.
+    try:
+        html, resolved_url = await asyncio.wait_for(_fetch_page_html(url), timeout=20)
+    except (asyncio.TimeoutError, Exception):
+        return None
+    if not html:
+        return None
 
-    def _sync():
-        downloaded = trafilatura.fetch_url(url)
-        if not downloaded:
-            return None
-        text = trafilatura.extract(downloaded, include_comments=False) or ""
-        meta = trafilatura.extract(downloaded, output_format="json", include_comments=False)
+    def _extract(html_text: str):
+        text = trafilatura.extract(html_text, include_comments=False) or ""
+        meta = trafilatura.extract(html_text, output_format="json", include_comments=False)
         date = None
         title = ""
         if meta:
@@ -422,11 +434,11 @@ async def _fetch_article(url: str) -> Optional[Dict[str, str]]:
         if not date:
             from .dailypost import _extract_date_from_html
 
-            date = _extract_date_from_html(downloaded)
-        return {"content": text, "date": date, "title": title}
+            date = _extract_date_from_html(html_text)
+        return {"content": text, "date": date, "title": title, "resolved_url": resolved_url}
 
     try:
-        return await asyncio.wait_for(asyncio.to_thread(_sync), timeout=20)
+        return await asyncio.wait_for(asyncio.to_thread(_extract, html), timeout=20)
     except (asyncio.TimeoutError, Exception):
         return None
 
@@ -2301,17 +2313,21 @@ class BlueskyEngageCog(commands.Cog):
                 content = full["content"][:2000]
                 title = full.get("title") or a_title
                 pub_date = full.get("date")
+                final_url = full.get("resolved_url") or a_url
             else:
                 content = a_snippet
                 title = a_title
                 pub_date = None
-            # Check article age using shared estimator (also include title/snippet)
+                final_url = a_url
+            # Check article age using shared estimator (also include title/snippet).
+            # Use the post-redirect URL so a date-in-URL heuristic can read the
+            # real publisher link, not a bit.ly/twp.ai shortener.
             from .dailypost import _estimate_article_age_days
 
             scan_text = " ".join(filter(None, [title, a_snippet, content]))
             age = _estimate_article_age_days(
                 pub_date=pub_date,
-                url=a_url,
+                url=final_url,
                 text=scan_text,
             )
             if age is None:
@@ -2321,7 +2337,7 @@ class BlueskyEngageCog(commands.Cog):
             if age > freshness_days:
                 logger.info("🦋   [%d] ⏭ Too old (~%d days): %s", idx, age, title[:60])
                 continue
-            fetched.append({"url": a_url, "title": title, "snippet": a_snippet, "content": content})
+            fetched.append({"url": final_url, "title": title, "snippet": a_snippet, "content": content})
             logger.info("🦋   [%d] %s (date=%s, %d chars)", idx, title[:60], pub_date or "?", len(content))
             await asyncio.sleep(0.5)
 
@@ -2403,6 +2419,8 @@ class BlueskyEngageCog(commands.Cog):
             if full and full.get("content"):
                 article_content = full["content"][:2000]
                 article_title = full.get("title") or article_url
+                # Post the final publisher URL, not a shortener.
+                article_url = full.get("resolved_url") or article_url
             else:
                 return False, f"Could not fetch article content from {article_url[:60]}", None
 
