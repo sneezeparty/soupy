@@ -1339,12 +1339,14 @@ def format_profile_prefix_for_rag(
     query_text: str,
     first_person_hint: Optional[str],
     subject_user_id: Optional[int] = None,
+    now: Optional[datetime] = None,
 ) -> str:
     """
     Build a query-aware profile prefix for the RAG bundle.
     Picks the profile items most relevant to the current message (see
     ``profile_document.render_for_chat``) instead of dumping the whole profile.
     If subject_user_id is provided, load that profile instead of re-resolving from tokens.
+    With ``now`` (time awareness on), items say how long ago they came up instead of the month.
     """
     if os.getenv("USER_PROFILES_IN_RAG", "1").strip() in ("0", "false", "no"):
         return ""
@@ -1398,7 +1400,12 @@ def format_profile_prefix_for_rag(
 
         if is_v2(row["structured"]):
             body = render_for_chat(
-                row["structured"], query_tokens, max_each, today=date.today(), lately_days=lately_days
+                row["structured"],
+                query_tokens,
+                max_each,
+                today=now.date() if now else date.today(),
+                lately_days=lately_days,
+                relative_dates=now is not None,
             )
         else:
             body = _legacy_summary_excerpt(row["summary"], max_each)
@@ -1409,11 +1416,16 @@ def format_profile_prefix_for_rag(
     if not sketch_parts:
         return ""
 
+    dated = (
+        "The bracket after an item says how long ago it came up in chat."
+        if now
+        else "(Mon YYYY) marks when something came up in chat."
+    )
     header = (
         "Internal notes on this member, built from saved chat—not quotes or proof.\n"
         "Use them for tone, personal facts, and continuity. For what anyone actually said, use the excerpts below; "
         "they win if the notes disagree.\n"
-        "(Mon YYYY) marks when something came up in chat. Older things may have changed—treat them as what you "
+        f"{dated} Older things may have changed—treat them as what you "
         "last heard, not as current fact.\n"
         "Answer in your normal voice. Never mention these notes, their dates, or that you keep a profile, and do "
         "not read them out like a list."

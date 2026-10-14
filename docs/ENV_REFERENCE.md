@@ -53,7 +53,7 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`OPENAI_BASE_URL`** — `http://localhost:1234/v1` — LM Studio (or other OpenAI-compatible) base URL.
 - **`LOCAL_KEY`** — `lm-studio` — Auto-mapped to `OPENAI_API_KEY` if that's unset; usually fine for local servers.
 - **`LOCAL_CHAT`** — `google/gemma-3-27b` — Exact chat-model id loaded in LM Studio.
-- **`AVAILABLE_MODELS`** — `"google/gemma-3-27b, qwen/qwen2.5-vl-7b, text-embedding-nomic-embed-text-v1.5"` — Comma-separated list of models offered in the panel's model dropdown.
+- **`AVAILABLE_MODELS`** — `"google/gemma-3-27b, qwen/qwen2.5-vl-7b, text-embedding-nomic-embed-text-v1.5"` — Comma-separated model names the panel offers when it can't read the list from the model server. With LM Studio reachable, the Model & Personality tab reads the list live and offers to update this one.
 
 ## Vision Model Configuration
 
@@ -78,14 +78,11 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`MAX_TOKENS`** — `4096` — LLM response length limit.
 - **`RECENT_MESSAGE_LIMIT`** — `15` — How many recent messages to pull for chat context.
 - **`UPDATE_INTERVAL_MINUTES`** — `61` — Periodic background-update interval, in minutes.
-- **`TIMEZONE`** — `America/Los_Angeles` — Timezone for scheduled loops and timestamps.
-- **`BEHAVIOUR`** — *(long string)* — Main personality system prompt; see [CUSTOMIZATION.md](CUSTOMIZATION.md).
-- **`BEHAVIOUR_SEARCH`** — *(long string)* — Voice used for `/soupysearch` summaries.
+- **`TIMEZONE`** — `America/Los_Angeles` — Timezone for scheduled loops and timestamps, and the clock Soupy reads in chat when time awareness is on.
 - **`MUSING_ENABLED`** — `true` — Enable the once-daily "thinking out loud" musing.
 - **`MUSING_CHANNEL_ID`** — *(empty)* — Channel ID where Soupy posts musings.
 - **`MUSING_HOUR_MIN`** — `6` — Earliest local hour the daily musing can fire (0–23, inclusive).
 - **`MUSING_HOUR_MAX`** — `20` — Latest local hour the daily musing can fire (1–24, exclusive; 24 means midnight).
-- **`9BALL`** — *(long string)* — Response style for `/9ball`.
 
 ## Stable Diffusion Configuration
 
@@ -95,7 +92,6 @@ Every variable in `.env-stable.example`, grouped by section the way they appear 
 - **`REMOVE_BG_API_URL`** — `http://your-sd-host:8000/remove_background` — Background-removal endpoint URL.
 - **`SD_STEPS`** — `20` — Diffusion steps per image.
 - **`SD_GUIDANCE`** — `5` — Classifier-free guidance scale.
-- **`SD_NEGATIVE_PROMPT`** — *(long default)* — Default negative prompt for image generation.
 - **`SD_DEFAULT_WIDTH`** — `1024` — Default image width (must be divisible by 64).
 - **`SD_DEFAULT_HEIGHT`** — `1024` — Default image height (must be divisible by 64).
 - **`SD_WIDE_WIDTH`** — `1440` — Width preset for wide-aspect generation.
@@ -109,29 +105,37 @@ The `/flux` command's local mflux/MLX backend. Unlike SD (remote GPU host), the
 Flux model runs on the same Mac as the bot via `flux_server.py`. The bot only
 talks to it over HTTP, exactly like SD.
 
-- **`FLUX_ENABLED`** — `false` — Soft toggle for the Flux feature (the cog also no-ops if `FLUX_SERVER_URL` is unset).
+- **`FLUX_ENABLED`** — `false` — Turns Flux on. With it off, `/flux` is not registered, the buttons under older Flux pictures answer that Flux is off, and neither the bot nor the panel checks the Flux server.
+- **`FLUX_SERVER_AUTOSTART`** — `true` in the template, off when the line is absent — The web panel starts `flux_server.py` when it starts and stops it when it stops. Needs `FLUX_ENABLED=true`. Off, the server is started by hand (`python flux_server.py`) or with the Start button on the panel's Overview tab. A server already answering at `FLUX_SERVER_URL` is left as it is.
 - **`FLUX_SERVER_URL`** — `http://127.0.0.1:4942` — Base URL of the local `flux_server.py` mflux backend.
 - **`FLUX_IMG2IMG_URL`** — *(empty)* — Optional explicit img2img endpoint; defaults to `{FLUX_SERVER_URL}/flux_img2img`.
 - **`FLUX_MODEL`** — `schnell` — mflux model: `schnell`/`dev` (FLUX.1), or a FLUX.2 klein/dev id later. Server-side; swapping models needs no code change.
 - **`FLUX_QUANTIZE`** — `4` — Quantization bits (4 or 8). 4-bit keeps FLUX.1 schnell ~8-12GB.
 - **`FLUX_LOW_RAM`** — `0` — Release text encoders between runs to save RAM (needed for tight memory / FLUX.2).
+- **`FLUX_CACHE_LIMIT_GB`** — `2` — Cap on the freed GPU buffers MLX keeps for reuse. Server-side. Without a cap the pile grows with the machine's RAM: on a 64 GB Mac a 1392x752 klein run held about 31 GB, and 16 GB under the 2 GB cap, in 34 s where it had taken 41 s, with a byte-identical picture. `0` leaves MLX's default.
 - **`FLUX_STEPS`** — `4` — Inference steps. schnell is step-distilled (2-4); dev/klein want more.
 - **`FLUX_GUIDANCE`** — `0.0` — Guidance scale. schnell is guidance-distilled (0); klein/dev want `1.0+`. `flux_server.py` auto-substitutes `1.0` when this is left at `0.0` on a guided model.
-- **`FLUX_DEFAULT_STRENGTH`** — `0.35` — Default img2img strength when `/flux` is given an input image.
+- **`FLUX_DEFAULT_STRENGTH`** — `0.35` — Strength used when an image is given without one and `FLUX_EDIT_ENABLED` is off. Lower keeps more of the image. `flux_server.py` runs `FLUX_STEPS` denoising steps at any strength; 0.8 and above are the same setting at 4 steps.
 - **`FLUX_SERVER_HOST`** — `127.0.0.1` — Bind host for `flux_server.py`.
 - **`FLUX_SERVER_PORT`** — `4942` — Bind port for `flux_server.py`.
 
 ### Flux Klein-Edit Pipeline (FLUX.2 only)
 
-When enabled, `/flux` with an attached image routes to `flux_server.py`'s
-`/flux_edit` endpoint, which uses `Flux2KleinEdit`. Reference-image latent
-tokens are concatenated with the noise latents inside the transformer — much
-stronger prompt-driven editing than the noise-mix `/flux_img2img` path.
-Strength is intentionally ignored here. First request loads klein weights
+When enabled, an image plus a prompt is edited by instruction ("make it a theme
+park", "add an alien to the scene"). That covers `/flux` with an attached image
+and the 🖼️ Change image button under a result. The request goes to `flux_server.py`'s
+`/flux_edit` endpoint, which uses `Flux2KleinEdit`: reference-image latent
+tokens are concatenated with the noise latents inside the transformer, so the
+rest of the picture is kept.
+
+Giving a strength (the `/flux` option, or the Strength field in the button's
+dialog) takes the noise-mix `/flux_img2img` path instead. There the prompt
+describes the picture wanted and the strength says how far to move toward it;
+it does not follow instructions. First request loads klein weights
 (~5 GB at `FLUX_QUANTIZE=4`, ~15 GB unquantized) and adds ~5-8 GB peak RAM
 alongside the `FLUX_MODEL` already loaded.
 
-- **`FLUX_EDIT_ENABLED`** — `false` — Auto-route `/flux <prompt> <image>` to `/flux_edit` instead of `/flux_img2img`.
+- **`FLUX_EDIT_ENABLED`** — `false` — Edit an image by instruction through `/flux_edit` whenever no strength is given. Off, every image request is noise-mix img2img.
 - **`FLUX_EDIT_URL`** — *(empty)* — Optional explicit edit endpoint; defaults to `{FLUX_SERVER_URL}/flux_edit`.
 - **`FLUX_EDIT_MODEL`** — `flux2-klein-4b` — FLUX.2 klein variant for editing (`flux2-klein-4b`/`9b`, plus `*-base-*` non-distilled variants).
 - **`FLUX_EDIT_STEPS`** — `4` — Distilled klein-edit is step-distilled; base variants want more.
@@ -142,10 +146,19 @@ alongside the `FLUX_MODEL` already loaded.
 - **`MAX_INTERACTIONS_PER_MINUTE`** — `4` — Per-user rate limit for interactive commands.
 - **`LIMIT_EXCEPTION_ROLES`** — `mod,owner` — Comma-separated role names exempt from rate limiting.
 
-## Image Generation Prompts
+## Prompts
 
-- **`FANCY`** — *(long string)* — Template used by the Fancy button to expand a short prompt into a detailed CLIP-style prompt.
-- **`RANDOMPROMPT`** — *(long string)* — Template used by Random buttons to generate a full image prompt from keywords.
+The prompts are not in `.env-stable.example`. They are text files in `prompts/`, edited on the panel's Model & Personality tab; see [CUSTOMIZATION.md](CUSTOMIZATION.md). Seven legacy variables are still read, and one that is set overrides its prompt file:
+
+- **`BEHAVIOUR`** — `prompts/behaviour.txt`, the chat personality.
+- **`BEHAVIOUR_SEARCH`** — `prompts/behaviour_search.txt`, the voice of `/soupysearch` summaries.
+- **`BEHAVIOUR_DAILY_POST`** — `prompts/behaviour_daily_post.txt`, commentary on the daily article post.
+- **`9BALL`** — `prompts/nineball.txt`, `/9ball` answers.
+- **`FANCY`** — `prompts/fancy.txt`, the Fancy button's prompt rewrite.
+- **`RANDOMPROMPT`** — `prompts/randomprompt.txt`, the random-keyword image prompt.
+- **`SD_NEGATIVE_PROMPT`** — `prompts/sd_negative_prompt.txt`, the negative prompt sent with image requests.
+
+`python tools/migrate_prompts.py` moves any that are set into their files.
 
 ## Content Categories
 
@@ -259,7 +272,7 @@ Retired with the nightly reflection: `SELF_MD_REFLECT_HOUR`, `SELF_MD_MIN_INTERA
 
 ## Context Budgeting
 
-- **`CONTEXT_WINDOW_TOKENS`** — `16000` — Total context-window budget, in tokens.
+- **`CONTEXT_WINDOW_TOKENS`** — `16000` — Token budget for one chat prompt. Soupy trims history, retrieved messages and link text to fit under it. Keep it below the context length the chat model is loaded with; the Model & Personality tab shows both and warns above 85%.
 
 ## Misc Runtime Knobs
 

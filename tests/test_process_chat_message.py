@@ -19,9 +19,13 @@ problems.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import soupy_remastered_stablediffusion as bot  # noqa: E402  (conftest sets env first)
+
+NOW = datetime(2026, 10, 6, 6, 14, tzinfo=ZoneInfo("America/Los_Angeles"))  # a Tuesday
 
 
 class _AsyncCM:
@@ -57,7 +61,9 @@ def _make_message(content: str = "hello soupy", *, guild_id: int = 222, channel_
     return msg
 
 
-def _base_patches(candidates, *, rag_enabled=False, self_md_enabled=False, rag_block=""):
+def _base_patches(
+    candidates, *, rag_enabled=False, self_md_enabled=False, rag_block="", time_aware=False, history=()
+):
     """Patch every I/O seam in the bot module; return a contextlib-style list.
 
     Returns a dict of patchers already started — caller is responsible for
@@ -71,8 +77,13 @@ def _base_patches(candidates, *, rag_enabled=False, self_md_enabled=False, rag_b
         "is_self_md_enabled": patch.object(
             bot, "is_self_md_enabled", MagicMock(return_value=self_md_enabled)
         ),
+        "is_time_awareness_enabled": patch.object(
+            bot, "is_time_awareness_enabled", MagicMock(return_value=time_aware)
+        ),
+        # The clock is frozen; it is only read when time awareness is on.
+        "now_local": patch.object(bot.timeaware, "now_local", MagicMock(return_value=NOW)),
         "fetch_recent_messages": patch.object(
-            bot, "fetch_recent_messages", AsyncMock(return_value=[])
+            bot, "fetch_recent_messages", AsyncMock(return_value=list(history))
         ),
         "generate_parallel_candidates": patch.object(
             bot, "generate_parallel_candidates", AsyncMock(return_value=candidates)
@@ -193,3 +204,82 @@ def test_long_reply_is_split_into_multiple_sends():
     assert msg.channel.send.call_count >= 2
     for call in msg.channel.send.call_args_list:
         assert len(call.args[0]) <= 1500
+
+
+# ---------------------------------------------------------------------------
+# Time awareness (soupy/timeaware.py)
+# ---------------------------------------------------------------------------
+
+_OLD_AND_NEW_HISTORY = (
+    {"role": "user", "content": "glenn: anyone watching the game", "ts": NOW - timedelta(hours=11, minutes=14)},
+    {"role": "assistant", "content": "nah", "ts": NOW - timedelta(hours=11, minutes=13)},
+    {"role": "user", "content": "jdk: morning", "ts": NOW - timedelta(minutes=2)},
+)
+
+
+def _llm_messages(started):
+    return started["generate_parallel_candidates"].call_args.kwargs["messages"]
+
+
+def test_time_awareness_ends_the_system_prompt_with_the_clock():
+    msg = _make_message("good morning soupy")
+    started = _run(msg, _base_patches(["morning"], time_aware=True))
+
+    system = _llm_messages(started)[0]
+    assert system["role"] == "system"
+    assert "Right now it is tuesday, october 6, 2026, 6:14 am PDT (early morning)." in system["content"]
+    assert system["content"].endswith("Never write a [chat from ...] marker yourself.\n"), "the clock block goes last"
+
+
+def test_time_awareness_marks_old_history_and_keeps_markers_out_of_soupys_turns():
+    msg = _make_message("soupy you there")
+    started = _run(msg, _base_patches(["yep"], time_aware=True, history=_OLD_AND_NEW_HISTORY))
+
+    sent = _llm_messages(started)
+    assert all(set(m) == {"role", "content"} for m in sent), "history timestamps must never reach the LLM API"
+    assert sent[1]["content"] == "[chat from yesterday evening]\nglenn: anyone watching the game"
+    assert sent[2] == {"role": "assistant", "content": "nah"}
+    assert sent[3]["content"].startswith("[chat from the last few minutes]\njdk: morning\n")
+    assert "The channel had been quiet" not in sent[3]["content"], "the last message was two minutes ago"
+
+
+def test_time_awareness_notes_when_the_message_broke_a_silence():
+    msg = _make_message("soupy you there")
+    msg.created_at = NOW
+    started = _run(msg, _base_patches(["yep"], time_aware=True, history=_OLD_AND_NEW_HISTORY[:2]))
+
+    task = _llm_messages(started)[-1]["content"]
+    note = "This message is new. The channel had been quiet for about 11 hours before it.\nMESSAGE TO RESPOND TO:"
+    assert note in task
+
+
+def test_time_awareness_off_leaves_the_prompt_without_a_clock_or_markers():
+    msg = _make_message("soupy you there")
+    msg.created_at = NOW
+    started = _run(msg, _base_patches(["yep"], history=_OLD_AND_NEW_HISTORY[:2]))
+
+    sent = _llm_messages(started)
+    assert all(set(m) == {"role", "content"} for m in sent)
+    blob = "\n".join(m["content"] for m in sent)
+    assert "Right now it is" not in blob and "[chat from" not in blob and "had been quiet" not in blob
+    assert "glenn: anyone watching the game" in blob
+
+
+def test_retrieval_gets_the_same_clock_or_none_when_off():
+    patches = _base_patches(["yes"], rag_enabled=True, rag_block="x", time_aware=True)
+    on = _run(_make_message("do I own a cat?"), patches)
+    assert on["fetch_rag_context_for_query"].call_args.kwargs["now"] == NOW
+    off = _run(_make_message("do I own a cat?"), _base_patches(["yes"], rag_enabled=True, rag_block="x"))
+    assert off["fetch_rag_context_for_query"].call_args.kwargs["now"] is None
+
+
+def test_a_reply_that_opens_with_the_time_is_sent_whole():
+    msg = _make_message("what time is it soupy")
+    _run(msg, _base_patches(["its 6:14 am, go back to bed"], time_aware=True))
+    assert msg.channel.send.call_args[0][0] == "its 6:14 am, go back to bed"
+
+
+def test_a_history_marker_echoed_by_the_model_is_scrubbed():
+    msg = _make_message("soupy you there")
+    _run(msg, _base_patches(["[chat from yesterday evening] yeah i am here"], time_aware=True))
+    assert msg.channel.send.call_args[0][0] == "yeah i am here"

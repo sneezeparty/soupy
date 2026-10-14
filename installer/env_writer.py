@@ -1,9 +1,10 @@
-"""Render `.env-stable` from the example template + user-supplied updates.
+"""Render `.env-stable` from a template + user-supplied updates.
 
-Preserves comments, blank lines, and ordering from `.env-stable.example`.
-Only the values for keys we know about are rewritten; everything else
-(quoted multi-line `BEHAVIOUR`, all the `WEB_COLOR_*` defaults, etc.) is
-copied through verbatim.
+The template is `.env-stable.example` on a first install and the existing
+`.env-stable` on a re-run. Its comments, blank lines, and ordering are
+preserved. Only the values for keys we know about are rewritten;
+everything else (quoted multi-line `BEHAVIOUR`, all the `WEB_COLOR_*`
+values, etc.) is copied through verbatim.
 
 NOTE on duplication: `web/services/env_store.py` solves a related but
 different problem (in-place edits to an existing `.env-stable`, not
@@ -60,6 +61,18 @@ def _format_value(value: str) -> str:
         escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         return f'"{escaped}"'
     return value
+
+
+_ESCAPED_RE = re.compile(r"""\\([\\'"nrt])""")
+_ESCAPED_CHARS = {"n": "\n", "r": "\r", "t": "\t"}
+
+
+def _unescape(value: str) -> str:
+    """Undo `_format_value`'s escaping inside a double-quoted value.
+
+    Same set of escapes python-dotenv decodes, so a value the wizard wrote
+    (the `DAILY_POST_CHANNELS` JSON, mostly) reads back as what was typed."""
+    return _ESCAPED_RE.sub(lambda m: _ESCAPED_CHARS.get(m.group(1), m.group(1)), value)
 
 
 def _is_simple_assignment(line: str) -> bool:
@@ -158,8 +171,10 @@ def write(
 def parse_existing(path: Path) -> Dict[str, str]:
     """Read an existing env file and return a flat key->value dict.
 
-    Used to compute a diff before overwriting. Multi-line quoted values
-    are joined with `\n`."""
+    Used to compute a diff before overwriting, and to carry an existing
+    config's answers into a re-run of the wizard. Multi-line quoted values
+    are joined with `\n`; escapes in a one-line double-quoted value are
+    decoded."""
     if not path.exists():
         return {}
     out: Dict[str, str] = {}
@@ -178,7 +193,7 @@ def parse_existing(path: Path) -> Dict[str, str]:
             quote = val[0]
             content = val[1:]
             if content.endswith(quote) and len(val) >= 2:
-                out[key] = content[:-1]
+                out[key] = _unescape(content[:-1]) if quote == '"' else content[:-1]
                 i += 1
                 continue
             # Multi-line — accumulate until close

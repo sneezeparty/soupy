@@ -12,20 +12,24 @@ Run it (separately from the bot) on the Mac that has the GPU/unified memory:
     pip install mflux fastapi uvicorn python-multipart pillow   # one-time
     python flux_server.py
 
-Endpoints (all PNG endpoints return raw PNG bytes):
+Endpoints (all PNG endpoints return raw PNG bytes, with the model that made
+them in an ``X-Flux-Model`` header):
     POST /flux           form: prompt, [negative_prompt], steps, guidance_scale,
                                width, height, seed
-    POST /flux_img2img   the above + image (file) + strength  (noise-mix img2img)
+    POST /flux_img2img   the above + image (file) + strength  (noise-mix img2img;
+                         ``steps`` is the number of denoising steps actually run)
     POST /flux_edit      image + prompt, steps, guidance_scale, width, height, seed
                          (FLUX.2-Klein only; uses Flux2KleinEdit — concatenated
                          reference-image tokens, strong prompt-driven editing.
                          No `strength` field.)
-    GET  /health         {"status": "ok", "model", "loaded", "edit_model", "edit_loaded"}
+    GET  /health         {"status": "ok", "model", "loaded", "edit_model", "edit_loaded",
+                          "cache_limit_gb"}
 
 The img2img ``strength`` form field uses standard Stable-Diffusion semantics
 (higher = deviate more from the input), matching the bot/SD contract. mflux's
-own ``image_strength`` is the INVERSE (higher = preserve the input), so the
-``/flux_img2img`` handler flips it before calling mflux — see the comment there.
+own ``image_strength`` is the INVERSE (higher = preserve the input) and is
+rounded to a whole step of the schedule, so ``/flux_img2img`` translates the
+request with ``_img2img_schedule`` — see the comment there.
 
 The ``/flux_edit`` endpoint is FLUX.2-Klein-only and uses a separate model
 instance (``Flux2KleinEdit``) lazily loaded on first request, then held
@@ -38,6 +42,7 @@ config + a weights download, not a code change:
     FLUX_MODEL             mflux model name ("schnell" / "dev", or a FLUX.2 id)  [schnell]
     FLUX_QUANTIZE          quantization bits, 4 or 8                             [4]
     FLUX_LOW_RAM           "1"/"true" to release encoders between runs           [0]
+    FLUX_CACHE_LIMIT_GB    cap on MLX's buffer cache, 0 for MLX's own default    [2]
     FLUX_EDIT_MODEL        FLUX.2-Klein variant used by /flux_edit               [flux2-klein-4b]
     FLUX_EDIT_MAX_PIXELS   max area (W*H) the edit pipeline is allowed to run    [1048576]
     FLUX_MAX_DIMENSION     max long side fed to mflux for img2img/edit           [1536]
@@ -65,9 +70,11 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 try:
@@ -92,6 +99,12 @@ logger = logging.getLogger("flux_server")
 FLUX_MODEL = os.getenv("FLUX_MODEL", "schnell")
 FLUX_QUANTIZE = int(os.getenv("FLUX_QUANTIZE", "4"))
 FLUX_LOW_RAM = os.getenv("FLUX_LOW_RAM", "0").lower() in ("1", "true", "yes")
+# Cap on MLX's buffer cache, in GB. MLX keeps freed GPU buffers to reuse, and its
+# default lets that pile grow with the machine's RAM: on a 64 GB Mac a 1392x752
+# klein run held about 31 GB with it and 16 GB under a 2 GB cap, and the capped
+# run was faster (34 s against 41 s) with a byte-identical PNG. mflux's own
+# --low-ram mode caps it at 1 GB. 0 leaves MLX's default in place.
+FLUX_CACHE_LIMIT_GB = float(os.getenv("FLUX_CACHE_LIMIT_GB", "2") or 0)
 FLUX_SERVER_HOST = os.getenv("FLUX_SERVER_HOST", "127.0.0.1")
 FLUX_SERVER_PORT = int(os.getenv("FLUX_SERVER_PORT", "4942"))
 
@@ -110,6 +123,64 @@ FLUX_EDIT_MAX_PIXELS = int(os.getenv("FLUX_EDIT_MAX_PIXELS", str(1024 * 1024)))
 FLUX_MAX_DIMENSION = int(os.getenv("FLUX_MAX_DIMENSION", "1536"))
 
 app = FastAPI(title="Soupy Flux Server")
+
+
+class _QuietHealthChecks(logging.Filter):
+    """Keep the bot's and the panel's health checks, a few a minute, out of the access log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            return "GET /health" not in record.getMessage()
+        except Exception:
+            return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietHealthChecks())
+
+
+_cache_limit_applied = False
+
+
+def _apply_cache_limit() -> None:
+    """Set MLX's buffer-cache cap from FLUX_CACHE_LIMIT_GB, once.
+
+    Called before a model is built, so it also holds when the app is served by
+    an outside uvicorn and ``__main__`` never runs.
+    """
+    global _cache_limit_applied
+    if _cache_limit_applied or FLUX_CACHE_LIMIT_GB <= 0:
+        return
+    _cache_limit_applied = True
+    try:
+        import mlx.core as mx
+
+        previous = mx.set_cache_limit(int(FLUX_CACHE_LIMIT_GB * 1024**3))
+    except Exception as e:  # no MLX (not Apple Silicon), or an MLX without the call
+        logger.warning(f"Could not cap the MLX cache at {FLUX_CACHE_LIMIT_GB:g} GB: {e}")
+        return
+    logger.info(f"MLX cache capped at {FLUX_CACHE_LIMIT_GB:g} GB (was {previous / 1024**3:.1f} GB)")
+
+
+def _start_run_stats() -> float:
+    try:
+        import mlx.core as mx
+
+        mx.reset_peak_memory()
+    except Exception:
+        pass
+    return time.perf_counter()
+
+
+def _log_run_stats(kind: str, started: float, width: int, height: int, steps: int) -> None:
+    """One line per finished run: how long it took and how much memory MLX peaked at."""
+    line = f"{kind}: {width}x{height}, {steps} steps, {time.perf_counter() - started:.1f} s"
+    try:
+        import mlx.core as mx
+
+        line += f", MLX peak {mx.get_peak_memory() / 1024**3:.1f} GB"
+    except Exception:
+        pass
+    logger.info(line)
 
 # Generation is single-threaded: one model, one GPU. The bot's SDQueue already
 # serializes requests, but this lock makes the server safe on its own too.
@@ -131,6 +202,7 @@ def _load_model():
         if _model is not None:
             return _model
         logger.info(f"Loading Flux model '{FLUX_MODEL}' (quantize={FLUX_QUANTIZE}, low_ram={FLUX_LOW_RAM})...")
+        _apply_cache_limit()
         _model = _construct_mflux()
         logger.info("Flux model loaded.")
         return _model
@@ -244,6 +316,7 @@ def _load_edit_model():
         logger.info(
             f"Loading Flux edit model '{FLUX_EDIT_MODEL}' (quantize={FLUX_QUANTIZE})..."
         )
+        _apply_cache_limit()
         _edit_model = _construct_mflux_edit()
         logger.info("Flux edit model loaded.")
         return _edit_model
@@ -263,6 +336,36 @@ def _resolve_guidance(model, requested: float, *, default_for_guided: float = 1.
     if supports and requested == 0.0:
         return default_for_guided
     return requested
+
+
+# Lowest strength /flux_img2img honours. Below it the picture barely moves, and
+# 0 would ask mflux for a schedule with no steps in it.
+IMG2IMG_MIN_STRENGTH = 0.05
+
+
+def _img2img_schedule(steps: int, strength: float) -> tuple[int, float]:
+    """Turn (steps, Stable-Diffusion strength) into (schedule length, mflux image_strength).
+
+    mflux starts an img2img run part-way down the noise schedule, at step
+    ``max(1, int(num_steps * image_strength))``, and denoises from there. Its
+    ``image_strength`` is how much of the input to keep, the opposite of the
+    request's ``strength``, and it only ever lands on a whole step. Passing the
+    caller's 4 steps straight through therefore left three settings: strength up
+    to 0.25, up to 0.5, and everything above, which started from 90% noise.
+
+    Here the schedule is stretched until ``steps`` denoising steps cover the
+    last ``strength`` of it, so the run always does the work the caller asked
+    for and the starting noise follows the strength: 0.1 starts FLUX.2 klein
+    from about 26% noise, 0.5 from 76%, 0.7 from 86%. One step of the schedule
+    is always skipped (mflux ignores the image otherwise), which makes strength
+    ``steps / (steps + 1)`` and above the same setting.
+    """
+    steps = max(1, int(steps))
+    strength = max(IMG2IMG_MIN_STRENGTH, min(1.0, float(strength)))
+    total = max(steps + 1, math.ceil(steps / strength))
+    start = total - steps
+    # Half a step past ``start`` so mflux's int() can't round down to start - 1.
+    return total, (start + 0.5) / total
 
 
 def _snap16_floor(v: int) -> int:
@@ -351,8 +454,10 @@ def _generate(*, prompt: str, width: int, height: int, steps: int, guidance: flo
             kwargs["image_path"] = init_image_path
             if strength is not None:
                 kwargs["image_strength"] = strength
+        started = _start_run_stats()
         result = model.generate_image(**kwargs)
         png = _to_png_bytes(result)
+        _log_run_stats("img2img" if init_image_path else "text2img", started, width, height, steps)
         if FLUX_LOW_RAM:
             # Free MLX's buffer cache between runs to keep peak RAM down.
             try:
@@ -382,6 +487,7 @@ def _generate_edit(*, prompt: str, width: int, height: int, steps: int, guidance
                 f"Overriding edit guidance {guidance} -> {effective_guidance} for "
                 f"'{FLUX_EDIT_MODEL}'."
             )
+        started = _start_run_stats()
         result = model.generate_image(
             seed=int(seed),
             prompt=prompt,
@@ -392,6 +498,7 @@ def _generate_edit(*, prompt: str, width: int, height: int, steps: int, guidance
             image_paths=[image_path],
         )
         png = _to_png_bytes(result)
+        _log_run_stats("edit", started, width, height, steps)
         if FLUX_LOW_RAM:
             try:
                 import mlx.core as mx
@@ -400,6 +507,11 @@ def _generate_edit(*, prompt: str, width: int, height: int, steps: int, guidance
             except Exception:
                 pass
         return png
+
+
+def _png_response(png: bytes, model: str) -> Response:
+    """A finished picture. The header tells the bot which model made it, for its archive."""
+    return Response(content=png, media_type="image/png", headers={"X-Flux-Model": model})
 
 
 @app.get("/health")
@@ -412,6 +524,7 @@ async def health():
             "loaded": _model is not None,
             "edit_model": FLUX_EDIT_MODEL,
             "edit_loaded": _edit_model is not None,
+            "cache_limit_gb": FLUX_CACHE_LIMIT_GB,
         }
     )
 
@@ -438,7 +551,7 @@ async def flux_text2img(
     except Exception as e:
         logger.exception("flux text2img failed")
         raise HTTPException(status_code=500, detail=str(e))
-    return Response(content=png, media_type="image/png")
+    return _png_response(png, FLUX_MODEL)
 
 
 @app.post("/flux_img2img")
@@ -457,20 +570,14 @@ async def flux_img2img(
 
     raw = await image.read()
 
-    # Translate the bot's standard Stable-Diffusion strength into mflux's INVERTED
-    # image_strength. The bot (and the SD server this endpoint mirrors) treats
-    # strength as "how much to deviate from the input" — higher = bigger change.
-    # mflux's image_strength is the opposite: init_time_step = num_steps *
-    # image_strength, and it only denoises range(init_time_step, num_steps), so a
-    # HIGH image_strength starts late, runs few steps, and the prompt barely moves
-    # the picture (it reads image_strength as "how much of the input to preserve").
-    # Flip it so a high request strength actually transforms the image toward the
-    # prompt. Clamp to a small positive floor so it stays img2img (image_strength
-    # of exactly 0 makes mflux ignore the init image entirely).
-    mflux_strength = max(0.05, min(1.0, 1.0 - strength))
+    # The bot (and the SD server this endpoint mirrors) treats strength as "how
+    # much to deviate from the input": higher = bigger change. mflux wants the
+    # opposite, as a position on the noise schedule. _img2img_schedule does the
+    # translation and keeps the run at the requested number of denoising steps.
+    total_steps, mflux_strength = _img2img_schedule(steps, strength)
     logger.info(
-        f"img2img: request strength={strength} -> mflux image_strength={mflux_strength:.3f} "
-        f"(steps={steps})"
+        f"img2img: request strength={strength} -> {steps} denoising steps at the end of a "
+        f"{total_steps}-step schedule (mflux image_strength={mflux_strength:.3f})"
     )
 
     tmp_path = None
@@ -485,7 +592,7 @@ async def flux_img2img(
             )
         png = await anyio.to_thread.run_sync(
             lambda: _generate(
-                prompt=prompt, width=eff_w, height=eff_h, steps=steps,
+                prompt=prompt, width=eff_w, height=eff_h, steps=total_steps,
                 guidance=guidance_scale, seed=seed,
                 init_image_path=tmp_path, strength=mflux_strength,
             )
@@ -499,7 +606,7 @@ async def flux_img2img(
                 os.unlink(tmp_path)
             except OSError:
                 pass
-    return Response(content=png, media_type="image/png")
+    return _png_response(png, FLUX_MODEL)
 
 
 @app.post("/flux_edit")
@@ -547,7 +654,7 @@ async def flux_edit(
                 os.unlink(tmp_path)
             except OSError:
                 pass
-    return Response(content=png, media_type="image/png")
+    return _png_response(png, FLUX_EDIT_MODEL)
 
 
 if __name__ == "__main__":
@@ -555,4 +662,5 @@ if __name__ == "__main__":
         f"Starting Flux server on {FLUX_SERVER_HOST}:{FLUX_SERVER_PORT} "
         f"(model={FLUX_MODEL}, edit_model={FLUX_EDIT_MODEL})"
     )
+    _apply_cache_limit()
     uvicorn.run(app, host=FLUX_SERVER_HOST, port=FLUX_SERVER_PORT)

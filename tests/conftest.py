@@ -28,6 +28,9 @@ os.environ.setdefault("OPENAI_BASE_URL", "http://localhost:1234/v1")
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("LOCAL_CHAT", "test-model")
 
+# /flux is only registered with Flux switched on.
+os.environ.setdefault("FLUX_ENABLED", "true")
+
 # The bot module is chatty at import and per-call. Keep test output readable.
 logging.getLogger("soupy_prompts").setLevel(logging.ERROR)
 logging.getLogger("soupy_remastered_stablediffusion").setLevel(logging.ERROR)

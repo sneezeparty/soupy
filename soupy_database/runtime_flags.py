@@ -8,8 +8,9 @@ flip without restarting the bot belongs here, not in ``.env-stable``.
 How it works:
 
 * The **web** writes the file via ``POST /api/runtime-flags``.
-* The **bot** reads the file via :func:`is_command_disabled` and
-  :func:`is_rag_enabled` on the chat hot path, *every message*. To make
+* The **bot** reads the file via :func:`is_command_disabled`,
+  :func:`is_rag_enabled` and :func:`is_time_awareness_enabled` on the chat
+  hot path, *every message*. To make
   that cheap, the bot caches the parsed JSON keyed on file mtime — only
   re-parses when the file actually changes.
 * :func:`write_runtime_flags` resets the cache on the write side so a
@@ -22,6 +23,9 @@ Schema (defaults in ``_DEFAULTS``):
 * ``rag_enabled`` (bool) — global on/off for RAG retrieval.
 * ``disabled_commands`` (list[str]) — slash command names the bot will
   refuse via the global interaction check.
+* ``time_awareness`` (bool) — chat replies get the current date and time and
+  how long ago older chat and memories were (``soupy/timeaware.py``). On
+  unless switched off.
 
 Gotcha: the cache is per-process. If you ever read this from a third
 process (e.g. a CLI tool), you'll get whatever's on disk, which is fine.
@@ -39,6 +43,7 @@ logger = logging.getLogger(__name__)
 _DEFAULTS: Dict[str, Any] = {
     "rag_enabled": False,
     "disabled_commands": [],  # list of command names (e.g. ["sd", "soupysearch"])
+    "time_awareness": True,
 }
 
 # Cached read: invalidate via mtime
@@ -110,3 +115,18 @@ def is_rag_enabled() -> bool:
     _cache["data"] = data
     _cache["mtime"] = mtime
     return bool(data.get("rag_enabled", False))
+
+
+def is_time_awareness_enabled() -> bool:
+    """Read time_awareness from disk (mtime-cached). On unless the dashboard switched it off."""
+    path = flags_path()
+    try:
+        mtime = path.stat().st_mtime
+    except FileNotFoundError:
+        return bool(_DEFAULTS["time_awareness"])
+    if _cache["data"] is not None and mtime <= _cache["mtime"]:
+        return bool(_cache["data"].get("time_awareness", True))
+    data = read_runtime_flags()
+    _cache["data"] = data
+    _cache["mtime"] = mtime
+    return bool(data.get("time_awareness", True))

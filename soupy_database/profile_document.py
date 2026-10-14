@@ -48,6 +48,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Sequence, Set, Tuple
 
+from soupy.timeaware import describe_item_age
+
 PROFILE_VERSION = 2
 
 ITEM_TEXT_MAX = 300
@@ -451,6 +453,26 @@ def parse_date(raw: Any) -> Optional[date]:
 
 def format_month(d: Optional[date]) -> str:
     return d.strftime("%b %Y") if d else ""
+
+
+def _item_when(item: Dict[str, Any], today: date, relative: bool) -> str:
+    """What goes in the bracket after an item in the chat render.
+
+    The month it came up ("Sep 2026"), or with ``relative`` how long ago that was
+    ("about a month ago"), plus when a later message last confirmed it. The first
+    date stays in front: an item that first came up two years ago and again last
+    month is not a month old.
+    """
+    first = parse_date(item.get("date"))
+    if not first:
+        return ""
+    if not relative:
+        return format_month(first)
+    when = describe_item_age(first, today)
+    again = parse_date(item.get("last_seen"))
+    if again and describe_item_age(again, today) != when:
+        when = f"{when}, again {describe_item_age(again, today)}"
+    return when
 
 
 def normalize_document(doc: Any, kind: Optional[DocumentKind] = None) -> Dict[str, Any]:
@@ -1152,12 +1174,14 @@ def render_for_chat(
     today: date,
     lately_days: int = LATELY_DEFAULT_DAYS,
     kind: Optional[DocumentKind] = None,
+    relative_dates: bool = False,
 ) -> str:
     """Pick the profile items most useful for this message and render them within ``max_chars``.
 
     Items matching the query come first, then a round-robin across sections
     (newest first) fills what's left. Whole items only — nothing is cut
-    mid-sentence. Each item shows the month it came up in chat.
+    mid-sentence. Each item shows the month it came up in chat, or with
+    ``relative_dates`` how long before ``today`` that was.
     """
     kind = kind or MEMBER
     if not is_v2(doc):
@@ -1210,8 +1234,8 @@ def render_for_chat(
         grouped: Dict[str, List[str]] = {}
         for c in chosen:
             label = _labelled(c.item) if c.section.key == kind.relationship_key else c.item["text"]
-            month = format_month(parse_date(c.item.get("date")))
-            grouped.setdefault(c.section.key, []).append(f"{label} ({month})" if month else label)
+            when = _item_when(c.item, today, relative_dates)
+            grouped.setdefault(c.section.key, []).append(f"{label} ({when})" if when else label)
         lines = list(head)
         for sec in kind.sections:
             if sec.key in grouped:
@@ -1248,6 +1272,7 @@ def render_self_for_chat(
     max_chars: int,
     today: date,
     lately_days: int = LATELY_DEFAULT_DAYS,
+    relative_dates: bool = False,
 ) -> str:
     """Soupy's memories that matter for this reply, within ``max_chars``, whole items only.
 
@@ -1303,8 +1328,8 @@ def render_self_for_chat(
         grouped: Dict[str, List[str]] = {}
         for iid in chosen:
             sec, it = visible[iid]
-            month = format_month(parse_date(it.get("date")))
-            text = f"{it['text']} ({month})" if month else it["text"]
+            when = _item_when(it, today, relative_dates)
+            text = f"{it['text']} ({when})" if when else it["text"]
             if sec.key == kind.relationship_key:
                 about.setdefault(it.get("name") or people.get(it.get("user_id") or 0) or "someone", []).append(text)
             else:

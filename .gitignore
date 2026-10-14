@@ -12,6 +12,8 @@
 # local.
 prompts/*.txt
 !prompts/*.default.txt
+# The versions the panel's prompt editor replaced.
+prompts/backups/
 
 # Live operational data — never committed (privacy)
 data/

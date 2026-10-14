@@ -78,6 +78,11 @@ Small, well-factored, and **unit-tested** (unlike the main file). This is the
 - `soupy/triggers.py` — pure predicates deciding whether the bot should respond
   (`message_contains_trigger_keyword`, `should_randomly_respond`). Reads env on
   **every call** so dashboard keyword edits take effect without restart.
+- `soupy/timeaware.py` — time awareness for chat replies: the "right now" line for the
+  system prompt, ages in words ("yesterday evening", "about 5 months ago"), and
+  `[chat from ...]` markers on stretches of history separated by an hour or more. Pure
+  functions of the datetimes passed in; `now_local()` is the only clock read. Gated by the
+  `time_awareness` runtime flag.
 - `soupy/msn.py` — resolves an msn.com link to the original publisher's article through
   MSN's content endpoint. MSN serves crawlers a JS shell with no og:image, no date and no
   text, so both article cogs resolve at discovery and carry the original from there.
@@ -89,14 +94,23 @@ Small, well-factored, and **unit-tested** (unlike the main file). This is the
 
 ### Tier 2 — web control panel (`web/`)
 
-A FastAPI app (`web/app.py`, ~2,545 lines) that is the **parent process** and the
+A FastAPI app (`web/app.py`, ~2,200 lines) that is the **parent process** and the
 primary operator interface. It:
 
 - Spawns and supervises the bot subprocess (`web/services/bot_runner.py`).
+- Starts, stops and watches the local Flux server, `flux_server.py`, as a second
+  child process (`web/services/flux_runner.py`; `FLUX_SERVER_AUTOSTART`). Its
+  output goes to `logs/flux_server.log` and into the live log marked `[flux]`. A
+  Flux server started by hand is reported and left alone.
 - Streams the bot's stdout/stderr to browsers over a WebSocket
   (`web/services/log_stream.py` + `/ws/logs`).
 - Reads and rewrites `.env-stable` while preserving comments and ordering
   (`web/services/env_store.py`).
+- Lists the model server's models and switches the chat model: the bot is stopped,
+  LM Studio unloads and loads, `.env-stable` is written, the bot starts again, and
+  a failed load is undone (`web/services/lm_studio.py`).
+- Edits the prompt files in `prompts/`, keeping each replaced version
+  (`web/services/prompt_store.py`).
 - Exposes ~40 `/api/*` endpoints: archive browsing, stats, env editing, LM Studio
   model switching, runtime-flag toggles, RAG/profile management, and bot lifecycle.
 
@@ -165,9 +179,11 @@ on_message
                               ▼
 process_chat_message  (runs one-at-a-time off the queue)
   1. Assemble system prompt:  BEHAVIOUR  +  self-knowledge anchor  +  technical_instructions
+                              (+ TIME block last, if is_time_awareness_enabled())
   2. Token budget:  CONTEXT_WINDOW − MAX_TOKENS − safety buffer − system − current
                     split history 45% / RAG 35% / URL 15%
-  3. Recent history       (fetch_recent_messages, trimmed to budget)
+  3. Recent history       (fetch_recent_messages, trimmed to budget; stale stretches
+                          get a [chat from ...] marker via timeaware.label_history)
   4. RAG retrieval        (if is_rag_enabled(): build_rag_retrieval_query → fetch_rag_context_for_query)
   5. URL content          (history URLs + current-message URLs, cached w/ TTL)
   6. Image descriptions    (from the vision step)
@@ -213,6 +229,13 @@ replies to other bots (this was a real bug — see CHANGELOG).
 take minutes on a Mac SD backend, and the queue exists precisely to prevent
 overloading it. Routing is by `item["type"]` (`sd` / `flux` / `button` / `outpaint`)
 and, for buttons, by `item["action"]`.
+
+A Flux result's row in `media/images/index.jsonl` records what made it (model,
+steps, strength, source image, the prompt a Fancy rewrite started from). The
+buttons under a result read that row, found by the attachment's filename, so a
+click after a restart can redo an edit from its source. Source images are named
+by their path under `media/` (`images/<file>`, or `flux_sources/<file>` for an
+upload). See the module docstring of `soupy/cogs/flux.py`.
 
 Chat replies ride a **separate** `ChatQueue` (§3). Both derive from `_WorkQueue`
 and both are single-consumer, but they must stay distinct: they were one queue
@@ -277,7 +300,7 @@ Markdown documents, each owned by exactly one module.
 | Path | Owner | Contents |
 |------|-------|----------|
 | `soupy_database/databases/guild_<id>.db` | `database.py` | Messages, channels, `rag_chunks`, `user_profile_summaries`, self-chunks, profile-batch jobs, scan metadata |
-| `data/runtime_flags.json` | `runtime_flags.py` | RAG enable + per-command disable toggles (bot↔web) |
+| `data/runtime_flags.json` | `runtime_flags.py` | RAG enable, time awareness, and per-command disable toggles (bot↔web) |
 | `data/bot_dashboard.json` | bot (write) / web (read) | Uptime, model, service health, loop timers |
 | `data/self_md/guild_<id>_self.json` | `self_profile.py` | Soupy's memory (source of truth) and its read cursor |
 | `data/self_md/guild_<id>{,_core,_anchor}.md` | `self_profile.py` (write) / `self_context.py` (read) | Views of the memory: full, compact summary, identity anchor |
@@ -365,12 +388,15 @@ and RAG status endpoints.
 |---------|----------|--------|-------------|
 | LM Studio (OpenAI-compatible) | Chat, embeddings, vision | `OPENAI_BASE_URL`, `LOCAL_CHAT`, `VISION_MODEL` | Chat fails loudly; RAG/embeddings fall back to keyword-only |
 | Stable Diffusion backend | Image gen | `SD_SERVER_URL` (+ img2img/inpaint/outpaint fallbacks) | `/sd` reports backend offline |
+| Flux server (`flux_server.py`, local) | Image gen, image editing | `FLUX_ENABLED`, `FLUX_SERVER_URL` | `/flux` reports the server offline, or the server's own error |
 | DuckDuckGo | Web + image search | — (rotates backends on timeout) | Command reports failure |
 | Bluesky AT Protocol | Autonomous posts | `BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, `BLUESKY_AUTO_REPLY` | Cog no-ops if credentials missing |
 
 The bot fails fast at import on missing **critical** env (`DISCORD_TOKEN`,
-`SD_SERVER_URL`, `REMOVE_BG_API_URL`). It does not currently health-check that those
-URLs point at *live* services until first use — see [ROADMAP.md](ROADMAP.md).
+`SD_SERVER_URL`, `REMOVE_BG_API_URL`). The two image servers are health-checked
+in the background (`refresh_image_backend_status`: Flux every 15 s, SD every
+minute) for the panel's status dots and `/status`; a request is still sent
+without consulting that result.
 
 ---
 
@@ -380,7 +406,7 @@ URLs point at *live* services until first use — see [ROADMAP.md](ROADMAP.md).
 |--------------|------------|
 | Add a self-contained feature with its own command/loop | New cog in `soupy/cogs/` (see [CONTRIBUTING.md](CONTRIBUTING.md)) |
 | Add a config knob | `@cached_property` in `soupy/settings.py` + document in `docs/ENV_REFERENCE.md` + `.env-stable.example` |
-| Change a persona/prompt | `prompts/<name>.default.txt` (or `.env-stable` for the legacy `BEHAVIOUR*`) |
+| Change a persona/prompt | `prompts/<name>.txt` for an install's own text (the panel's Prompts editor writes it), `prompts/<name>.default.txt` for what ships |
 | Change the response decision | `soupy/triggers.py` (it's pure and tested) |
 | Add a live web toggle | `runtime_flags.py` + an `/api/runtime-flags` field + bot-side read |
 | Persist new state | A file under `data/`, written atomically, owned by one module |

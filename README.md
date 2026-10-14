@@ -37,8 +37,8 @@ Personality is the point. Soupy maintains a self-knowledge document about itself
 - **Two independent image-generation backends, sharing a single serial queue:**
   - **Stable Diffusion** (`/sd`, `/img2img`, `/inpaint`, `/outpaint`) over HTTP to a separate GPU host.
   - **Local Flux** (`/flux`) via mflux/MLX on Apple Silicon — text-to-image, noise-mix image-to-image, and FLUX.2 Klein-Edit for genuine prompt-driven editing — running on the same Mac as the bot via a small `flux_server.py` FastAPI process.
-- Post-generation control panels with Remix, Fancy, R-Fancy, R-Keyword, Edit, Wide, and Tall buttons on both backends (plus Outpaint on `/sd`, img2img-from-display on `/flux`).
-- FastAPI web control panel for process control, live logs, env editing, stats, theming, per-loop toggles, and a light-table view of every image the bot has generated.
+- Post-generation control panels with Remix, Fancy, R-Fancy, R-Keyword, Edit, Wide, Tall, and Square buttons on both backends (plus Outpaint on `/sd`, and on `/flux` a Change image button that edits the displayed image by instruction). A Flux picture remembers what it was made from, so Remix on an edited picture redoes the edit.
+- FastAPI web control panel for process control, live logs, env editing, stats, theming, per-loop toggles, and a lightbox gallery of every image the bot has generated or looked at.
 
 ## What Soupy Accesses In Your Server
 
@@ -61,10 +61,10 @@ Have [LM Studio](https://lmstudio.ai/) running with a chat model **and** an embe
 ```bash
 git clone https://github.com/sneezeparty/soupy.git
 cd soupy
-python install.py
+python3 install.py        # Windows: python install.py
 ```
 
-The interactive installer walks you through Discord setup, LM Studio probing, optional integrations (Bluesky, Stable Diffusion, daily posts), and writes `.env-stable`. It validates the Discord token and the loaded LM Studio models live, then offers to launch `python run_all.py`. See [INSTALL.md](INSTALL.md) for flags (`--dry-run`, `--resume`, `--minimal`, `--non-interactive`).
+The interactive installer walks you through Discord setup, LM Studio probing, optional integrations (Bluesky, Stable Diffusion, daily posts), and writes `.env-stable`. It validates the Discord token and the loaded LM Studio models live, then offers to launch `run_all.py` from the `.venv` it built. See [INSTALL.md](INSTALL.md) for flags (`--dry-run`, `--resume`, `--minimal`, `--locked`, `--non-interactive`).
 
 After the bot is running, run `/soupyscan` once per guild as an owner to archive history. The first scan can run for hours or days on busy servers — see `docs/SETUP.md` for tuning.
 

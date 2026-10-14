@@ -11,6 +11,7 @@ import webbrowser
 from typing import Dict
 
 from .. import validators
+from ..state import PLACEHOLDER
 
 PORTAL_URL = "https://discord.com/developers/applications"
 
@@ -40,8 +41,8 @@ def _checklist(ui) -> None:
 def _prompt_token(state: Dict, ui) -> str:
     existing = state.get("DISCORD_TOKEN", "")
     while True:
-        if existing and existing != "<set in earlier step>":
-            token = ui.prompt("Discord bot token", default=existing, secret=True)
+        if existing and existing != PLACEHOLDER:
+            token = ui.prompt("Discord bot token (enter keeps the current one)", default=existing, secret=True)
         else:
             token = ui.prompt("Discord bot token", secret=True)
         result = validators.discord_token(token)
@@ -87,7 +88,9 @@ def run(state: Dict, ui) -> Dict:
     ui.header("Step 3 — Discord app")
     _checklist(ui)
     ui.hr()
-    if ui.confirm("Open the Discord developer portal in your browser now?", default=True):
+    # Someone coming back through this step (a resume, a reconfigure) already
+    # has an app; only a first pass opens the portal by default.
+    if ui.confirm("Open the Discord developer portal in your browser now?", default=not state.get("OWNER_IDS")):
         _open_portal(ui)
     ui.hr()
 

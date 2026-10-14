@@ -1,11 +1,12 @@
 # Soupy Dashboard — Vite + React scaffold
 
 This directory contains a fresh Vite + JSX build pipeline for the dashboard.
-**It is not the canonical UI yet.** The canonical dashboard is still
-[`web/static/dashboard/dashboard-app.js`](../static/dashboard/dashboard-app.js)
-— a 5,000-line single file of `React.createElement(...)` calls served directly
-by FastAPI. That file must keep working byte-identically while this scaffold
-exists in parallel.
+**It is not the canonical UI yet.** The canonical dashboard is still the five
+script files under [`web/static/dashboard/`](../static/dashboard/)
+(`dashboard-core.js`, `dashboard-media.js`, `dashboard-database.js`,
+`dashboard-model.js`, `dashboard-app.js`): about 5,700 lines of `React.createElement(...)` calls served
+directly by FastAPI, with no build step. They are the supported UI and change on
+their own schedule; this scaffold does not track them.
 
 The plan is to port one tab at a time into this app. This milestone (M6a)
 landed only the build pipeline plus a single proof-of-concept Status card so a
@@ -73,8 +74,8 @@ web/frontend/
 
 ## Constraints
 
-- The existing `dashboard-app.js` and `dashboard.css` are read-only for this
-  scaffold. Do not edit them.
+- The served dashboard scripts and `dashboard.css` are read-only for this
+  scaffold. Do not edit them from here.
 - `web/app.py` and `web/templates/` are also read-only — the FastAPI template
   still loads the legacy bundle.
 - Use existing CSS class names from `dashboard.css` (e.g. `dash-sticky-bar`,

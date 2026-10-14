@@ -126,6 +126,7 @@ from PIL import Image
 from timezonefinder import TimezoneFinder
 
 from soupy import prompts as soupy_prompts
+from soupy import timeaware
 from soupy.llm_gate import gate_busy as llm_gate_busy
 from soupy.llm_gate import llm_turn, note_chat_activity, note_chat_done, note_chat_queued
 from soupy.settings import openai_client
@@ -137,7 +138,7 @@ from soupy_database.rag import (
     strip_rag_gate_word,
     strip_rag_query_invocations,
 )
-from soupy_database.runtime_flags import is_rag_enabled
+from soupy_database.runtime_flags import is_rag_enabled, is_time_awareness_enabled
 from soupy_database.self_context import (
     get_self_md_for_injection,
     is_self_md_enabled,
@@ -363,7 +364,7 @@ if not REMOVE_BG_API_URL:
 
 async def get_guild_behaviour(guild_id: str) -> str:
     """Get the behaviour prompt. Single behaviour for all guilds.
-    Reads the BEHAVIOUR env var from .env-stable.
+    Resolved by soupy.prompts: prompts/behaviour.txt, else the shipped default.
     """
     return soupy_prompts.load_prompt("behaviour", fallback="You're a stupid bot.")
 
@@ -989,8 +990,10 @@ def format_uptime(td: timedelta) -> str:
 # Track bot start time for uptime calculation
 bot_start_time = None
 
-# Track SD server status
-sd_server_online = True  # Assume online at start
+# Whether each image server answered its last health check. None until the
+# first check: the panel shows that as unknown, which is not the same as down.
+sd_server_online = None
+flux_server_online = None
 
 chat_functions_online = True  # Assume online at start
 
@@ -1290,6 +1293,9 @@ def clean_response(text: str) -> str:
     # Remove self-knowledge section headers leaked: "[self-knowledge: ...]"
     text = re.sub(r"\[self-knowledge:[^\]]*\]", "", text, flags=re.IGNORECASE)
 
+    # Remove history markers leaked from context: "[chat from yesterday evening]"
+    text = timeaware.HISTORY_LABEL_RE.sub("", text)
+
     # Collapse multiple blank lines left by removals
     text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
     # Collapse multiple spaces left by inline removals
@@ -1536,7 +1542,8 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
                 image_context = "\n".join(image_desc_for_msg)
                 formatted_content = f"{image_context}\n{formatted_content}" if formatted_content else image_context
 
-            formatted_message = {"role": role, "content": formatted_content}
+            # "ts" is for soupy.timeaware; it is stripped before anything goes to the LLM.
+            formatted_message = {"role": role, "content": formatted_content, "ts": msg.created_at}
 
             # Prioritize recent messages much more heavily
             if len(current_topic_messages) < 8:  # Keep most recent 8 messages for current topic
@@ -2130,6 +2137,7 @@ async def help_command(interaction: discord.Interaction):
     # Manual mapping of command usage examples with improved descriptions
     command_usage_examples = {
         "sd": "`description` [size] [seed]",
+        "flux": "`description` [size] [image] [strength] [seed] [fancy]",
         "soupysearch": "`query`",
         "soupyimage": "`query`",
         "soupystock": "`query`",
@@ -2144,6 +2152,7 @@ async def help_command(interaction: discord.Interaction):
     # Improved command descriptions
     command_descriptions = {
         "sd": "Generate an image using Stable Diffusion. Provide a description of what you want to see, optionally choose a size and seed.",
+        "flux": "Generate an image with Flux. Attach an image to change it instead: the description is then an instruction, or with a strength, what to repaint it toward.",
         "soupysearch": "Search the web using DuckDuckGo and get a comprehensive answer with citations from multiple sources.",
         "soupyimage": "Search for images using DuckDuckGo and get a random image from the top results.",
         "soupystock": "Look up the current price for a stock ticker or company name (powered by Finnhub).",
@@ -2152,7 +2161,7 @@ async def help_command(interaction: discord.Interaction):
         "whattime": "Get the current time in any city or location around the world.",
         "weather": "Get the current weather conditions for any city or location around the world.",
         "stats": "View server statistics showing the top users for images generated and chat responses. (Admin only)",
-        "status": "Check the current status of the bot, Stable Diffusion server, and chat functions.",
+        "status": "Check the current status of the bot, the image servers, and chat functions.",
     }
 
     # Collect slash commands (excluding owner-only, excluded commands, and helpsoupy itself)
@@ -2397,27 +2406,82 @@ async def stats_command(interaction: discord.Interaction):
         await interaction.followup.send(f"Error fetching statistics: {e}", ephemeral=True)
 
 
-async def check_sd_server_status() -> bool:
+async def _health_ok(base_url: str, *, timeout: float = 5) -> bool:
+    """True when ``GET {base_url}/health`` answers 200 with ``{"status": "ok"}``. Raises on a failed request."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+        async with session.get(f"{base_url.rstrip('/')}/health") as response:
+            if response.status != 200:
+                return False
+            data = await response.json()
+            return data.get("status") == "ok"
+
+
+async def check_sd_server_status(quiet: bool = False) -> bool:
     """
     Checks if the SD server is online by making a request to its health endpoint.
-    Returns True if the server is online, False otherwise.
+    Returns True if the server is online, False otherwise. ``quiet`` is for the
+    background check, which would otherwise log a dead server every minute.
     """
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
-            async with session.get(f"{SD_SERVER_URL.rstrip('/')}/health") as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get("status") == "ok"
-                return False
+        return await _health_ok(SD_SERVER_URL)
     except Exception as e:
-        error_detail = str(e)
-        logger.error(f"Error checking SD server status: {error_detail}")
-        logger.error(f"SD server URL: {SD_SERVER_URL}")
+        if not quiet:
+            logger.error(f"Error checking SD server status: {e}")
+            logger.error(f"SD server URL: {SD_SERVER_URL}")
         return False
 
 
-@bot.tree.command(name="status", description="Displays the current status of the bot, SD server, and chat functions.")
+async def check_flux_server_status() -> bool:
+    """Whether the local Flux server (flux_server.py) answers its health check."""
+    from soupy.settings import settings
+
+    if not settings.flux_server_url:
+        return False
+    try:
+        return await _health_ok(settings.flux_server_url)
+    except Exception:
+        return False
+
+
+# Consecutive failed Flux checks. The server answers /health while it generates,
+# but slowly enough at times that one missed check shouldn't turn the dot red.
+_flux_check_failures = 0
+
+
+async def refresh_image_backend_status(*, check_sd: bool = True) -> None:
+    """Update ``sd_server_online`` / ``flux_server_online`` for the panel and ``/status``.
+
+    Flux is only checked when ``FLUX_ENABLED`` is on; otherwise it stays None.
+    A change is logged once, not every check.
+    """
+    global sd_server_online, flux_server_online, _flux_check_failures
+    from soupy.settings import settings
+
+    if settings.flux_enabled:
+        if await check_flux_server_status():
+            _flux_check_failures = 0
+            reachable = True
+        else:
+            _flux_check_failures += 1
+            # Unknown or already down: say so now. Up: wait for a second miss.
+            reachable = bool(flux_server_online) and _flux_check_failures < 2
+        if reachable != flux_server_online:
+            logger.info(f"⚡ Flux server is {'reachable' if reachable else 'unreachable'} ({settings.flux_server_url})")
+        flux_server_online = reachable
+    else:
+        flux_server_online = None
+
+    if check_sd:
+        reachable = await check_sd_server_status(quiet=True)
+        if reachable != sd_server_online:
+            logger.info(f"🖼️ SD server is {'reachable' if reachable else 'unreachable'} ({SD_SERVER_URL})")
+        sd_server_online = reachable
+
+
+@bot.tree.command(name="status", description="Displays the current status of the bot, image servers, and chat functions.")
 async def status_command(interaction: discord.Interaction):
+    from soupy.settings import settings
+
     logger.info(f"Command 'status' invoked by {interaction.user}")
 
     # Defer the response immediately
@@ -2431,18 +2495,22 @@ async def status_command(interaction: discord.Interaction):
     else:
         uptime_str = "Uptime information not available."
 
-    # Check SD server status
-    sd_server_online = await check_sd_server_status()
-    sd_status = "🟢 Online" if sd_server_online else "🔴 Offline"
+    # Check the image servers now, not from the background check's last answer.
+    flux_online = settings.flux_enabled and await check_flux_server_status()
+    sd_online = await check_sd_server_status()
+
+    def online(flag) -> str:
+        return "🟢 Online" if flag else "🔴 Offline"
 
     # Check chat functions status
     await check_chat_functions()
-    chat_status = "🟢 Online" if chat_functions_online else "🔴 Offline"
 
     # Create an embed message
     embed = discord.Embed(title="Bot Status", color=discord.Color.blue())
-    embed.add_field(name="SD Server", value=sd_status, inline=False)
-    embed.add_field(name="Chat Functions", value=chat_status, inline=False)
+    if settings.flux_enabled:
+        embed.add_field(name="Flux Server", value=online(flux_online), inline=False)
+    embed.add_field(name="SD Server", value=online(sd_online), inline=False)
+    embed.add_field(name="Chat Functions", value=online(chat_functions_online), inline=False)
     embed.add_field(name="Uptime", value=uptime_str, inline=False)
     embed.set_footer(
         text=f"Requested by {interaction.user}",
@@ -3341,10 +3409,17 @@ async def _dashboard_status_writer(bot_instance):
     await bot_instance.wait_until_ready()
     status_path = Path("data") / "bot_dashboard.json"
     status_path.parent.mkdir(parents=True, exist_ok=True)
+    from soupy.settings import settings
 
+    tick = 0
     while not bot_instance.is_closed():
         try:
             from datetime import timezone as _tz
+
+            # Flux is local and answers at once: every round. SD is on the
+            # network and may time out: every fourth, about once a minute.
+            await refresh_image_backend_status(check_sd=tick % 4 == 0)
+            tick += 1
 
             now = datetime.now(_tz.utc)
             uptime_sec = None
@@ -3356,6 +3431,8 @@ async def _dashboard_status_writer(bot_instance):
                 "model": os.getenv("LOCAL_CHAT", ""),
                 "uptime_seconds": uptime_sec,
                 "sd_online": sd_server_online,
+                "flux_enabled": settings.flux_enabled,
+                "flux_online": flux_server_online,
                 "llm_online": chat_functions_online,
                 "timers": timer_state,
                 "updated_at": now.isoformat(),
@@ -3508,7 +3585,11 @@ async def rag_reindex_loop(bot):
 # Handles optional quotes around the username::
 # Usernames can contain letters, numbers, underscores, and up to 2 spaces (max 3 words)
 # This prevents matching things like "The time is 3:" while still catching display names
-remove_all_before_colon_pattern = re.compile(r'^["\'"]?[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+){0,2}["\'"]?:\s*', re.IGNORECASE)
+# WHY the (?!\d): a clock time is not a name prefix. Without it "its 3:14 am and
+# youre still up" was sent as "14 am and youre still up".
+remove_all_before_colon_pattern = re.compile(
+    r'^["\'"]?[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+){0,2}["\'"]?:(?!\d)\s*', re.IGNORECASE
+)
 
 
 def remove_all_before_colon(text: str) -> str:
@@ -3520,6 +3601,7 @@ def remove_all_before_colon(text: str) -> str:
     Example: "Alice: what's up" -> "what's up"
     Example: "'glenn': hello" -> "hello"
     Example: "The time is 3:45 PM" -> "The time is 3:45 PM" (not removed, not at start)
+    Example: "its 3:45 pm" -> "its 3:45 pm" (not removed, a clock time is not a prefix)
     """
     return remove_all_before_colon_pattern.sub("", text, count=1)
 
@@ -3592,13 +3674,19 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                     "How NOT to use the memory block:\n"
                     "- Never recite, list, or summarize what is in it. You are not a search engine — you are a person who remembers things.\n"
                     '- Never say "according to the archives", "based on what I found", "the records show", or anything similar.\n'
-                    "- Never output raw metadata: no timestamps, no '---' separators, no 'message_id=', no '#channel-name', no '[Embed Title:', no YYYY-MM-DD dates. If any of this appears in your reply, it is broken.\n"
+                    "- Never output raw metadata from the memory block: no log timestamps, no '---' separators, no 'message_id=', no '#channel-name', no '[Embed Title:', no YYYY-MM-DD dates. If any of this appears in your reply, it is broken.\n"
                     "- Never mention archives, RAG, retrieval, databases, embeddings, or that you were given snippets.\n"
                     "- Never fabricate personal stories or attribute opinions to yourself based on the snippets.\n"
                     "- Do not tell the user to dig through old messages.\n"
                     "- Do not say someone never said much about a topic if the snippets show otherwise.\n\n"
                     "All BEHAVIOUR rules above (lower case, no quotation marks, length caps, one topic, one person, no questions, etc.) still govern HOW you write the answer.\n"
                 )
+
+            # Time awareness: one clock reading for the whole reply, so the "right now" line,
+            # the history markers and the memory ages all agree. None means the feature is off.
+            _now = timeaware.now_local() if is_time_awareness_enabled() else None
+            if _now is not None:
+                technical_instructions += timeaware.time_rules(_now)
 
             # Inject SELF.MD (accumulated self-knowledge) between behaviour and technical instructions
             self_md_block = ""
@@ -3694,6 +3782,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                             rag_query,
                             first_person_hint=_fp_cur,
                             max_chars_override=_rag_budget_chars,
+                            now=_now,
                         )
                     if rag_block:
                         rag_context_message = {
@@ -3713,8 +3802,15 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                 except Exception as rag_exc:
                     logger.warning("RAG retrieval skipped: %s", format_error_message(rag_exc))
 
-            # Add conversation history (same fetch as used for RAG query context)
-            messages_for_llm.extend(recent_messages)
+            # Add conversation history (same fetch as used for RAG query context).
+            # Markers go in here, after the RAG query was built from the bare messages,
+            # so they are never embedded as if someone had said them.
+            if _now is not None:
+                messages_for_llm.extend(timeaware.label_history(recent_messages, _now))
+                _quiet_note = timeaware.quiet_note(recent_messages, message.created_at)
+            else:
+                messages_for_llm.extend(timeaware.strip_timestamps(recent_messages))
+                _quiet_note = ""
 
             # Scan recent history for URLs and inline extracted content (cached, deduped, limited).
             # All URL content (history + current message) shares _url_budget_chars so they can't
@@ -3882,6 +3978,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
                     "history, link previews, and retrieved memory snippets. Do NOT\n"
                     "respond to that. Treat it as ambient information only.\n"
                     "----------------------------------------------------------------\n"
+                    f"{_quiet_note}"
                     "MESSAGE TO RESPOND TO:\n"
                     f"  {message.author.display_name}: {current_message_content}\n"
                     "================================================================\n"

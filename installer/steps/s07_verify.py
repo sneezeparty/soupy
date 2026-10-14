@@ -10,11 +10,12 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from .. import validators
+from ..state import PLACEHOLDER
 
 
 def _verify_discord(state: Dict, ui) -> Tuple[bool, str]:
     token = state.get("DISCORD_TOKEN", "")
-    if not token:
+    if not token or token == PLACEHOLDER:
         return False, "no token in state"
     result = validators.discord_token(token)
     return result.ok, result.message
@@ -49,7 +50,12 @@ def _verify_sd(state: Dict, ui) -> List[Tuple[str, bool, str]]:
     if not base:
         return [("SD backend reachable", False, "no SD URL in state")]
     result = validators.sd_backend(base)
-    return [("SD backend reachable", result.ok, result.message)]
+    if result.ok or mode == "remote":
+        return [("SD backend reachable", result.ok, result.message)]
+    # A local backend is started by hand once the wizard is done (the handoff
+    # step prints the command), so "not up yet" is expected here. Same
+    # treatment as Flux below.
+    return [("SD backend reachable", True, f"not running yet — the next step shows how to start it ({result.message})")]
 
 
 def _verify_flux(state: Dict, ui) -> List[Tuple[str, bool, str]]:
@@ -64,6 +70,8 @@ def _verify_flux(state: Dict, ui) -> List[Tuple[str, bool, str]]:
     result = validators.sd_backend(base)
     if result.ok:
         return [("Flux backend reachable", True, result.message)]
+    if str(state.get("FLUX_SERVER_AUTOSTART") or "").strip().lower() == "true":
+        return [("Flux backend reachable", True, f"not running yet — the web panel starts it ({result.message})")]
     return [("Flux backend reachable", True, f"not running yet — launch with `python flux_server.py` ({result.message})")]
 
 

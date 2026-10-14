@@ -324,7 +324,14 @@ class Settings:
 
     @cached_property
     def flux_enabled(self) -> bool:
+        # Off: /flux is not registered, its buttons say so, and nothing checks
+        # the Flux server's health.
         return _env_bool("FLUX_ENABLED", default=False)
+
+    @cached_property
+    def flux_server_autostart(self) -> bool:
+        # The web panel starts flux_server.py when it starts (web/services/flux_runner.py).
+        return _env_bool("FLUX_SERVER_AUTOSTART", default=False)
 
     @cached_property
     def flux_server_url(self) -> str:

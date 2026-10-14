@@ -719,7 +719,13 @@ def archive_image_bytes(
     guild_id: int | None,
     channel_id: int | None,
     source: str = "sd",
+    extra: dict | None = None,
 ) -> None:
+    """Save an image, its thumbnail and one row in ``media/images/index.jsonl``.
+
+    ``extra`` adds fields to the row (the Flux cog records the model, steps,
+    strength and source image there). A ``None`` value is left out.
+    """
     try:
         import json
         from datetime import datetime, timezone
@@ -758,11 +764,44 @@ def archive_image_bytes(
             "channel_id": channel_id,
             "source": source,
         }
+        for key, value in (extra or {}).items():
+            if value is not None:
+                meta.setdefault(key, value)
         index_path = media / "images" / "index.jsonl"
         with open(index_path, "a", encoding="utf-8") as idx:
             idx.write(json.dumps(meta, ensure_ascii=False) + "\n")
     except Exception as _e:
         logger.debug(f"archive_image_bytes failed: {_e}")
+
+def find_archived_image(filename: str) -> Optional[dict]:
+    """The index row for an archived image, or ``None``.
+
+    A posted result's attachment has the archive's filename, which is how a
+    button click after a restart finds what made the picture.
+    """
+    if not filename:
+        return None
+    try:
+        import json
+
+        index_path = _ensure_media_dirs() / "images" / "index.jsonl"
+        if not index_path.exists():
+            return None
+        needle = json.dumps(filename, ensure_ascii=False)
+        # Newest first: a click is almost always on a recent picture.
+        for line in reversed(index_path.read_text(encoding="utf-8").splitlines()):
+            if needle not in line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("filename") == filename:
+                return row
+    except Exception as e:
+        logger.debug(f"find_archived_image failed: {e}")
+    return None
+
 
 @app_commands.command(name="sd", description="Generates an image using Stable Diffusion.")
 @app_commands.describe(
@@ -1371,20 +1410,23 @@ def _view_state_from_message(message) -> dict:
     view instance does not — after a restart the registered template view has
     blank defaults. Everything we need is already visible in the message itself:
     the prompt in embed[0] (``**Prompt:** ...``), the seed in embed[1]
-    (``🌱 {seed}``), and the dimensions on the image attachment. Each key is
-    ``None`` when that field can't be recovered.
+    (``🌱 {seed}``), and the dimensions on the image attachment. A Flux result
+    that Fancy rewrote also shows the prompt it started from (``**Original:**
+    ...``). Each key is ``None`` when that field can't be recovered.
     """
-    state = {"prompt": None, "seed": None, "width": None, "height": None}
+    state = {"prompt": None, "seed": None, "width": None, "height": None, "original": None}
     if message is None:
         return state
     try:
         embeds = message.embeds or []
         if embeds and embeds[0].description and "**Prompt:** " in embeds[0].description:
-            prompt = embeds[0].description.split("**Prompt:** ", 1)[1]
+            head, prompt = embeds[0].description.split("**Prompt:** ", 1)
             # Outpaint results append "\n**Direction:** ..." after the prompt.
             prompt = prompt.split("\n**Direction:**", 1)[0].strip()
             if prompt:
                 state["prompt"] = prompt
+            if head.startswith("**Original:** "):
+                state["original"] = head[len("**Original:** "):].strip() or None
         if len(embeds) > 1 and embeds[1].description:
             seed_match = re.search(r"🌱\s*(\d+)", embeds[1].description)
             if seed_match:

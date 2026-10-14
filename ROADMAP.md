@@ -11,7 +11,7 @@ touches a load-bearing surface.
 
 **Status of the basics (so we don't relitigate them):** CI already runs `ruff` +
 `pytest` on Python 3.10/3.11/3.12 plus an installer smoke test; `requirements.lock`
-is committed and the installer prefers it; `pre-commit` carries a `gitleaks` hook;
+is committed and the installer uses it with `--locked`; `pre-commit` carries a `gitleaks` hook;
 and `soupy/` core (triggers, settings, prompts, env writer, validators, state) is
 unit-tested. The gaps below are real gaps, not missing fundamentals.
 
@@ -76,7 +76,7 @@ live-test the bot, not blind. Best tackled after image-gen is confirmed working 
 
 ### 8. Decide the fate of the React rewrite (M, mostly a decision)
 There are two front ends: the shipped, full-featured vanilla-JS dashboard
-(`web/static/dashboard/dashboard-app.js`, ~3,800 lines) and a thin React+Vite
+(`web/static/dashboard/`, five script files, ~5,700 lines) and a thin React+Vite
 scaffold (`web/frontend/`) that only shows bot status and is **not served**. Either
 commit to finishing the React migration (and set a feature-parity bar) or delete the
 scaffold so it stops implying a migration that isn't happening. Carrying both is the

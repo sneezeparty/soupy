@@ -1,6 +1,6 @@
 # First Run Walkthrough
 
-For most users the installer (`python install.py`) handles steps 1–5 of this walkthrough — see [INSTALL.md](../INSTALL.md). This doc is the manual breakdown if you want to know what the wizard is doing under the hood, plus the post-install archive scan and RAG verification steps that the installer does *not* do for you.
+For most users the installer (`python3 install.py`) handles steps 1–5 of this walkthrough — see [INSTALL.md](../INSTALL.md). This doc is the manual breakdown if you want to know what the wizard is doing under the hood, plus the post-install archive scan and RAG verification steps that the installer does *not* do for you.
 
 This is the path from `git clone` to a working bot with persistent memory. The bot will start and respond to messages after Phase 5 — but Soupy's memory (RAG) doesn't actually contain anything until you complete Phases 6 and 7. Plan accordingly.
 
@@ -153,22 +153,22 @@ If the scan dies mid-way (bot restart, network drop, LM Studio crash), you can r
 ### Watching progress
 
 - Live log: open the **web panel console drawer** for streaming scan output (channels processed, messages added, periodic checkpoints).
-- **Database Explorer tab** shows per-guild row counts and scan history.
+- The **Database tab** shows each server's message count and last scan; its Maintenance view lists recent scans.
 - The dashboard's **Archive Scan** and **RAG Reindex** cards show whether each loop is currently running, when it last completed, and (for the scheduled archive scan) when it'll run next.
 
 ## Phase 7 — RAG Reindex and Verification
 
 After `/soupyscan` finishes, the bot **automatically kicks off a RAG reindex in the background** if any new messages were added. You don't have to trigger it manually for the normal case. The reindex consolidates raw messages into conversation chunks and embeds them via your LM Studio embedding model — populating the `rag_chunks` table.
 
-If for any reason you want to force a reindex (changed embedding models, manual database edits, etc.), the **Database Explorer tab** has a "RAG Reindex" button per guild. There's also a periodic consolidation pass on a timer (`RAG_REINDEX_INTERVAL_HOURS`, default `6`).
+If for any reason you want to force a reindex (changed embedding models, manual database edits, etc.), the **Database tab's** Maintenance view has a "Rebuild index" button for the selected server. There's also a periodic consolidation pass on a timer (`RAG_REINDEX_INTERVAL_HOURS`, default `6`).
 
 **Turn on RAG.** RAG retrieval defaults to **off** and is controlled by a runtime flag stored in `data/runtime_flags.json`, not by an env variable. Toggle it from the dashboard's runtime-flags section ("RAG on every reply") — the bot picks up the change live, no restart needed.
 
 **Verify it works.** Once the reindex finishes and RAG is toggled on, ask the bot something it should remember from earlier in the channel — a running joke, a topic that came up last week, a username it should recognize. If the response actually references that history, RAG retrieval is working. If it answers cold, double-check:
 
-1. The Database Explorer shows non-zero rows in `rag_chunks` for that guild.
+1. Database → Maintenance shows a non-zero chunk count under "Search index (RAG)" for that server.
 2. `RAG_EMBEDDING_MODEL` exactly matches the embedding model loaded in LM Studio.
 3. The "RAG on every reply" toggle is on in the dashboard.
 4. The bot was restarted (or the runtime flag flushed) after any env edits.
 
-Subsequent maintenance is mostly hands-off: schedule periodic incremental scans via the Database Explorer (or just re-run `/soupyscan`), and the bot will keep its archive and RAG index current.
+Subsequent maintenance is mostly hands-off: schedule periodic incremental scans under Database → Maintenance (or just re-run `/soupyscan`), and the bot will keep its archive and RAG index current.

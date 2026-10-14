@@ -115,7 +115,7 @@ def test_view_state_recovered_from_message():
         attachments = [_Attachment()]
 
     state = sd._view_state_from_message(_Message())
-    assert state == {"prompt": "a neon cat", "seed": 1234567, "width": 1152, "height": 896}
+    assert state == {"prompt": "a neon cat", "seed": 1234567, "width": 1152, "height": 896, "original": None}
 
     # Unparseable message → all None (callbacks fall back to instance state).
     class _Bare:

@@ -2,38 +2,39 @@
 
 This covers the three ways you can put your own stamp on Soupy: editing the prompts (personality, search voice, image-prompt rewriting, etc.), changing the web panel's colors, and rebranding the panel itself.
 
-## Personality (`BEHAVIOUR`)
+## Personality and prompts
 
-Soupy's personality is a single system prompt: the `BEHAVIOUR` variable. The `BEHAVIOUR_SEARCH` variable defines the voice used for `/soupysearch` summaries. Both can be edited from the web panel's **Model & Personality** tab, which has a dedicated editor with auto-formatting on load and a "Load raw" mode for the as-stored text — plus a "Save preset + restart" button.
+Soupy's personality is one system prompt, `behaviour`, sent with every chat reply. Eight more prompts cover the other things Soupy writes. Each is a plain text file in `prompts/`:
 
-For very long rewrites, editing the underlying prompt file in a real text editor is the safest path; the web editor's textarea can get unwieldy past a few hundred lines.
+| Prompt | Shipped file | Used for |
+|--------|--------------|----------|
+| Chat personality | `behaviour.default.txt` | The system prompt for every chat reply |
+| Search answers | `behaviour_search.default.txt` | `/soupysearch` summaries |
+| Article posts | `behaviour_daily_post.default.txt` | Commentary on the daily article post |
+| 9-ball | `nineball.default.txt` | `/9ball` answers |
+| Fancy rewrite | `fancy.default.txt`, `fancy_flux.default.txt` | Rewriting an image prompt for the Fancy button (Stable Diffusion, Flux) |
+| Random prompt | `randomprompt.default.txt`, `randomprompt_flux.default.txt` | Turning random keywords into an image prompt (Stable Diffusion, Flux) |
+| Negative prompt | `sd_negative_prompt.default.txt` | Sent with every image request |
 
-### Prompt files (since M2)
+The bot loads `prompts/<name>.txt` when that file exists and the shipped `prompts/<name>.default.txt` otherwise. The `.txt` files are yours: git ignores them, so an update never overwrites one.
 
-As of M2, prompts no longer live exclusively in `.env-stable`. They live as plain text files in `prompts/`:
+### Editing a prompt
 
-- `prompts/behaviour.default.txt` — main personality used for chat replies, musings, autonomous interjections.
-- `prompts/behaviour_search.default.txt` — voice for `/soupysearch`.
-- `prompts/behaviour_daily_post.default.txt` — voice used to write daily article posts.
-- `prompts/fancy.default.txt` — the Fancy-button image-prompt rewrite template.
-- `prompts/randomprompt.default.txt` — the random-keyword-to-prompt template.
-- `prompts/nineball.default.txt` — `/9ball` response style.
-- `prompts/sd_negative_prompt.default.txt` — default negative prompt for image generation.
+The panel's **Model & Personality** tab has an editor for all nine. It shows each file exactly as stored and saves it exactly as typed. A save writes `prompts/<name>.txt` and keeps the version it replaced in `prompts/backups/` (the newest 20 per prompt). "Use shipped default" moves your file into the backups and returns to the shipped text.
 
-To customise, you have two options:
+The files can also be edited in any text editor. Copy `prompts/behaviour.default.txt` to `prompts/behaviour.txt` and edit the copy.
 
-1. **Edit the `.default.txt` file directly.** Quick and obvious. Be aware that a future update may overwrite it.
-2. **Copy the default to a non-default override.** Copy `prompts/behaviour.default.txt` to `prompts/behaviour.txt` (drop `.default`) and edit that. The bot prefers the non-default file when present, so updates to the default won't clobber your version.
+The bot reads prompts once, when it starts. Restart it after a change ("Save + restart bot" in the editor does both).
 
-If you have an existing `.env-stable` with a heavily customised `BEHAVIOUR` string and want to migrate it into the `prompts/` flow, run:
+### Prompts left in `.env-stable`
+
+Older installs kept the prompts in `.env-stable` (`BEHAVIOUR`, `BEHAVIOUR_SEARCH`, `BEHAVIOUR_DAILY_POST`, `9BALL`, `FANCY`, `RANDOMPROMPT`, `SD_NEGATIVE_PROMPT`). A value still set there overrides the prompt file, and the panel shows it read-only. To move them into files:
 
 ```bash
 python tools/migrate_prompts.py
 ```
 
-It pulls `BEHAVIOUR` / `BEHAVIOUR_SEARCH` / etc. out of `.env-stable` and writes them into the corresponding override files in `prompts/`, so you don't lose any of the work you put into the prompt over time.
-
-> **Don't paste extremely long prompts through the web env editor.** The form-based editor was built around short scalar values; the personality strings can be very long, and the web UI may truncate or escape them in surprising ways. Edit the `prompts/*.txt` files (or `.env-stable` directly) in a real editor for big rewrites.
+It writes each one to `prompts/<name>.txt` and comments out the line in `.env-stable`.
 
 ## Web Control Panel Customization
 

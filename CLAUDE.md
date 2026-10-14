@@ -19,9 +19,11 @@ optional third-party import, with a graceful fallback) so it runs on a
 fresh clone before `pip install` has happened. Each numbered step in
 `installer/steps/sNN_*.py` exposes `run(state, ui) -> dict`. The wizard
 persists progress to `.install-state.json` (gitignored), masks secrets
-in that file, generates `.env-stable` from `.env-stable.example` while
-preserving comments / ordering / multi-line values, and `os.execvp`s
-`run_all.py` at the end.
+in that file, generates `.env-stable` from `.env-stable.example` (or
+updates an existing `.env-stable` in place) while preserving comments /
+ordering / multi-line values, and `os.execvp`s `run_all.py` with
+`.venv`'s Python at the end. It installs `requirements.txt`;
+`requirements.lock` is used only with `--locked`.
 
 When a change touches the env-var surface, the Discord-bot connection,
 LM Studio probe shape, or SD endpoints, also check whether `install.py`
@@ -85,15 +87,23 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | [soupy/cogs/musings.py](soupy/cogs/musings.py) | Cog — periodic reflective musings in a configured channel |
 | [soupy/cogs/bluesky.py](soupy/cogs/bluesky.py) | Cog — autonomous Bluesky replies, quote-posts, original posts |
 | [soupy/settings.py](soupy/settings.py) | Typed, cached config accessors over `.env-stable` |
-| [soupy/prompts.py](soupy/prompts.py) | Prompt loader (env → custom file → default → fallback) |
+| [soupy/prompts.py](soupy/prompts.py) | Prompt loader (legacy env var → `prompts/<name>.txt` → `prompts/<name>.default.txt` → fallback) |
 | [soupy/msn.py](soupy/msn.py) | Resolves an msn.com link to the article it was syndicated from |
 | [soupy/slop.py](soupy/slop.py) | Anti-slop rules for Bluesky drafts: the prompt block and the tell detector |
 | [soupy/triggers.py](soupy/triggers.py) | Pure respond/don't-respond predicates |
+| [soupy/timeaware.py](soupy/timeaware.py) | Time awareness for chat: the clock line, age phrases, history markers |
 | [soupy/scheduling.py](soupy/scheduling.py) | Shared local-time windows + atomic JSON state files for the autonomous loops |
 | [run_all.py](run_all.py) | Launcher: starts uvicorn with `SOUPY_AUTOSTART_BOT=1` |
 | [web/app.py](web/app.py) | FastAPI app — routes, WebSocket, archive/stats endpoints |
 | [web/services/bot_runner.py](web/services/bot_runner.py) | Spawns and manages the bot subprocess via PTY |
+| [web/services/flux_runner.py](web/services/flux_runner.py) | Starts, stops and watches `flux_server.py`; keeps `logs/flux_server.log` |
+| [soupy/cogs/flux.py](soupy/cogs/flux.py) | Cog — `/flux`, its buttons and dialogs, and what a result remembers about how it was made |
+| [flux_server.py](flux_server.py) | The local Flux backend (mflux/MLX): `/flux`, `/flux_img2img`, `/flux_edit`, `/health`. Its own process |
 | [web/services/env_store.py](web/services/env_store.py) | Parses and rewrites `.env-stable` |
+| [web/services/browse.py](web/services/browse.py) | Read-only queries behind the Database and Media tabs: messages, profiles, Soupy's memory, the image archive |
+| [web/services/lm_studio.py](web/services/lm_studio.py) | The model server's list, and the chat-model switch: plan it, carry it out, undo it if LM Studio fails |
+| [web/services/prompt_store.py](web/services/prompt_store.py) | The prompt files behind the panel's editor: the list of prompts, exact saves, backups, reset to default |
+| [web/static/dashboard/](web/static/dashboard/) | The dashboard, no build step: `dashboard-core.js`, `dashboard-media.js`, `dashboard-database.js`, `dashboard-model.js`, `dashboard-app.js`, loaded in that order |
 | [web/services/log_stream.py](web/services/log_stream.py) | WebSocket fan-out for live log streaming |
 | [soupy_database/database.py](soupy_database/database.py) | SQLite schema + per-guild DB operations |
 | [soupy_database/rag.py](soupy_database/rag.py) | RAG embeddings and cosine similarity retrieval |
@@ -118,6 +128,7 @@ Critical variables — the bot will not start without `DISCORD_TOKEN`:
 | `OPENAI_BASE_URL` | LM Studio URL (e.g., `http://localhost:1234/v1` or `http://<lm-studio-host>:1234/v1`) |
 | `OPENAI_API_KEY` | API key (can be `lm-studio` for local; `LOCAL_KEY` is auto-mapped if this is empty) |
 | `SD_SERVER_URL` | Stable Diffusion endpoint |
+| `FLUX_ENABLED` / `FLUX_SERVER_URL` / `FLUX_SERVER_AUTOSTART` | Local Flux backend: on/off (`/flux` is only registered when on), where the bot reaches it, and whether the web panel starts it |
 | `OWNER_IDS` | Comma-separated Discord user IDs for admin commands |
 | `CHANNEL_IDS` | Channels the bot actively monitors |
 | `SOUPY_TRIGGER_KEYWORDS` | Comma-separated keywords that trigger replies outside monitored channels. Default: `soup,gumbo` |
@@ -138,21 +149,27 @@ There are also 50+ `WEB_COLOR_*` variables for UI customization.
 
 ---
 
-## Personality (`BEHAVIOUR`)
+## Personality and prompts
 
-Soupy's personality is a single system prompt stored in the `BEHAVIOUR` variable in `.env-stable`. To change personality, edit that string. There is no per-guild or runtime preset selection — the same `BEHAVIOUR` is used everywhere.
+Soupy's personality is one system prompt, `behaviour`, sent with every chat reply. There is no per-guild or runtime preset: the same prompt is used everywhere. Eight more prompts cover search answers, article posts, `/9ball` and the image prompts.
 
-Two related prompt variables exist:
+Each prompt is a text file. The bot loads `prompts/<name>.txt` (yours, gitignored) when it exists and the tracked `prompts/<name>.default.txt` otherwise, once, at startup. A legacy variable in `.env-stable` (`BEHAVIOUR`, `BEHAVIOUR_SEARCH`, `BEHAVIOUR_DAILY_POST`, `9BALL`, `FANCY`, `RANDOMPROMPT`, `SD_NEGATIVE_PROMPT`) still overrides its file when set; `tools/migrate_prompts.py` moves those into files. The template no longer sets any.
 
-| Variable | Used for |
-|----------|----------|
-| `BEHAVIOUR` | Default persona for chat replies, musings, autonomous interjections |
-| `BEHAVIOUR_SEARCH` | Persona used when answering `/soupysearch` queries |
-| `9BALL` | Response style for `/9ball` |
+| Prompt file | Used for |
+|-------------|----------|
+| `behaviour` | The system prompt for every chat reply |
+| `behaviour_search` | `/soupysearch` summaries |
+| `behaviour_daily_post` | Commentary on the daily article post |
+| `nineball` | `/9ball` answers |
+| `fancy`, `fancy_flux` | Rewriting an image prompt for the Fancy button |
+| `randomprompt`, `randomprompt_flux` | Turning random keywords into an image prompt |
+| `sd_negative_prompt` | Sent with every Stable Diffusion request (Flux has no negative prompt) |
 
-**Never edit these prompts via the web UI env editor** — they are long and the editor may truncate them. Edit `.env-stable` directly.
+Edit a prompt in the panel (Model & Personality → Prompts) or in the file. The panel's editor saves the text exactly as typed and keeps the replaced version in `prompts/backups/`. **Do not put a prompt back into `.env-stable`**: it would override the file, and the env editor no longer offers fields for them.
 
-The lookup happens in `get_guild_behaviour()` in [soupy_remastered_stablediffusion.py](soupy_remastered_stablediffusion.py).
+`web/services/prompt_store.PROMPTS` is the list the editor shows. A prompt the bot loads that is missing from it fails `tests/test_web_prompts.py`.
+
+The chat lookup is `get_guild_behaviour()` in [soupy_remastered_stablediffusion.py](soupy_remastered_stablediffusion.py).
 
 ---
 
@@ -178,7 +195,7 @@ See [requirements.txt](requirements.txt) for the full dependency list. Vision (`
 | Command | Cog | Description |
 |---------|-----|-------------|
 | `/sd <prompt>` | main | Generate image via Stable Diffusion |
-| `/flux <description> [image]` | soupy.cogs.flux | Generate image **locally** via Flux/mflux (text2img, or img2img when an image is attached) — backed by `flux_server.py` |
+| `/flux <description> [image] [strength] [fancy]` | soupy.cogs.flux | Generate image **locally** via Flux/mflux, backed by `flux_server.py`. With an image: edits it by instruction (Klein edit), or repaints it at `strength` when one is given (noise-mix img2img). `fancy` has Soupy write a fuller prompt first |
 | `/img2img` | main | Transform an image with a prompt |
 | `/inpaint` | main | Inpaint an image with a mask + prompt |
 | `/outpaint <prompt> <direction>` | main | Extend image by ~25% |
@@ -199,18 +216,21 @@ See [requirements.txt](requirements.txt) for the full dependency list. Vision (`
 
 Image generation posts the result with a `SDRemixView` control panel — Remix, R-Fancy, R-Keyword, Fancy, Edit, Wide, Tall, and Outpaint buttons.
 
+A `/flux` result gets `FluxRemixView`: Edit prompt, Fancy, Remix, Change image, R-Fancy, R-Keyword, Wide, Tall, Square. Change image starts from the picture it sits under (a chain of edits runs A to B to C). A picture made from another one remembers its source, so Remix and Edit prompt redo that step from the source; it gets no Fancy or shape buttons.
+
 ---
 
 ## Data & Storage
 
 - **Per-guild SQLite DBs**: `soupy_database/databases/guild_<id>.db` — message archive + RAG embeddings
-- **Generated images**: `media/images/` (full) + `media/thumbs/` (thumbnails)
+- **Generated images**: `media/images/` (full) + `media/thumbs/` (thumbnails). `media/images/index.jsonl` has one row per image; a Flux row also records model, steps, strength, source image and the prompt a Fancy rewrite started from
+- **Uploaded Flux source images**: `media/flux_sources/` (named by content; results are not copied here)
 - **Message log**: `media/messages.jsonl`
 - **User stats**: `user_stats.json`
-- **Logs**: `logs/soupy.log` (rotating, 5MB max, 5 backups)
+- **Logs**: `logs/soupy.log` (rotating, 5MB max, 5 backups); `logs/flux_server.log` when the panel runs the Flux server
 
 Under `data/`:
-- `data/runtime_flags.json` — shared bot↔web feature toggles (RAG enabled, command disables, etc.)
+- `data/runtime_flags.json` — shared bot↔web feature toggles (RAG enabled, command disables, time awareness)
 - `data/bot_dashboard.json` — bot-written status the web panel reads
 - `data/self_md/guild_<id>_self.json` — Soupy's memory per guild; `guild_<id>.md` + `_core.md` + `_anchor.md` are views rendered from it (`_archive.md` and `v1_backup/` hold the retired reflection's files)
 - `data/musings_archive.jsonl` — musings history
@@ -227,6 +247,7 @@ Under `data/`:
 - **Async/await throughout** — all I/O is non-blocking
 - **One big LLM call at a time** — chat replies, profile-build passes (members and Soupy's own memory), and the cogs' LLM calls all take `soupy.llm_gate.llm_turn()`. Profile passes use most of LM Studio's loaded context window, and hitting that ceiling takes LM Studio down, so large prompts must never overlap. Chat goes first: the profile builder waits while `ChatQueue` has a reply queued or running (plus a 60 s grace) before each pass, but never aborts a pass in flight. Profile jobs run only in the bot process (the web panel just queues them) for the same reason.
 - **Two single-consumer work queues** — `SDQueue` serializes image generation so the SD/flux backend isn't overloaded; `ChatQueue` serializes chat replies. Keep them separate: they were one queue once, and since each consumer awaits a job to completion, a single `/flux` blocked every reply bot-wide with no typing indicator anywhere. Both derive from `_WorkQueue`.
+- **Time awareness** — when the `time_awareness` runtime flag is on (default), `process_chat_message` reads the clock once (`timeaware.now_local()`, in `TIMEZONE`) and passes that one value everywhere: the `TIME` block that ends the system prompt, `[chat from ...]` markers on stale stretches of history, and `now=` into RAG so retrieved conversations and profile items say how long ago they were. History entries carry a `ts` key that must be stripped (`label_history` / `strip_timestamps`) before anything reaches the LLM. Ages are worded in code; never hand the 12b raw dates to do arithmetic on.
 - **Per-user rate limiting** — 10 searches/minute
 - **URL content caching** — 1-hour TTL to avoid repeated fetches
 - **Embedding semaphore** — prevents LM Studio request stampedes
@@ -258,6 +279,12 @@ Roughly 212 quadrillion possible keyword combinations.
 
 ## Notes & Quirks
 
+- Comments in `.env-stable` and `.env-stable.example` go on their own line. The web panel's `parse_env` takes everything after `=` as the value, and under `run_all.py` its values are the ones the bot gets, so `KEY=6  # note` arrives as `"6  # note"`. `tests/test_env_template.py` checks the template.
+- The dashboard API sends Discord IDs as strings. A browser reads a JSON number as a double and corrupts a snowflake, which broke every member filter in the old explorer. `tests/test_web_browse.py` checks it.
+- The panel reads page code (`web/static/`, `web/templates/`) from disk on every load, but `web/app.py` and `web/services/` only when it starts. After a change to both, the page is ahead of the server until the panel restarts. The Model & Personality tab says so instead of breaking.
+- A chat-model switch from the panel stops the bot, unloads and loads in LM Studio, writes `.env-stable`, then starts the bot. `CONTEXT_WINDOW_TOKENS` is the chat prompt budget, not the context length the model is loaded with; the budget has to stay under it. `tests/fake_lm_studio.py` stands in for LM Studio in tests and for trying the panel by hand.
+- A Flux button click after a restart is handled by a blank template view. It reads the prompt, seed and size from the message and the rest (source image, strength, original prompt) from the picture's row in `media/images/index.jsonl`, found by the attachment's filename. Button `custom_id`s must not change: Discord stores them on every posted message. `tests/flux_fakes.py` has the stand-ins for testing the cog; `tests/test_flux_buttons.py` clicks with a blank view.
+- `flux_server.py` is its own process. A change to it or to a server-side `FLUX_*` setting needs the Flux server restarted (the panel's Flux server card, or by hand); restarting the bot does not touch it. To try a change with real generations, run a second server on a spare port (`FLUX_SERVER_PORT=14942 .venv/bin/python flux_server.py`).
 - The `.env-stable` file accumulates timestamped backups (`.env-stable.bak.*`) on every web-UI save — safe to clean up old ones.
 - The bot supports multi-guild operation; each Discord server gets its own SQLite database and its own Soupy memory.
 - Discord requires **Message Content Intent** to be enabled in the Discord Developer Portal.

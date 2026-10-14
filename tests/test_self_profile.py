@@ -22,7 +22,7 @@ import asyncio
 import json
 import re
 import sqlite3
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -215,6 +215,19 @@ def test_chat_memory_puts_the_people_talking_first_and_skips_unrelated_items():
     assert "cloud" not in text and "pineapple" not in text, "unrelated opinions don't fill the budget"
     assert "Lately: people keep asking me to rank sandwiches (Mar 2025)" in text
     assert "honestly" not in text and "jazz" not in text
+
+
+def test_chat_memory_can_say_how_long_ago_instead_of_the_month():
+    text = pdoc.render_self_for_chat(
+        _rich_self_doc(),
+        people={ANN: "ann"},
+        query_tokens=["weather"],
+        max_chars=2000,
+        today=date(2025, 3, 5),
+        relative_dates=True,
+    )
+    assert text.split("\n")[0] == "About ann: i love arguing about pizza with ann (about 5 weeks ago)"
+    assert "Lately: people keep asking me to rank sandwiches (a few days ago)" in text
 
 
 def test_chat_memory_uses_ranked_and_word_matched_items_within_budget():
@@ -455,6 +468,26 @@ def test_chat_block_is_none_until_built_then_renders_memory(archive, monkeypatch
     conn.close()
     assert block.startswith("(Mon YYYY) is when it came up.")
     assert "\nAbout Ann: ann roasts my spelling (Apr 2025); ann and i trade movie picks (Apr 2025)" in block
+
+
+def test_chat_block_switches_to_ages_when_given_the_clock(archive, monkeypatch):
+    _fake_self_llm(monkeypatch)
+    asyncio.run(self_profile.refresh_self_profile(7, BOT))
+    conn = sqlite3.connect(archive)
+    block = self_profile.self_block_for_chat(
+        conn,
+        7,
+        people={ANN: "Ann"},
+        query_vec=None,
+        query_tokens=["topic29"],
+        max_chars=1500,
+        min_sim=0.3,
+        now=datetime(2025, 10, 6, 9, 0),
+    )
+    conn.close()
+    assert block.startswith("The bracket after each one says how long ago it came up.")
+    assert "(Apr 2025)" not in block and "Mon YYYY" not in block
+    assert re.search(r"\nAbout Ann: ann roasts my spelling \(about \d months ago\)", block), block
 
 
 def test_refresh_requests_round_trip(archive):

@@ -1,191 +1,25 @@
 (function () {
-  const e = React.createElement;
+  // Helpers and overlay pieces shared with the tab scripts live in dashboard-core.js.
+  const D = window.SoupyDash;
+  const e = D.e;
+  const fmtNum = D.fmtNum;
+  const readJson = D.readJson;
   const { useCallback, useEffect, useMemo, useState, useRef } = React;
 
-  function fmtNum(v) {
-    return Number(v || 0).toLocaleString();
-  }
+  const TABS = ["overview", "model", "stats", "media", "database"];
+  const DB_VIEWS = ["messages", "profiles", "maintenance"];
+  const GUILD_STORAGE_KEY = "soupy.dash.guild";
+  // The bot rewrites data/bot_dashboard.json about every 15 seconds.
+  const STATUS_POLL_MS = 20000;
+  const NOTICE_LINGER_MS = 6000;
 
-  /**
-   * Friendly labels for an image-archive row, keyed off `row.source` (newer
-   * entries) with a legacy fallback for rows written before the tag existed.
-   * Vision rows are recognised by `event_type === "vision"` regardless of source.
-   */
-  function imageSourceLabel(row) {
-    if (!row) return { badge: "?", badgeClass: "", pill: "Unknown", title: "Unknown" };
-    if (row.event_type === "vision") {
-      return { badge: "V", badgeClass: "", pill: "Vision", title: "Vision (image analyzed by the bot)" };
-    }
-    const src = (row.source || "").toLowerCase();
-    switch (src) {
-      case "flux":
-        return { badge: "Flux", badgeClass: "archive-img-badge--flux", pill: "Flux", title: "Flux (local mflux, text-to-image)" };
-      case "flux-img2img":
-        return { badge: "Flux i2i", badgeClass: "archive-img-badge--flux", pill: "Flux i2i", title: "Flux (noise-mix image-to-image)" };
-      case "flux-edit":
-        return { badge: "Flux ✎", badgeClass: "archive-img-badge--flux-edit", pill: "Flux Edit", title: "Flux Klein-Edit (reference-image conditioning)" };
-      case "sd":
-      case "":
-      default:
-        // Legacy rows have no `source` field — assume SD (the only engine that
-        // existed when those rows were written).
-        return { badge: "SD", badgeClass: "archive-img-badge--gen", pill: "Stable Diffusion", title: "Stable Diffusion (remote GPU)" };
-    }
-  }
-
-  /** One line in the profile-batch activity console (timestamp split for readability). */
-  function profileBatchLogLineRow(line, idx) {
-    var s = String(line || "");
-    var m = /^\[([^\]]+)\]\s*(.*)$/.exec(s);
-    if (m) {
-      return e(
-        "div",
-        { key: "pbl-" + idx, className: "profile-batch-log-row" },
-        e("span", { className: "profile-batch-log-ts" }, m[1]),
-        e("span", { className: "profile-batch-log-msg" }, m[2])
-      );
-    }
-    return e("div", { key: "pbl-" + idx, className: "profile-batch-log-row profile-batch-log-row-raw" }, s);
-  }
-
-  /**
-   * Shared panel state — uniform loading/error/empty/info presentation.
-   * Usage: PanelState({ kind: "loading"|"error"|"empty"|"info", message: "...", inline: true })
-   */
-  function PanelState(opts) {
-    var o = opts || {};
-    var kind = o.kind || "info";
-    var msg = o.message || "";
-    var children = o.children;
-    var inline = !!o.inline;
-    var cls = "panel-state panel-state--" + kind + (inline ? " panel-state--inline" : "");
-    var icon = null;
-    if (kind === "loading") icon = e("span", { className: "panel-state-spinner", "aria-hidden": "true" });
-    else if (kind === "error") icon = e("span", { className: "panel-state-glyph", "aria-hidden": "true" }, "!");
-    else if (kind === "empty") icon = e("span", { className: "panel-state-glyph", "aria-hidden": "true" }, "∅");
-    else if (kind === "info") icon = e("span", { className: "panel-state-glyph", "aria-hidden": "true" }, "i");
-    return e(
-      "div",
-      { className: cls, role: kind === "error" ? "alert" : "status", "aria-live": "polite" },
-      icon,
-      e("span", { className: "panel-state-text" }, msg),
-      children ? e("span", { className: "panel-state-extra" }, children) : null
-    );
-  }
-
-  function previewText(text, maxLen) {
-    var s = String(text || "").replace(/\s+/g, " ").trim();
-    if (s.length <= maxLen) return s;
-    return s.slice(0, Math.max(0, maxLen - 1)) + "…";
-  }
-
-  function pickerSelectValue(userList, currentId) {
-    var s = String(currentId || "").trim();
-    if (!s) return "";
-    var found = (userList || []).some(function (u) {
-      return String(u.user_id) === s;
-    });
-    return found ? s : "";
-  }
-
-  function normalizeLineEndings(text) {
-    return String(text || "").replace(/\r\n?/g, "\n");
-  }
-
-  /**
-   * Turn dense one-line behaviours (as stored in .env) into readable, editable paragraphs
-   * in the browser: section bars, numbered lists, glued "2. …" items, ALL‑CAPS headers, etc.
-   */
-  function formatBehaviourForEditor(text) {
-    var t = normalizeLineEndings(text).trim();
-    if (!t) return t;
-
-    var pass;
-    for (pass = 0; pass < 5; pass++) {
-      var before = t;
-
-      // Long equals bars with a title between them
-      t = t.replace(/={12,}([^=\n][^=\n]*?)={12,}/g, "\n\n$1\n\n");
-
-      // Double-space after sentence end → paragraph (common in your prompts)
-      t = t.replace(/([.!?])\s{2,}(?=[A-Z*0-9])/g, "$1\n\n");
-
-      // "Section title:" immediately followed by "1." (no newline)
-      t = t.replace(/:([1-9]\d{0,2}\.\s)/g, ":\n\n$1");
-
-      // "1.You" / "10.Behave" → space after the dot (lists crushed in .env)
-      t = t.replace(/([1-9]\d{0,2}\.)([A-Za-z*])/g, "$1 $2");
-
-      // Word / punctuation glued to next list number: "…thing2. You" / "…topic10. Behave"
-      t = t.replace(/([a-z.!?)])([1-9]\d{0,2}\.\s)/gi, "$1\n\n$2");
-      t = t.replace(/([a-z.!?)])([1-9]\d{0,2}\.)(?=[A-Za-z*])/gi, "$1\n\n$2 ");
-
-      // ALL‑CAPS word + period + Capitalized word: "IMPORTANT.Core" / "RESPONSE.Your"
-      t = t.replace(/([A-Z]{2,})\.([A-Z][a-z]+)/g, "$1.\n\n$2");
-
-      // ",INCLUDING" / instruction boilerplate
-      t = t.replace(/,(\s*)(INCLUDING\b)/gi, ",\n\n$2");
-
-      // Emphasis blocks in older prompts
-      t = t.replace(/\*\*([^*]+)\*\*/g, "\n\n**$1**\n\n");
-
-      t = t.replace(/\n{3,}/g, "\n\n");
-      if (t === before) break;
-    }
-
-    // Final sentence + long ALL‑CAPS clause (e.g. trailing NEVER EVER…)
-    t = t.replace(/([.!?])\s+([A-Z][A-Z\s,\d]{18,})\s*$/m, "$1\n\n$2");
-
-    t = t.replace(/\n{3,}/g, "\n\n");
-    return t.trim();
-  }
-
-  function parseModelList(raw) {
-    return String(raw || "")
-      .split(/[\n,]/)
-      .map(function (m) {
-        return m.trim();
-      })
-      .filter(Boolean);
-  }
-
-  function uniqueModels(list) {
-    const seen = new Set();
-    const out = [];
-    list.forEach(function (item) {
-      const key = String(item || "").trim();
-      if (!key) return;
-      const low = key.toLowerCase();
-      if (!seen.has(low)) {
-        seen.add(low);
-        out.push(key);
-      }
-    });
-    return out;
-  }
-
-  function titleFromPersonalityKey(key) {
-    if (key === "BEHAVIOUR") return "Live chat prompt (env)";
-    if (key === "INTERJECT") return "Interject personality";
-    if (key === "9BALL") return "9-ball personality";
-    return key
-      .replace(/^BEHAVIOUR_?/, "")
-      .replace(/^PERSONALITY_?/, "")
-      .split("_")
-      .filter(Boolean)
-      .map(function (part) {
-        return part.charAt(0) + part.slice(1).toLowerCase();
-      })
-      .join(" ");
-  }
-
-  async function readJson(url, init) {
-    const res = await fetch(url, init);
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || data.error || "Request failed");
-    }
-    return data;
+  /** "#database/profiles" as { tab, view }. Anything unrecognized falls back to the first. */
+  function readRoute() {
+    var parts = String(window.location.hash || "").replace(/^#/, "").split("/");
+    return {
+      tab: TABS.indexOf(parts[0]) !== -1 ? parts[0] : TABS[0],
+      view: DB_VIEWS.indexOf(parts[1]) !== -1 ? parts[1] : DB_VIEWS[0],
+    };
   }
 
   function SparkLine({ points, labels, color, compact, title }) {
@@ -852,406 +686,6 @@
     );
   }
 
-  async function fetchArchiveMessageByImage(filename) {
-    try {
-      var res = await fetch("/api/archive/message_by_image?filename=" + encodeURIComponent(filename));
-      var data = await res.json();
-      if (!data || !data.ok) return null;
-      return data;
-    } catch (_e) {
-      return null;
-    }
-  }
-
-  function MediaArchiveTab({ active }) {
-    const [imgItems, setImgItems] = useState([]);
-    const [imgTotal, setImgTotal] = useState(0);
-    const [imgOffset, setImgOffset] = useState(0);
-    const imgLimit = 30;
-    const [imgKind, setImgKind] = useState("all");
-    const [msgItems, setMsgItems] = useState([]);
-    const [msgTotal, setMsgTotal] = useState(0);
-    const [msgOffset, setMsgOffset] = useState(0);
-    const msgLimit = 40;
-    const [detail, setDetail] = useState(null);
-
-    const loadImages = useCallback(
-      async function (off) {
-        try {
-          var qs = "/api/archive/images?limit=" + imgLimit + "&offset=" + (off || 0);
-          if (imgKind && imgKind !== "all") qs += "&kind=" + encodeURIComponent(imgKind);
-          var data = await readJson(qs);
-          setImgItems(data.items || []);
-          setImgTotal(Number(data.total || 0));
-          setImgOffset(off || 0);
-        } catch (_err) {
-          setImgItems([]);
-          setImgTotal(0);
-        }
-      },
-      [imgKind, imgLimit]
-    );
-
-    const loadMessages = useCallback(
-      async function (off) {
-        try {
-          var data = await readJson("/api/archive/messages?limit=" + msgLimit + "&offset=" + (off || 0));
-          setMsgItems(data.items || []);
-          setMsgTotal(Number(data.total || 0));
-          setMsgOffset(off || 0);
-        } catch (_err) {
-          setMsgItems([]);
-          setMsgTotal(0);
-        }
-      },
-      [msgLimit]
-    );
-
-    useEffect(
-      function () {
-        if (!active) return;
-        loadMessages(0);
-      },
-      [active, loadMessages]
-    );
-
-    useEffect(
-      function () {
-        if (!active) return;
-        loadImages(0);
-        setDetail(null);
-      },
-      [active, imgKind, loadImages]
-    );
-
-    useEffect(
-      function () {
-        if (!active) return;
-        function onKey(ev) {
-          if (ev.key === "Escape") setDetail(null);
-        }
-        window.addEventListener("keydown", onKey);
-        return function () {
-          window.removeEventListener("keydown", onKey);
-        };
-      },
-      [active]
-    );
-
-    async function selectImage(row) {
-      var fn = row.filename;
-      if (!fn) return;
-      var isVis = row.event_type === "vision";
-      if (isVis) {
-        setDetail({ loading: true, row: row, filename: fn });
-        var d = await fetchArchiveMessageByImage(fn);
-        if (d) {
-          setDetail({
-            loading: false,
-            row: row,
-            filename: fn,
-            username: d.username || row.username,
-            ts: d.ts || row.ts,
-            event_type: d.event_type || "vision",
-            content: d.content || "",
-          });
-        } else {
-          setDetail({
-            loading: false,
-            row: row,
-            filename: fn,
-            username: row.username,
-            ts: row.ts,
-            event_type: "vision",
-            content: row.prompt || "(No matching messages.jsonl entry — showing index prompt only.)",
-            fromIndexOnly: true,
-          });
-        }
-      } else {
-        setDetail({
-          loading: false,
-          row: row,
-          filename: fn,
-          username: row.username,
-          ts: row.ts,
-          event_type: "generated",
-          content: row.prompt || "",
-          meta: { w: row.width, h: row.height, seed: row.seed },
-        });
-      }
-    }
-
-    function rowSelected(row) {
-      return !!(detail && detail.row && detail.row.filename === row.filename);
-    }
-
-    return e(
-      "div",
-      { className: "media-archive" },
-      e(
-        "p",
-        { className: "muted", style: { marginTop: 0 } },
-        "Light table: thumbnails only — click for caption (user, description, metadata). Live stream: Overview → Live log."
-      ),
-      e(
-        "article",
-        { className: "archive-panel archive-lighttable" },
-        e("h4", { style: { marginTop: 0 } }, "Image archive"),
-        e(
-          "div",
-          { className: "dash-controls", style: { flexWrap: "wrap", gap: "0.5rem", alignItems: "center", marginBottom: "0.65rem" } },
-            e(
-              "label",
-              { style: { display: "flex", alignItems: "center", gap: "0.35rem" } },
-              "Show",
-              e(
-                "select",
-                {
-                  value: imgKind,
-                  onChange: function (ev) {
-                    setImgKind(ev.target.value || "all");
-                  },
-                },
-                e("option", { value: "all" }, "All"),
-                e("option", { value: "vision" }, "Vision / analyzed"),
-                e("option", { value: "generated" }, "Generated (SD)")
-              )
-            ),
-            e(
-              "button",
-              { type: "button", className: "secondary", disabled: imgOffset <= 0, onClick: function () { loadImages(Math.max(0, imgOffset - imgLimit)); } },
-              "Prev page"
-            ),
-            e(
-              "button",
-              {
-                type: "button",
-                className: "secondary",
-                disabled: imgOffset + imgLimit >= imgTotal,
-                onClick: function () {
-                  if (imgOffset + imgLimit < imgTotal) loadImages(imgOffset + imgLimit);
-                },
-              },
-              "Next page"
-            ),
-            e(
-              "span",
-              { className: "muted", style: { fontSize: "0.88rem" } },
-              fmtNum(imgTotal ? imgOffset + 1 : 0) +
-                "–" +
-                fmtNum(Math.min(imgOffset + imgLimit, imgTotal)) +
-                " of " +
-                fmtNum(imgTotal)
-            )
-        ),
-        e(
-          "div",
-          { className: "archive-img-grid archive-img-grid--light" },
-          !imgItems.length
-            ? e("p", { className: "muted" }, "No images in the index yet.")
-            : imgItems.map(function (row, i) {
-                var fn = row.filename || "";
-                var sel = rowSelected(row);
-                var label = imageSourceLabel(row);
-                return e(
-                  "div",
-                  {
-                    key: i,
-                    className: "archive-img-card" + (sel ? " archive-img-card--selected" : ""),
-                    role: "button",
-                    tabIndex: 0,
-                    "aria-pressed": sel,
-                    onClick: function () {
-                      selectImage(row);
-                    },
-                    onKeyDown: function (ev) {
-                      if (ev.key === "Enter" || ev.key === " ") {
-                        ev.preventDefault();
-                        selectImage(row);
-                      }
-                    },
-                  },
-                  e(
-                    "div",
-                    { className: "archive-img-thumb-wrap" },
-                    e("img", {
-                      className: "archive-img-thumb",
-                      alt: "",
-                      loading: "lazy",
-                      draggable: false,
-                      src: "/media/thumbs/" + encodeURIComponent(fn),
-                      onError: function (ev) {
-                        ev.target.src = "/media/images/" + encodeURIComponent(fn);
-                      },
-                    }),
-                    e(
-                      "span",
-                      {
-                        className: ("archive-img-badge " + (label.badgeClass || "")).trim(),
-                        title: label.title,
-                      },
-                      label.badge
-                    )
-                  )
-                );
-              })
-        ),
-        e(
-          "div",
-          { className: "archive-caption" },
-          e("div", { className: "archive-caption-bar" }, e("span", { className: "archive-caption-label" }, "Caption")),
-          !detail
-            ? e("p", { className: "muted archive-caption-placeholder" }, "Select an image above. Press Esc to clear.")
-            : detail.loading
-              ? e("p", { className: "muted archive-caption-placeholder" }, "Loading vision text from message log…")
-              : e(
-                  "div",
-                  { className: "archive-caption-inner" },
-                  e(
-                    "div",
-                    { className: "archive-caption-visual" },
-                    e("img", {
-                      className: "archive-caption-img",
-                      alt: "",
-                      src: "/media/images/" + encodeURIComponent(detail.filename || ""),
-                      onError: function (ev) {
-                        ev.target.src = "/media/thumbs/" + encodeURIComponent(detail.filename || "");
-                      },
-                    })
-                  ),
-                  e(
-                    "div",
-                    { className: "archive-caption-body" },
-                    e(
-                      "div",
-                      { className: "archive-caption-meta" },
-                      (function () {
-                        var lbl = imageSourceLabel(detail.row || detail);
-                        return e("span", { className: "pill", title: lbl.title }, lbl.pill);
-                      })(),
-                      e("strong", { className: "archive-caption-user" }, detail.username || "—"),
-                      e("span", { className: "muted mono archive-caption-ts" }, (detail.ts || "").replace("T", " ").slice(0, 19)),
-                      detail.meta &&
-                        detail.meta.w &&
-                        detail.meta.h &&
-                        e(
-                          "span",
-                          { className: "muted mono" },
-                          detail.meta.w + "×" + detail.meta.h + (detail.meta.seed != null ? " · seed " + detail.meta.seed : "")
-                        ),
-                      detail.row &&
-                        detail.row.channel_id != null &&
-                        e("span", { className: "muted mono" }, "ch " + detail.row.channel_id),
-                      detail.row &&
-                        detail.row.original_url &&
-                        e(
-                          "a",
-                          {
-                            className: "archive-caption-src",
-                            href: detail.row.original_url,
-                            target: "_blank",
-                            rel: "noreferrer",
-                          },
-                          "Source URL"
-                        )
-                    ),
-                    e("div", { className: "mono archive-caption-filename" }, detail.filename),
-                    detail.fromIndexOnly
-                      ? e("p", { className: "muted archive-caption-note" }, "Full vision text not in messages.jsonl — index snippet only.")
-                      : null,
-                    e("div", { className: "archive-caption-text" }, detail.content || e("span", { className: "muted" }, "(no description)")),
-                    e(
-                      "div",
-                      { className: "archive-caption-actions" },
-                      e("button", { type: "button", className: "secondary", onClick: function () { setDetail(null); } }, "Clear selection"),
-                      e(
-                        "a",
-                        {
-                          role: "button",
-                          href: "/media/images/" + encodeURIComponent(detail.filename || ""),
-                          target: "_blank",
-                          rel: "noreferrer",
-                        },
-                        "Open full file"
-                      )
-                    )
-                  )
-                )
-        )
-      ),
-      e(
-        "details",
-        { className: "archive-details-log" },
-        e("summary", null, "Text activity log (messages.jsonl)"),
-        e(
-          "div",
-          { className: "archive-panel", style: { marginTop: "0.65rem" } },
-          e(
-            "div",
-            { className: "dash-controls", style: { flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.65rem" } },
-            e(
-              "button",
-              { type: "button", className: "secondary", disabled: msgOffset <= 0, onClick: function () { loadMessages(Math.max(0, msgOffset - msgLimit)); } },
-              "Newer"
-            ),
-            e(
-              "button",
-              {
-                type: "button",
-                className: "secondary",
-                disabled: msgOffset + msgLimit >= msgTotal,
-                onClick: function () {
-                  if (msgOffset + msgLimit < msgTotal) loadMessages(msgOffset + msgLimit);
-                },
-              },
-              "Older"
-            ),
-            e(
-              "span",
-              { className: "muted", style: { fontSize: "0.88rem" } },
-              fmtNum(msgTotal ? msgOffset + 1 : 0) +
-                "–" +
-                fmtNum(Math.min(msgOffset + msgLimit, msgTotal)) +
-                " of " +
-                fmtNum(msgTotal)
-            )
-          ),
-          e(
-            "div",
-            { className: "archive-log-list" },
-            !msgItems.length
-              ? e("p", { className: "muted" }, "No log lines yet.")
-              : msgItems.map(function (row, i) {
-                  var et = row.event_type || "message";
-                  var short = String(row.content || "").replace(/\s+/g, " ").trim();
-                  if (short.length > 280) short = short.slice(0, 277) + "…";
-                  return e(
-                    "div",
-                    { key: i, className: "archive-log-row" },
-                    e("div", { className: "archive-log-meta mono" }, (row.ts || "").replace("T", " ").slice(0, 19)),
-                    e("div", { className: "archive-log-who" }, row.username || "—"),
-                    e("span", { className: "pill archive-et" }, et),
-                    row.image_filename
-                      ? e(
-                          "a",
-                          {
-                            className: "archive-img-link",
-                            href: "/media/images/" + encodeURIComponent(row.image_filename),
-                            target: "_blank",
-                            rel: "noreferrer",
-                          },
-                          row.image_filename
-                        )
-                      : null,
-                    e("div", { className: "archive-log-body" }, short || e("span", { className: "muted" }, "(empty)"))
-                  );
-                })
-          )
-        )
-      )
-    );
-  }
-
   function App() {
     const initialDataNode = document.getElementById("dashboard-initial");
     let initialStatus = { running: false, pid: null };
@@ -1259,23 +693,24 @@
       if (initialDataNode) initialStatus = JSON.parse(initialDataNode.textContent || "{}").status || initialStatus;
     } catch (_err) {}
 
-    const [tab, setTab] = useState("overview");
+    const [route, setRoute] = useState(readRoute);
+    const tab = route.tab;
     const [notice, setNotice] = useState("");
     const [noticeError, setNoticeError] = useState(false);
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState(initialStatus);
     const [summary, setSummary] = useState(null);
     const [envVars, setEnvVars] = useState({});
-    const [selectedModel, setSelectedModel] = useState("");
-    const [modelQuery, setModelQuery] = useState("");
-    const [modelCatalogDraft, setModelCatalogDraft] = useState("");
-    const [contextWindowSize, setContextWindowSize] = useState("16000");
-    const [preset, setPreset] = useState("BEHAVIOUR");
-    const [personalityText, setPersonalityText] = useState("");
-    const [prompts, setPrompts] = useState({});
     const [selectedCommand, setSelectedCommand] = useState(null);
     const [cmdEnvDrafts, setCmdEnvDrafts] = useState({});
     const [dashStatus, setDashStatus] = useState({});
+    // The local Flux server, as the panel sees it (/api/flux/status). Empty
+    // until the first answer, and when the panel predates that route.
+    const [fluxStatus, setFluxStatus] = useState({});
+    const [fluxBusy, setFluxBusy] = useState(false);
+    const [fluxLog, setFluxLog] = useState(null);
+    // Whether the card's log is open, for timers that outlive a render.
+    const fluxLogOpenRef = useRef(false);
     const [activity, setActivity] = useState({});
     const [cmdChannelList, setCmdChannelList] = useState([]);
     const [cmdChannelConfig, setCmdChannelConfig] = useState({});
@@ -1287,106 +722,49 @@
     const [logFilter, setLogFilter] = useState("");
     const [logLevels, setLogLevels] = useState({ DEBUG: true, INFO: true, WARNING: true, ERROR: true });
     const [dbStatus, setDbStatus] = useState({ databases: [] });
-    const [dbGuild, setDbGuild] = useState("");
-    const [dbTable, setDbTable] = useState("messages");
-    const [dbSearch, setDbSearch] = useState("");
-    const [dbChannel, setDbChannel] = useState("");
-    const [dbUser, setDbUser] = useState("");
-    const [dbLimit, setDbLimit] = useState(50);
-    const [dbHasImages, setDbHasImages] = useState(false);
-    const [dbHasUrls, setDbHasUrls] = useState(false);
-    const [dbOffset, setDbOffset] = useState(0);
-    const [dbRows, setDbRows] = useState([]);
-    const [dbTotal, setDbTotal] = useState(0);
-    const [dbInfo, setDbInfo] = useState("Choose a server and click Load Rows.");
-    const [dbSelectedRow, setDbSelectedRow] = useState(null);
-    const [profSearch, setProfSearch] = useState("");
-    const [profLimit, setProfLimit] = useState(50);
-    const [profOffset, setProfOffset] = useState(0);
-    const [profRows, setProfRows] = useState([]);
-    const [profTotal, setProfTotal] = useState(0);
-    const [profInfo, setProfInfo] = useState("Choose a server and click Load profiles.");
-    const [profSelected, setProfSelected] = useState(null);
-    const [dbPickerUsers, setDbPickerUsers] = useState([]);
-    const [profPickerUsers, setProfPickerUsers] = useState([]);
-    const [profileRowCount, setProfileRowCount] = useState(null);
-    const [userPickerError, setUserPickerError] = useState("");
-    const [userPickerLoading, setUserPickerLoading] = useState(false);
-    const [profBatchStatus, setProfBatchStatus] = useState(null);
-    const [profBatchLogLines, setProfBatchLogLines] = useState([]);
-    const [profBatchPollEpoch, setProfBatchPollEpoch] = useState(0);
+    const [dbGuild, setDbGuildState] = useState(function () {
+      try {
+        return localStorage.getItem(GUILD_STORAGE_KEY) || "";
+      } catch (_err) {
+        return "";
+      }
+    });
     const [runtimeFlags, setRuntimeFlags] = useState({ rag_enabled: false });
     const [ragStatus, setRagStatus] = useState(null);
     const [profileStatus, setProfileStatus] = useState(null);
-    const [archiveScanMinutes, setArchiveScanMinutes] = useState("0");
-    // Overview tab — sticky-bar restart confirm + collapsible "knob" sections
+    // Status bar restart confirm, and the Overview tab's collapsible "knob" sections
     const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
-    const [overviewKnobs, setOverviewKnobs] = useState({ commands: false, rag: false });
+    const [overviewKnobs, setOverviewKnobs] = useState({ commands: false, rag: false, time: false });
+    const [confirm, confirmDialog] = D.useConfirm();
     const logRef = useRef(null);
-    const profBatchLogRef = useRef(null);
     const logsAttemptRef = useRef(0);
     const logsReconnectTimerRef = useRef(null);
     const logsCountdownTimerRef = useRef(null);
-    /** Last "next_index:profile_row_count" — refresh when either changes */
-    const profBatchPickerSyncRef = useRef(null);
+    // The socket's handler is made once, so it reads the pause switch through a ref.
+    const pauseLogsRef = useRef(false);
+    pauseLogsRef.current = pauseLogs;
 
-    const models = useMemo(function () {
-      const list = parseModelList(envVars.AVAILABLE_MODELS || "");
-      const current = String(envVars.LOCAL_CHAT || "");
-      const normalized = uniqueModels([current].concat(list));
-      return normalized.sort(function (a, b) {
-        if (a === current) return -1;
-        if (b === current) return 1;
-        return a.toLowerCase().localeCompare(b.toLowerCase());
-      });
-    }, [envVars]);
+    function notify(message, isError) {
+      setNotice(message);
+      setNoticeError(!!isError);
+    }
 
-    const filteredModels = useMemo(
-      function () {
-        const q = modelQuery.trim().toLowerCase();
-        if (!q) return models;
-        return models.filter(function (m) {
-          return m.toLowerCase().indexOf(q) !== -1;
-        });
-      },
-      [models, modelQuery]
-    );
+    function navigate(nextTab, nextView) {
+      var view = nextView || route.view;
+      var hash = "#" + nextTab + (nextTab === "database" ? "/" + view : "");
+      if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+      setRoute({ tab: nextTab, view: view });
+    }
 
-    const personalityOptions = useMemo(
-      function () {
-        // Only two prompts: main BEHAVIOUR and BEHAVIOUR_SEARCH
-        var opts = [
-          { key: "BEHAVIOUR", label: "Main chat personality", hint: "BEHAVIOUR" },
-          { key: "BEHAVIOUR_SEARCH", label: "Search personality", hint: "BEHAVIOUR_SEARCH" },
-        ];
-        return opts;
-      },
-      [envVars]
-    );
+    function setTab(id) {
+      navigate(id);
+    }
 
-    const displayNameById = useMemo(
-      function () {
-        const map = {};
-        function add(u) {
-          if (!u || u.user_id == null) return;
-          const id = String(u.user_id);
-          if (map[id]) return;
-          const label = String(u.label || u.nickname_hint || "").trim();
-          if (label) map[id] = label;
-        }
-        (dbPickerUsers || []).forEach(add);
-        (profPickerUsers || []).forEach(add);
-        return map;
-      },
-      [dbPickerUsers, profPickerUsers]
-    );
-
-    function displayNameFor(userId, fallback) {
-      if (userId == null) return fallback || "";
-      const id = String(userId);
-      const name = displayNameById[id];
-      if (name) return name;
-      return fallback || "";
+    function setDbGuild(id) {
+      setDbGuildState(id);
+      try {
+        localStorage.setItem(GUILD_STORAGE_KEY, id);
+      } catch (_err) {}
     }
 
     const filteredLogs = useMemo(
@@ -1410,12 +788,39 @@
     useEffect(function () {
       loadSummary();
       loadEnv();
-      loadPrompts();
       loadRuntimeFlags();
       refreshStatus();
       loadEnvToggles();
-      loadActivity();
       connectLogs();
+      function onRoute() {
+        setRoute(readRoute());
+      }
+      window.addEventListener("popstate", onRoute);
+      window.addEventListener("hashchange", onRoute);
+      // The status bar sticks just under the page nav, and the profile list
+      // under both. Their heights follow the title, the zoom and line wraps,
+      // so the stylesheet gets them measured.
+      var rootEl = document.getElementById("dashboard-root");
+      var nav = document.querySelector("nav.app-nav");
+      var bar = rootEl.querySelector(".dash-sticky-bar");
+      function measure() {
+        rootEl.style.setProperty("--dash-nav-height", (nav ? nav.offsetHeight : 0) + "px");
+        rootEl.style.setProperty("--dash-bar-height", (bar ? bar.offsetHeight : 0) + "px");
+      }
+      measure();
+      var sizes = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+      if (sizes && nav) sizes.observe(nav);
+      if (sizes && bar) sizes.observe(bar);
+      // Keep the status bar current, but not from a background browser tab.
+      var poll = setInterval(function () {
+        if (document.visibilityState === "visible") refreshStatus(true);
+      }, STATUS_POLL_MS);
+      return function () {
+        window.removeEventListener("popstate", onRoute);
+        window.removeEventListener("hashchange", onRoute);
+        if (sizes) sizes.disconnect();
+        clearInterval(poll);
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -1423,6 +828,9 @@
       function () {
         if (tab === "database" || tab === "overview") {
           loadDatabases();
+        }
+        if (tab === "overview") {
+          loadActivity();
         }
         if (tab === "stats") {
           loadSummary();
@@ -1432,124 +840,23 @@
       [tab]
     );
 
-    async function loadUserPickerData() {
-      if (!dbGuild) {
-        setDbPickerUsers([]);
-        setProfPickerUsers([]);
-        setProfileRowCount(null);
-        setUserPickerError("");
-        return;
-      }
-      setUserPickerLoading(true);
-      setUserPickerError("");
-      setProfileRowCount(null);
-      try {
-        const data = await readJson("/api/database/user-picker/" + encodeURIComponent(dbGuild));
-        setDbPickerUsers(data.from_messages || []);
-        setProfPickerUsers(data.from_profiles || []);
-        if (typeof data.profile_row_count === "number") {
-          setProfileRowCount(data.profile_row_count);
-        } else {
-          setProfileRowCount((data.from_profiles || []).length);
-        }
-        if ((data.from_profiles || []).length === 0 && (data.profile_row_count || 0) > 0) {
-          setUserPickerError(
-            "Profile rows exist in the database but the list came back empty — try Refresh lists or restart the web app."
-          );
-        }
-      } catch (err) {
-        setDbPickerUsers([]);
-        setProfPickerUsers([]);
-        setProfileRowCount(null);
-        setUserPickerError(err.message || "Failed to load user lists");
-      } finally {
-        setUserPickerLoading(false);
-      }
-    }
-
+    // A success message clears itself; an error stays until it is dismissed.
     useEffect(
       function () {
-        if (tab !== "database" || !dbGuild) return;
-        loadUserPickerData();
-      },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [tab, dbGuild]
-    );
-
-    useEffect(
-      function () {
-        if (tab !== "database" || !dbGuild) {
-          setProfBatchStatus(null);
-          setProfBatchLogLines([]);
-          profBatchPickerSyncRef.current = null;
-          return;
-        }
-        profBatchPickerSyncRef.current = null;
-        var cancelled = false;
-        var timeoutId = null;
-        var BATCH_POLL_ACTIVE_MS = 12000;
-        var BATCH_POLL_IDLE_MS = 120000;
-        var BATCH_POLL_ERR_MS = 30000;
-        function needActivePoll(st) {
-          if (!st || !st.ok) return false;
-          if (st.task_running) return true;
-          var s = String(st.status || "");
-          return s === "running" || s === "paused";
-        }
-        function schedule(delayMs) {
-          if (cancelled) return;
-          timeoutId = setTimeout(tick, delayMs);
-        }
-        async function tick() {
-          if (cancelled) return;
-          var nextDelay = BATCH_POLL_IDLE_MS;
-          try {
-            const d = await readJson("/api/profiles/batch/status/" + encodeURIComponent(dbGuild));
-            if (!cancelled) {
-              setProfBatchStatus(d);
-              setProfBatchLogLines(Array.isArray(d.log_lines) ? d.log_lines : []);
-              var ni = d.next_index != null ? Number(d.next_index) : 0;
-              var prc =
-                typeof d.profile_row_count === "number" && !Number.isNaN(d.profile_row_count)
-                  ? Number(d.profile_row_count)
-                  : null;
-              var syncKey = prc !== null ? ni + ":" + prc : String(ni);
-              if (syncKey !== profBatchPickerSyncRef.current) {
-                profBatchPickerSyncRef.current = syncKey;
-                loadUserPickerData();
-              }
-              nextDelay = needActivePoll(d) ? BATCH_POLL_ACTIVE_MS : BATCH_POLL_IDLE_MS;
-            }
-          } catch (_err) {
-            if (!cancelled) setProfBatchStatus(null);
-            nextDelay = BATCH_POLL_ERR_MS;
-          }
-          if (!cancelled) schedule(nextDelay);
-        }
-        tick();
+        if (!notice || noticeError) return;
+        var id = setTimeout(function () {
+          setNotice("");
+        }, NOTICE_LINGER_MS);
         return function () {
-          cancelled = true;
-          profBatchPickerSyncRef.current = null;
-          if (timeoutId != null) clearTimeout(timeoutId);
+          clearTimeout(id);
         };
       },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [tab, dbGuild, profBatchPollEpoch]
+      [notice, noticeError]
     );
 
     useEffect(
       function () {
-        if (tab !== "database") return;
-        var el = profBatchLogRef.current;
-        if (!el) return;
-        el.scrollTop = el.scrollHeight;
-      },
-      [tab, profBatchLogLines]
-    );
-
-    useEffect(
-      function () {
-        if (tab !== "overview" || !dbGuild) {
+        if ((tab !== "overview" && tab !== "database") || !dbGuild) {
           return;
         }
         let cancelled = false;
@@ -1576,24 +883,6 @@
 
     useEffect(
       function () {
-        if (!dbGuild || !(dbStatus.databases || []).length) {
-          setArchiveScanMinutes("0");
-          return;
-        }
-        var d = (dbStatus.databases || []).find(function (x) {
-          return String(x.guild_id) === String(dbGuild);
-        });
-        if (d && d.archive_scan_interval_minutes != null) {
-          setArchiveScanMinutes(String(d.archive_scan_interval_minutes));
-        } else {
-          setArchiveScanMinutes("0");
-        }
-      },
-      [dbGuild, dbStatus]
-    );
-
-    useEffect(
-      function () {
         if (autoscroll && logRef.current) {
           logRef.current.scrollTop = logRef.current.scrollHeight;
         }
@@ -1602,26 +891,10 @@
     );
 
     async function copyVisibleLogs() {
-      const text = filteredLogs.join("\n");
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(text);
-        } else {
-          const ta = document.createElement("textarea");
-          ta.value = text;
-          ta.setAttribute("readonly", "");
-          ta.style.position = "absolute";
-          ta.style.left = "-9999px";
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand("copy");
-          document.body.removeChild(ta);
-        }
-        setNotice("Copied " + filteredLogs.length + " log line(s) to clipboard.");
-        setNoticeError(false);
-      } catch (err) {
-        setNotice("Copy failed: " + err.message);
-        setNoticeError(true);
+      if (await D.copyText(filteredLogs.join("\n"))) {
+        notify("Copied " + filteredLogs.length + " log line(s) to clipboard.");
+      } else {
+        notify("Copy failed: the browser refused clipboard access.", true);
       }
     }
 
@@ -1635,21 +908,61 @@
       }
     }, []);
 
-    async function refreshStatus() {
+    // `quiet` is the background poll: a failure there (the panel restarting,
+    // a laptop waking up) isn't worth a message every 20 seconds.
+    async function refreshStatus(quiet) {
       try {
         const data = await readJson("/api/bot/status");
         setStatus(data);
       } catch (err) {
-        setNotice("Failed to refresh status: " + err.message);
-        setNoticeError(true);
+        if (!quiet) notify("Failed to refresh status: " + err.message, true);
       }
-      // Also load extended dashboard status
       try {
-        const ds = await readJson("/api/bot/dashboard-status");
-        console.log("dashboard-status response:", ds);
-        setDashStatus(ds || {});
-      } catch (dsErr) {
-        console.error("dashboard-status fetch failed:", dsErr);
+        setDashStatus((await readJson("/api/bot/dashboard-status")) || {});
+      } catch (_err) {
+        // Extended status is a nicety; the bar still shows running/stopped.
+      }
+      try {
+        setFluxStatus((await readJson("/api/flux/status")) || {});
+      } catch (_err) {
+        // A panel started before this route existed: the bot's own report is used.
+      }
+    }
+
+    async function loadFluxLog() {
+      try {
+        setFluxLog(((await readJson("/api/flux/log?lines=60")) || {}).lines || []);
+      } catch (err) {
+        setFluxLog(["Could not read the Flux server's log: " + err.message]);
+      }
+    }
+
+    async function fluxAction(action) {
+      if (action !== "start") {
+        const ok = await confirm({
+          title: (action === "stop" ? "Stop" : "Restart") + " the Flux server?",
+          message: "A picture being generated right now is lost. The model loads again on the next image.",
+          confirmLabel: action === "stop" ? "Stop" : "Restart",
+        });
+        if (!ok) return;
+      }
+      setFluxBusy(true);
+      try {
+        const data = await readJson("/api/flux/" + action, { method: "POST" });
+        setFluxStatus(data || {});
+        notify(data.message || "Done", data.ok === false);
+        // The server takes a few seconds to answer after a start. Don't leave
+        // the card on "Starting…" until the next 20-second poll.
+        [2500, 7000].forEach(function (ms) {
+          setTimeout(function () {
+            refreshStatus(true);
+            if (fluxLogOpenRef.current) loadFluxLog();
+          }, ms);
+        });
+      } catch (err) {
+        notify("Flux server: " + err.message, true);
+      } finally {
+        setFluxBusy(false);
       }
     }
 
@@ -1681,17 +994,12 @@
       try {
         var payload = {};
         payload[key] = newVal;
-        await fetch("/api/env/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        // Update local state immediately for responsive UI
+        await D.postJson("/api/env/save", payload);
         var updated = Object.assign({}, envToggles);
         updated[key] = !current;
         setEnvToggles(updated);
       } catch (err) {
-        console.error("Failed to toggle " + key + ":", err);
+        notify("Could not save " + key + ": " + err.message, true);
       }
     }
 
@@ -1741,7 +1049,7 @@
           pushLog("[logs connected]");
         };
         ws.onmessage = function (ev) {
-          if (!pauseLogs) pushLog(String(ev.data || ""));
+          if (!pauseLogsRef.current) pushLog(String(ev.data || ""));
         };
         ws.onerror = function () {
           try { ws.close(); } catch (_) {}
@@ -1800,7 +1108,7 @@
       try {
         await readJson("/api/self-memory/refresh/" + encodeURIComponent(dbGuild), { method: "POST" });
         setNotice(
-          "Queued. The bot reads Soupy's new messages at its next chance (between members if a profile job is running); progress shows in the Database tab's profile log."
+          "Queued. The bot reads Soupy's new messages at its next chance (between members if a profile job is running). Progress shows under Database → Maintenance."
         );
       } catch (err) {
         setNotice("Could not queue the refresh: " + err.message);
@@ -1812,12 +1120,12 @@
 
     async function rebuildRagIndex() {
       if (!dbGuild) return;
-      if (
-        !window.confirm(
-          "Rebuild RAG index for this server? This calls LM Studio embeddings and may take a while."
-        )
-      )
-        return;
+      const ok = await confirm({
+        title: "Rebuild the search index?",
+        message: "Every archived message for this server is embedded again through LM Studio. That can take a while.",
+        confirmLabel: "Rebuild",
+      });
+      if (!ok) return;
       setBusy(true);
       setNotice("Rebuilding RAG index…");
       setNoticeError(false);
@@ -1834,293 +1142,14 @@
       }
     }
 
-    async function profileResetAll() {
-      if (!dbGuild) return;
-      if (
-        !window.confirm(
-          "Delete ALL stored member profiles for this server and clear batch job state? " +
-            "You can run a new batch afterward."
-        )
-      )
-        return;
-      setBusy(true);
-      setNoticeError(false);
-      try {
-        await readJson("/api/profiles/reset/" + encodeURIComponent(dbGuild), { method: "POST" });
-        setNotice("All profiles deleted for this server.");
-        setProfBatchPollEpoch(function (n) {
-          return n + 1;
-        });
-        loadUserPickerData();
-        loadProfileList(0);
-        loadDatabases();
-        try {
-          const st = await readJson("/api/profiles/status/" + encodeURIComponent(dbGuild));
-          setProfileStatus(st);
-        } catch (_err) {
-          setProfileStatus(null);
-        }
-      } catch (err) {
-        setNotice("Reset failed: " + err.message);
-        setNoticeError(true);
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function profileBatchStart() {
-      if (!dbGuild) return;
-      if (
-        !window.confirm(
-          "Queue a profile batch? The bot builds each member in several passes (LOCAL_CHAT), one call at a time, and must be running. You can pause, resume, and cancel. Logs appear below."
-        )
-      )
-        return;
-      setBusy(true);
-      setNoticeError(false);
-      try {
-        const data = await readJson("/api/profiles/batch/start/" + encodeURIComponent(dbGuild), { method: "POST" });
-        setNotice("Batch queued: " + fmtNum(data.total || 0) + " user(s).");
-        setProfBatchPollEpoch(function (n) {
-          return n + 1;
-        });
-      } catch (err) {
-        setNotice("Batch start failed: " + err.message);
-        setNoticeError(true);
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function profileBatchPause() {
-      if (!dbGuild) return;
-      try {
-        await readJson("/api/profiles/batch/pause/" + encodeURIComponent(dbGuild), { method: "POST" });
-        setProfBatchPollEpoch(function (n) {
-          return n + 1;
-        });
-      } catch (_err) {}
-    }
-
-    async function profileBatchResume() {
-      if (!dbGuild) return;
-      try {
-        await readJson("/api/profiles/batch/resume/" + encodeURIComponent(dbGuild), { method: "POST" });
-        setProfBatchPollEpoch(function (n) {
-          return n + 1;
-        });
-      } catch (_err) {}
-    }
-
-    async function profileBatchCancel() {
-      if (!dbGuild) return;
-      if (!window.confirm("Cancel the profile job? The bot stops after the current pass; progress so far is saved.")) return;
-      try {
-        await readJson("/api/profiles/batch/cancel/" + encodeURIComponent(dbGuild), { method: "POST" });
-        setProfBatchPollEpoch(function (n) {
-          return n + 1;
-        });
-      } catch (_err) {}
-    }
-
     async function loadEnv() {
       try {
         const data = await readJson("/api/env/get");
         const vars = data.vars || {};
         setEnvVars(vars);
-        setSelectedModel(String(vars.LOCAL_CHAT || ""));
-        setContextWindowSize(String(vars.CONTEXT_WINDOW_TOKENS || "16000"));
-        setModelCatalogDraft(parseModelList(vars.AVAILABLE_MODELS || "").join("\n"));
       } catch (err) {
         setNotice("Failed to load environment: " + err.message);
         setNoticeError(true);
-      }
-    }
-
-    // Prompts (BEHAVIOUR, BEHAVIOUR_SEARCH, etc.) live in prompts/<name>.txt
-    // since the 2026-05-06 migration — the env editor no longer sees them.
-    // /api/prompts/get returns them via the same resolution chain the bot
-    // uses (legacy env > custom file > shipped default).
-    async function loadPrompts() {
-      try {
-        const data = await readJson("/api/prompts/get");
-        setPrompts(data.prompts || {});
-      } catch (err) {
-        setNotice("Failed to load prompts: " + err.message);
-        setNoticeError(true);
-      }
-    }
-
-    // Map dashboard preset keys (env-var style) to the prompt names used by
-    // soupy/prompts.py and /api/prompts/*. The preset select shows the
-    // env-var labels for continuity with older docs/UI.
-    const PRESET_TO_PROMPT_NAME = { BEHAVIOUR: "behaviour", BEHAVIOUR_SEARCH: "behaviour_search" };
-    function promptNameFor(key) {
-      return PRESET_TO_PROMPT_NAME[key] || String(key || "").toLowerCase();
-    }
-
-    useEffect(
-      function () {
-        if (!personalityOptions.length) {
-          setPreset("");
-          setPersonalityText("");
-          return;
-        }
-        const hasPreset = personalityOptions.some(function (opt) {
-          return opt.key === preset;
-        });
-        const resolved = hasPreset ? preset : personalityOptions[0].key;
-        if (!hasPreset) {
-          setPreset(resolved);
-        }
-        setPersonalityText(formatBehaviourForEditor(getPresetValueRaw(resolved)));
-      },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [preset, prompts, envVars, personalityOptions]
-    );
-
-    function getPresetValueRaw(key) {
-      const entry = prompts[promptNameFor(key)];
-      if (entry && typeof entry.value === "string" && entry.value) {
-        return normalizeLineEndings(entry.value);
-      }
-      return normalizeLineEndings(envVars[key] || "");
-    }
-
-    function getPresetValueFormatted(key) {
-      return formatBehaviourForEditor(getPresetValueRaw(key));
-    }
-
-    function presetSourceLabel(key) {
-      const entry = prompts[promptNameFor(key)];
-      if (!entry) return "";
-      if (entry.source === "env") return "legacy env var " + (entry.env_var || key);
-      if (entry.source === "custom") return "prompts/" + entry.name + ".txt";
-      if (entry.source === "default") return "shipped default prompts/" + entry.name + ".default.txt";
-      return "no prompt set";
-    }
-
-    async function savePrompt(key, text, restart, successMsg) {
-      const name = promptNameFor(key);
-      setBusy(true);
-      setNotice(restart ? "Saving and restarting..." : "Saving...");
-      setNoticeError(false);
-      try {
-        await readJson("/api/prompts/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: name, value: normalizeLineEndings(text) }),
-        });
-        if (restart) {
-          const restarted = await readJson("/api/bot/restart", { method: "POST" });
-          setStatus(restarted);
-        }
-        setNotice(successMsg);
-        await loadPrompts();
-      } catch (err) {
-        setNotice("Save failed: " + err.message);
-        setNoticeError(true);
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function saveEnvOnly(updates, msg) {
-      setBusy(true);
-      setNotice("Saving...");
-      setNoticeError(false);
-      try {
-        const payload = Object.assign({}, envVars, updates || {});
-        await readJson("/api/env/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        setNotice(msg || "Saved to .env");
-        await loadEnv();
-      } catch (err) {
-        setNotice("Save failed: " + err.message);
-        setNoticeError(true);
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function saveEnvAndRestart(updates, msg) {
-      setBusy(true);
-      setNotice("Saving and restarting...");
-      setNoticeError(false);
-      try {
-        const payload = Object.assign({}, envVars, updates || {});
-        await readJson("/api/env/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const restarted = await readJson("/api/bot/restart", { method: "POST" });
-        setStatus(restarted);
-        setNotice(msg || "Saved and restarted.");
-        await loadEnv();
-      } catch (err) {
-        setNotice("Update failed: " + err.message);
-        setNoticeError(true);
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function saveAvailableModels() {
-      const modelList = uniqueModels(parseModelList(modelCatalogDraft));
-      const joined = modelList.join(", ");
-      setModelCatalogDraft(modelList.join("\n"));
-      await saveEnvAndRestart({ AVAILABLE_MODELS: joined }, "Model catalog saved and bot restarted.");
-      if (modelList.length && modelList.indexOf(selectedModel) === -1) {
-        setSelectedModel(modelList[0]);
-      }
-    }
-
-    async function fetchLMStudioModels() {
-      setBusy(true);
-      setNotice("");
-      setNoticeError(false);
-      try {
-        var resp = await fetch("/api/lm-studio/models");
-        var data = await resp.json();
-        if (!data.ok) {
-          setNotice("Could not fetch models: " + (data.message || "unknown error"));
-          setNoticeError(true);
-          return;
-        }
-        var fetched = data.models || [];
-        if (!fetched.length) {
-          setNotice("LM Studio returned no models. Is a model downloaded?");
-          setNoticeError(true);
-          return;
-        }
-        // Extract model keys — the API now returns objects with key/label/type/quant
-        var keys = fetched.map(function (m) {
-          return typeof m === "string" ? m : (m.key || "");
-        }).filter(Boolean);
-        // Store the full model info for display labels
-        var labelMap = {};
-        fetched.forEach(function (m) {
-          if (typeof m === "object" && m.key) {
-            labelMap[m.key] = m.label || m.key;
-          }
-        });
-        window._lmModelLabels = labelMap;
-        // Merge with existing catalog
-        var existing = parseModelList(modelCatalogDraft);
-        var merged = uniqueModels(keys.concat(existing));
-        setModelCatalogDraft(merged.join("\n"));
-        var llmCount = fetched.filter(function (m) { return typeof m === "object" && m.type === "llm"; }).length;
-        var embCount = fetched.filter(function (m) { return typeof m === "object" && m.type === "embedding"; }).length;
-        setNotice("Fetched " + keys.length + " model(s) from LM Studio (" + llmCount + " LLM, " + embCount + " embedding). Review and save.");
-      } catch (err) {
-        setNotice("Failed to reach LM Studio: " + err.message);
-        setNoticeError(true);
-      } finally {
-        setBusy(false);
       }
     }
 
@@ -2128,112 +1157,32 @@
       try {
         const data = await readJson("/api/database/status");
         setDbStatus(data);
-        if ((data.databases || []).length) {
-          const first = String(data.databases[0].guild_id || "");
-          setDbGuild(function (old) {
-            return old || first;
-          });
-        } else {
-          setDbInfo("No databases found yet. Run /soupyscan in Discord first.");
-        }
-      } catch (err) {
-        setDbInfo("Failed to load databases: " + err.message);
-      }
-    }
-
-    async function loadRows(nextOffset) {
-      const offset = nextOffset == null ? dbOffset : nextOffset;
-      if (!dbGuild) return;
-      setDbInfo("Loading rows...");
-      setDbSelectedRow(null);
-      try {
-        const qs = new URLSearchParams({
-          table: dbTable,
-          limit: String(dbLimit),
-          offset: String(offset),
-          has_images: String(!!dbHasImages),
-          has_urls: String(!!dbHasUrls),
+        // Keep the remembered server if it still has an archive; otherwise the biggest one.
+        const ids = (data.databases || []).map(function (d) {
+          return String(d.guild_id);
         });
-        if (dbSearch.trim()) qs.set("search", dbSearch.trim());
-        if (dbChannel.trim()) qs.set("channel_id", dbChannel.trim());
-        if (dbUser.trim()) qs.set("user_id", dbUser.trim());
-        const data = await readJson("/api/database/explore/" + encodeURIComponent(dbGuild) + "?" + qs.toString());
-        const total = Number(data.total || 0);
-        const start = total ? offset + 1 : 0;
-        const end = Math.min(offset + Number(dbLimit), total);
-        setDbRows(data.rows || []);
-        setDbTotal(total);
-        setDbOffset(offset);
-        setDbInfo("Showing " + start + "-" + end + " of " + total + " rows");
+        setDbGuildState(function (old) {
+          return ids.indexOf(old) !== -1 ? old : ids[0] || "";
+        });
       } catch (err) {
-        setDbInfo("Failed to load rows: " + err.message);
-      }
-    }
-
-    async function loadProfileList(nextOffset) {
-      const offset = nextOffset == null ? profOffset : nextOffset;
-      if (!dbGuild) return;
-      setProfInfo("Loading profiles...");
-      setProfSelected(null);
-      try {
-        const qs = new URLSearchParams({ limit: String(profLimit), offset: String(offset) });
-        if (profSearch.trim()) qs.set("search", profSearch.trim());
-        const data = await readJson("/api/profiles/list/" + encodeURIComponent(dbGuild) + "?" + qs.toString());
-        const total = Number(data.total || 0);
-        const start = total ? offset + 1 : 0;
-        const end = Math.min(offset + Number(profLimit), total);
-        setProfRows(data.rows || []);
-        setProfTotal(total);
-        setProfOffset(offset);
-        setProfInfo("Showing " + start + "-" + end + " of " + total + " stored profiles");
-        loadUserPickerData();
-      } catch (err) {
-        setProfInfo("Failed to load profiles: " + err.message);
-        setProfRows([]);
-        setProfTotal(0);
+        notify("Failed to load databases: " + err.message, true);
       }
     }
 
     async function triggerScan() {
       if (!dbGuild) return;
-      if (!window.confirm("Run incremental scan now?")) return;
+      const ok = await confirm({
+        title: "Scan this server now?",
+        message: "The bot fetches messages posted since the last scan and adds them to the archive.",
+        confirmLabel: "Scan now",
+      });
+      if (!ok) return;
       try {
         const data = await readJson("/api/database/scan/" + encodeURIComponent(dbGuild), { method: "POST" });
-        setNotice(data.message || "Scan triggered");
-        setNoticeError(false);
+        notify(data.message || "Scan triggered");
         setTimeout(loadDatabases, 1200);
       } catch (err) {
-        setNotice("Scan failed: " + err.message);
-        setNoticeError(true);
-      }
-    }
-
-    async function saveArchiveSchedule() {
-      if (!dbGuild) return;
-      var m = parseInt(String(archiveScanMinutes).trim(), 10);
-      if (isNaN(m) || m < 0 || m > 10080) {
-        setNotice("Auto-archive minutes must be a number from 0 to 10080 (7 days). Use 0 to disable.");
-        setNoticeError(true);
-        return;
-      }
-      try {
-        const data = await readJson("/api/database/archive-schedule/" + encodeURIComponent(dbGuild), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ minutes: m }),
-        });
-        setNotice(
-          data.archive_scan_interval_minutes === 0
-            ? "Automatic archive scans disabled for this server."
-            : "Saved: incremental archive every " +
-                data.archive_scan_interval_minutes +
-                " min (bot polls ~45s). RAG reindexes after each successful scan."
-        );
-        setNoticeError(false);
-        setTimeout(loadDatabases, 400);
-      } catch (err) {
-        setNotice("Auto-archive save failed: " + err.message);
-        setNoticeError(true);
+        notify("Scan failed: " + err.message, true);
       }
     }
 
@@ -2253,54 +1202,134 @@
       );
     };
 
+    function formatUptime(s) {
+      if (s == null) return "—";
+      var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+      return (d > 0 ? d + "d " : "") + h + "h " + m + "m";
+    }
+
+    // The bot reports whether it can reach each backend. Until a freshly started
+    // bot has reported, the answer is unknown, which is not the same as down.
+    function reachClass(online) {
+      return online == null ? "status-unknown" : online ? "status-on" : "status-off";
+    }
+
+    function reachTitle(online) {
+      return online == null ? ": not reported yet" : online ? ": reachable" : ": unreachable";
+    }
+
+    // Flux is local, so the panel asks it directly: that answer is seconds old,
+    // where the bot's report can be half a minute behind a Start or Stop.
+    var fluxShown = !!(fluxStatus.enabled || dashStatus.flux_enabled);
+    var fluxOnline = fluxStatus.reachable != null ? fluxStatus.reachable : dashStatus.flux_online;
+
+    // Shown above every tab: whether the bot is up, and the buttons that change that.
+    var statusBar = e(
+      "div",
+      { className: "dash-sticky-bar", role: "status", "aria-label": "Bot status" },
+      e("div", { className: "dash-sticky-segment" },
+        e("span", { className: "status-dot " + (status.running ? "status-on" : "status-off") }),
+        e("strong", null, status.running ? "Running" : "Stopped"),
+        status.pid ? e("span", { className: "muted mono", style: { fontSize: "0.78rem" } }, "PID " + status.pid) : null
+      ),
+      dashStatus.model
+        ? e("div", { className: "dash-sticky-segment" },
+            e("span", { className: "muted" }, "Model"),
+            e("span", { className: "mono", style: { fontSize: "0.85rem" } }, dashStatus.model)
+          )
+        : null,
+      status.running && dashStatus.uptime_seconds != null
+        ? e("div", { className: "dash-sticky-segment" },
+            e("span", { className: "muted" }, "Uptime"),
+            e("span", null, formatUptime(dashStatus.uptime_seconds))
+          )
+        : null,
+      e("div", { className: "dash-sticky-segment", title: "LM Studio" + reachTitle(dashStatus.llm_online) },
+        e("span", { className: "status-dot " + reachClass(dashStatus.llm_online) }),
+        e("span", null, "LLM")
+      ),
+      fluxShown
+        ? e("div", { className: "dash-sticky-segment", title: "Flux server" + reachTitle(fluxOnline) },
+            e("span", { className: "status-dot " + reachClass(fluxOnline) }),
+            e("span", null, "Flux")
+          )
+        : null,
+      e("div", { className: "dash-sticky-segment", title: "Stable Diffusion backend" + reachTitle(dashStatus.sd_online) },
+        e("span", { className: "status-dot " + reachClass(dashStatus.sd_online) }),
+        e("span", null, "SD")
+      ),
+      e("div", { className: "dash-sticky-spacer" }),
+      e("div", { className: "dash-sticky-actions" },
+        e("button", {
+          disabled: busy || status.running,
+          onClick: function () { botAction("/api/bot/start"); }
+        }, "Start"),
+        e("button", {
+          className: "secondary",
+          disabled: busy || !status.running,
+          onClick: function () { botAction("/api/bot/stop"); }
+        }, "Stop"),
+        !restartConfirmOpen
+          ? e("button", {
+              disabled: busy,
+              onClick: function () { setRestartConfirmOpen(true); }
+            }, "Restart")
+          : e("span", { className: "dash-confirm" },
+              e("span", { className: "dash-confirm-prompt" }, "Restart bot?"),
+              e("button", {
+                className: "dash-confirm-yes",
+                disabled: busy,
+                onClick: function () { setRestartConfirmOpen(false); botAction("/api/bot/restart"); }
+              }, "Yes"),
+              e("button", {
+                className: "secondary",
+                onClick: function () { setRestartConfirmOpen(false); }
+              }, "Cancel")
+            ),
+        e("button", {
+          className: "secondary",
+          disabled: busy,
+          title: "Reload status, stats and activity",
+          onClick: function () { refreshStatus(); loadSummary(); loadEnvToggles(); loadActivity(); loadDatabases(); }
+        }, "Refresh")
+      )
+    );
+
     return e(
       "section",
       { className: "dash-app" },
       e(
-        "article",
-        { className: "dash-hero" },
-        e(
-          "div",
-          null,
-          e("h2", { style: { marginBottom: "0.2rem" } }, "Soupy Control Studio"),
-          e("p", { className: "dash-subtitle" }, "Faster controls, cleaner stats, and a playful database explorer.")
-        ),
-        e(
-          "div",
-          { className: "dash-nav" },
-          tabButton("overview", "Overview"),
-          tabButton("model", "Model & Personality"),
-          tabButton("stats", "Stats Studio"),
-          tabButton("archive", "Media & log"),
-          tabButton("database", "Database Explorer"),
-          e("a", { role: "button", className: "dash-tab dash-tab--link", href: "/env" }, "Environment Editor")
-        )
+        // A <div>: Pico lays out a <nav> with space-between, which spreads the tabs apart.
+        "div",
+        { className: "dash-nav", role: "navigation", "aria-label": "Dashboard sections" },
+        tabButton("overview", "Overview"),
+        tabButton("model", "Model & Personality"),
+        tabButton("stats", "Stats"),
+        tabButton("media", "Media"),
+        tabButton("database", "Database")
       ),
-      e("div", { className: noticeError ? "dash-message error" : "dash-message" }, notice),
+      statusBar,
       tab === "overview" && (function () {
-        function formatUptime(s) {
-          if (s == null) return "—";
-          var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
-          return (d > 0 ? d + "d " : "") + h + "h " + m + "m";
-        }
+        // A scheduled time as a countdown. Some timers report a phrase ("after
+        // each scan") instead of a time; those pass through as they are.
         function timeUntil(iso) {
           if (!iso) return "—";
           if (typeof iso === "string" && isNaN(Date.parse(iso))) return iso;
-          try {
-            var diff = Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 60000));
-            if (diff < 1) return "imminent";
-            if (diff < 60) return "in " + diff + "m";
-            return "in " + Math.floor(diff / 60) + "h " + (diff % 60) + "m";
-          } catch (_) { return "—"; }
+          var diff = Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 60000));
+          if (diff < 1) return "imminent";
+          if (diff < 60) return "in " + diff + "m";
+          if (diff < 1440) return "in " + Math.floor(diff / 60) + "h " + (diff % 60) + "m";
+          return "in " + Math.floor(diff / 1440) + "d " + Math.floor((diff % 1440) / 60) + "h";
         }
         function timeAgo(iso) {
           if (!iso) return "never";
-          try {
-            var ago = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-            if (ago < 1) return "just now";
-            if (ago < 60) return ago + "m ago";
-            return Math.floor(ago / 60) + "h " + (ago % 60) + "m ago";
-          } catch (_) { return "—"; }
+          var then = new Date(iso).getTime();
+          if (isNaN(then)) return "—";
+          var ago = Math.floor((Date.now() - then) / 60000);
+          if (ago < 1) return "just now";
+          if (ago < 60) return ago + "m ago";
+          if (ago < 1440) return Math.floor(ago / 60) + "h " + (ago % 60) + "m ago";
+          return Math.floor(ago / 1440) + "d ago";
         }
         function togglePill(on, onClick, disabled) {
           return e("span", {
@@ -2338,14 +1367,17 @@
               ? e("div", { className: "muted", style: { fontSize: "0.76rem" } }, opts.toggleHint)
               : null,
             e("div", { className: "dash-loop-card-meta" }, meta),
-            e("div", { className: "dash-loop-card-actions" },
-              e("button", {
-                className: "secondary",
-                disabled: !!opts.runNowDisabled,
-                title: opts.runNowTitle || null,
-                onClick: opts.runNowOnClick || null
-              }, "Run now")
-            )
+            // Loops with nothing to trigger from here get no button.
+            opts.runNowOnClick
+              ? e("div", { className: "dash-loop-card-actions" },
+                  e("button", {
+                    className: "secondary",
+                    disabled: !!opts.runNowDisabled,
+                    title: opts.runNowTitle || null,
+                    onClick: opts.runNowOnClick
+                  }, opts.runNowLabel || "Run now")
+                )
+              : null
           );
         }
         function knobToggle(key) {
@@ -2358,79 +1390,12 @@
           };
         }
 
-        var pendingTitle = "Manual trigger plumbing not yet implemented (planned).";
+        var noGuildTitle = "Pick a server under RAG below";
         var selfMemory = ((dashStatus.self_memory || {})[dbGuild]) || {};
 
-        // ---------- Band 0 — Sticky status bar ----------
-        var stickyBar = e(
-          "div",
-          { className: "dash-sticky-bar", role: "status", "aria-label": "Bot status" },
-          e("div", { className: "dash-sticky-segment" },
-            e("span", { className: "status-dot " + (status.running ? "status-on" : "status-off") }),
-            e("strong", null, status.running ? "Running" : "Stopped"),
-            status.pid ? e("span", { className: "muted mono", style: { fontSize: "0.78rem" } }, "PID " + status.pid) : null
-          ),
-          dashStatus.model
-            ? e("div", { className: "dash-sticky-segment" },
-                e("span", { className: "muted" }, "Model"),
-                e("span", { className: "mono", style: { fontSize: "0.85rem" } }, dashStatus.model)
-              )
-            : null,
-          dashStatus.uptime_seconds != null
-            ? e("div", { className: "dash-sticky-segment" },
-                e("span", { className: "muted" }, "Uptime"),
-                e("span", null, formatUptime(dashStatus.uptime_seconds))
-              )
-            : null,
-          e("div", { className: "dash-sticky-segment" },
-            e("span", { className: "status-dot " + (dashStatus.llm_online ? "status-on" : "status-off") }),
-            e("span", null, "LLM")
-          ),
-          e("div", { className: "dash-sticky-segment" },
-            e("span", { className: "status-dot " + (dashStatus.sd_online ? "status-on" : "status-off") }),
-            e("span", null, "SD")
-          ),
-          e("div", { className: "dash-sticky-spacer" }),
-          e("div", { className: "dash-sticky-actions" },
-            e("button", {
-              disabled: busy || status.running,
-              onClick: function () { botAction("/api/bot/start"); }
-            }, "Start"),
-            e("button", {
-              className: "secondary",
-              disabled: busy || !status.running,
-              onClick: function () { botAction("/api/bot/stop"); }
-            }, "Stop"),
-            !restartConfirmOpen
-              ? e("button", {
-                  disabled: busy,
-                  onClick: function () { setRestartConfirmOpen(true); }
-                }, "Restart")
-              : e("span", { className: "dash-confirm" },
-                  e("span", { className: "dash-confirm-prompt" }, "Restart bot?"),
-                  e("button", {
-                    className: "dash-confirm-yes",
-                    disabled: busy,
-                    onClick: function () { setRestartConfirmOpen(false); botAction("/api/bot/restart"); }
-                  }, "Yes"),
-                  e("button", {
-                    className: "secondary",
-                    onClick: function () { setRestartConfirmOpen(false); }
-                  }, "Cancel")
-                ),
-            e("button", {
-              className: "secondary",
-              disabled: busy,
-              onClick: function () { refreshStatus(); loadSummary(); loadEnvToggles(); loadActivity(); }
-            }, "Refresh")
-          )
-        );
-
-        // ---------- Band 1 — Live Activity + Quick Actions ----------
+        // ---------- Band 1 — Live Activity ----------
         var bandLive = e(
-          "div",
-          { className: "dash-band-live" },
-          e("article", null,
+          "article", { className: "dash-band-live" },
             e("div", { className: "logs-header" },
               e("h4", { style: { marginTop: 0, marginBottom: 0 } }, "Live Activity"),
               (function () {
@@ -2496,32 +1461,91 @@
                   "Showing " + filteredLogs.length + " of " + logs.length + " line(s)")
               : null,
             e("div", { className: "dash-log mono", ref: logRef }, filteredLogs.join("\n"))
-          ),
-          e("article", { className: "dash-quick-card" },
-            e("h4", null, "Quick Actions"),
-            e("p", { className: "muted", style: { marginTop: 0, fontSize: "0.85rem" } },
-              "Manual triggers — backend wiring lands in workstream 2; buttons activate then."),
-            e("div", { className: "dash-quick-grid" },
-              [
-                ["Post a daily article", "uses the daily-post pipeline"],
-                ["Drop a musing", "thinks out loud in the musing channel"],
-                ["Bluesky: reply", "find a post and reply once"],
-                ["Bluesky: quote-post", "quote-share something interesting"],
-                ["Bluesky: original post", "find an article and post about it"],
-                ["Run archive scan", "scan recent messages now"]
-              ].map(function (pair, idx) {
-                return e("button", {
-                  key: idx,
-                  className: "secondary",
-                  disabled: true,
-                  title: pendingTitle
-                }, pair[0],
-                  e("span", { className: "dash-quick-sub" }, pair[1])
-                );
-              })
-            )
-          )
         );
+
+        // ---------- Flux server card (joins the loops grid) ----------
+        // Only with FLUX_ENABLED on. The panel can start and stop its own
+        // server; one started by hand is shown and left alone.
+        var fluxCard = null;
+        if (fluxStatus.enabled) {
+          var fluxState = fluxStatus.external ? "Running, started outside the panel"
+            : fluxStatus.running && fluxStatus.reachable ? "Running"
+            : fluxStatus.running ? "Starting…"
+            // An exit nobody asked for: say how it ended. The reason is in the log.
+            : fluxStatus.returncode && !fluxStatus.stopped_by_panel
+              ? "Stopped on its own (exit code " + fluxStatus.returncode + ")"
+            : "Stopped";
+          var fluxModelLine = function (name, loaded) {
+            return name ? name + (loaded ? " (loaded)" : " (loads on first use)") : "—";
+          };
+          var fluxMeta = [
+            e("span", { key: "sl", className: "dash-loop-card-meta-label" }, "State:"),
+            e("span", { key: "sv" }, fluxState)
+          ];
+          if (fluxStatus.reachable) {
+            fluxMeta.push(e("span", { key: "ml", className: "dash-loop-card-meta-label" }, "Model:"));
+            fluxMeta.push(e("span", { key: "mv" }, fluxModelLine(fluxStatus.model, fluxStatus.loaded)));
+            fluxMeta.push(e("span", { key: "el", className: "dash-loop-card-meta-label" }, "Edit model:"));
+            fluxMeta.push(e("span", { key: "ev" }, fluxModelLine(fluxStatus.edit_model, fluxStatus.edit_loaded)));
+          }
+          if (fluxStatus.running && fluxStatus.start_time) {
+            fluxMeta.push(e("span", { key: "ul", className: "dash-loop-card-meta-label" }, "Started:"));
+            fluxMeta.push(e("span", { key: "uv" }, timeAgo(fluxStatus.start_time)));
+          }
+          fluxCard = e("div", { key: "flux-server", className: "dash-loop-card" },
+            e("div", { className: "dash-loop-card-header" },
+              e("h5", { className: "dash-loop-card-title" }, "Flux server"),
+              e("span", { className: "status-dot " + reachClass(fluxStatus.reachable), title: "Flux server" + reachTitle(fluxStatus.reachable) })
+            ),
+            e("div", { className: "muted", style: { fontSize: "0.76rem" } },
+              fluxStatus.external
+                ? "Stop it in the terminal it was started in. The panel only stops a server it started."
+                : fluxStatus.autostart
+                  ? "Starts with the panel (FLUX_SERVER_AUTOSTART)."
+                  : "Set FLUX_SERVER_AUTOSTART=true to start it with the panel."),
+            e("div", { className: "dash-loop-card-meta" }, fluxMeta),
+            e("div", { className: "dash-loop-card-actions" },
+              e("button", {
+                disabled: fluxBusy || fluxStatus.running || fluxStatus.reachable,
+                onClick: function () { fluxAction("start"); }
+              }, "Start"),
+              e("button", {
+                className: "secondary",
+                disabled: fluxBusy || !fluxStatus.running,
+                onClick: function () { fluxAction("stop"); }
+              }, "Stop"),
+              e("button", {
+                className: "secondary",
+                disabled: fluxBusy || !fluxStatus.running,
+                title: "Picks up a change to FLUX_* settings or to flux_server.py",
+                onClick: function () { fluxAction("restart"); }
+              }, "Restart"),
+              e("button", {
+                className: "secondary",
+                title: "The server's output since the panel started. The whole log is logs/flux_server.log.",
+                onClick: function () {
+                  fluxLogOpenRef.current = !fluxLog;
+                  if (fluxLog) setFluxLog(null); else loadFluxLog();
+                }
+              }, fluxLog ? "Hide log" : "Show log")
+            ),
+            fluxLog
+              ? e("div", {
+                  className: "dash-log mono",
+                  style: { maxHeight: "14rem", marginTop: "0.5rem", fontSize: "0.72rem" },
+                  // Newest lines are at the bottom: go there when the log changes.
+                  ref: function (el) {
+                    var mark = fluxLog.length + ":" + (fluxLog[fluxLog.length - 1] || "");
+                    if (el && el.getAttribute("data-shown") !== mark) {
+                      el.setAttribute("data-shown", mark);
+                      el.scrollTop = el.scrollHeight;
+                    }
+                  }
+                },
+                  fluxLog.length ? fluxLog.join("\n") : "Nothing yet. The panel only has the output of a server it started.")
+              : null
+          );
+        }
 
         // ---------- Band 2 — Loops grid ----------
         var timers = dashStatus.timers || {};
@@ -2550,9 +1574,7 @@
             nextRunIso: (timers.daily_post || {}).next_run,
             lastRunIso: (timers.daily_post || {}).last_run,
             intervalLabel: (timers.daily_post || {}).interval || null,
-            todayLine: dailyPostsToday + " / 2 posts",
-            runNowDisabled: true,
-            runNowTitle: pendingTitle
+            todayLine: dailyPostsToday + " / 2 posts"
           }),
           loopCard({
             key: "loop-bluesky",
@@ -2563,11 +1585,9 @@
             nextRunIso: (timers.bluesky || {}).next_run,
             lastRunIso: (timers.bluesky || {}).last_run,
             intervalLabel: (timers.bluesky || {}).interval || null,
-            todayLine: (bskyAct.replies_today || 0) + " replies · "
-                     + (bskyAct.posts_today || 0) + " posts · "
-                     + (bskyAct.reposts_today || 0) + " reposts",
-            runNowDisabled: true,
-            runNowTitle: pendingTitle
+            todayLine: D.plural(bskyAct.replies_today || 0, "reply", "replies") + " · "
+                     + D.plural(bskyAct.posts_today || 0, "post") + " · "
+                     + D.plural(bskyAct.reposts_today || 0, "repost")
           }),
           loopCard({
             key: "loop-archive-scan",
@@ -2577,8 +1597,9 @@
             lastRunIso: (timers.archive_scan || {}).last_run,
             intervalLabel: (timers.archive_scan || {}).interval || null,
             todayLine: null,
-            runNowDisabled: true,
-            runNowTitle: pendingTitle
+            runNowDisabled: !dbGuild || !status.running || busy,
+            runNowOnClick: triggerScan,
+            runNowTitle: !dbGuild ? noGuildTitle : !status.running ? "Start the bot first" : null
           }),
           loopCard({
             key: "loop-rag-reindex",
@@ -2592,7 +1613,7 @@
               : null,
             runNowDisabled: !dbGuild || !(dbStatus.databases || []).length || busy,
             runNowOnClick: rebuildRagIndex,
-            runNowTitle: !dbGuild ? "Pick a guild in Knobs → RAG" : null
+            runNowTitle: !dbGuild ? noGuildTitle : null
           }),
           loopCard({
             key: "loop-self-memory",
@@ -2610,7 +1631,7 @@
                 : "not built yet",
             runNowDisabled: !dbGuild || busy,
             runNowOnClick: refreshSelfMemory,
-            runNowTitle: !dbGuild ? "Pick a guild in Knobs → RAG" : "Queue a refresh; the bot runs it between profile members"
+            runNowTitle: !dbGuild ? noGuildTitle : "Queue a refresh; the bot runs it between profile members"
           }),
           loopCard({
             key: "loop-profile-nightly",
@@ -2623,8 +1644,9 @@
             intervalLabel: (timers.profile_nightly || {}).interval || null,
             todayLine: null,
             runNowDisabled: !dbGuild,
-            runNowOnClick: function () { setTab("database"); },
-            runNowTitle: !dbGuild ? "Pick a guild in Knobs → RAG" : "Open Database → Profile batch"
+            runNowLabel: "Open the profile job →",
+            runNowOnClick: function () { navigate("database", "maintenance"); },
+            runNowTitle: !dbGuild ? noGuildTitle : null
           }),
           loopCard({
             key: "loop-musings",
@@ -2635,10 +1657,9 @@
             nextRunIso: (timers.musings || {}).next_run,
             lastRunIso: (timers.musings || {}).last_run,
             intervalLabel: (timers.musings || {}).interval || null,
-            todayLine: MUSING_STATUS_LABELS[(timers.musings || {}).last_status] || null,
-            runNowDisabled: true,
-            runNowTitle: pendingTitle
-          })
+            todayLine: MUSING_STATUS_LABELS[(timers.musings || {}).last_status] || null
+          }),
+          fluxCard
         );
 
         // ---------- Band 3 — Snapshot stats ----------
@@ -2671,11 +1692,42 @@
             e("span", { className: "dash-snapshot-kpi-value" }, fmtNum(summary ? summary.last30d_messages || 0 : 0))
           ),
           e("div", { className: "dash-snapshot-link" },
-            e("button", { className: "secondary", onClick: function () { setTab("stats"); } }, "Open Stats Studio →")
+            e("button", { className: "secondary", onClick: function () { setTab("stats"); } }, "All stats →")
           )
         );
 
         // ---------- Band 4 — Knobs accordion ----------
+        // time_awareness is on unless the flags file says false, so "not loaded yet" reads as on.
+        var timeKnobBody = e("div", null,
+          e("p", { className: "muted", style: { marginTop: 0 } },
+            "When enabled, Soupy knows the current date and time (TIMEZONE) in chat, and how long ago older ",
+            "chat history and memories were. On by default; takes effect on the next reply."),
+          e("label", { style: { display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" } },
+            e("input", {
+              type: "checkbox",
+              checked: runtimeFlags.time_awareness !== false,
+              disabled: busy,
+              onChange: function (ev) {
+                var v = !!ev.target.checked;
+                setBusy(true);
+                setNoticeError(false);
+                readJson("/api/runtime-flags", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ time_awareness: v })
+                })
+                  .then(function (data) {
+                    setRuntimeFlags(data || Object.assign({}, runtimeFlags, { time_awareness: v }));
+                    setNotice(v ? "Time awareness enabled." : "Time awareness disabled.");
+                  })
+                  .catch(function (err) { setNotice("Failed to save: " + err.message); setNoticeError(true); })
+                  .finally(function () { setBusy(false); });
+              }
+            }),
+            e("span", null, "Enable time awareness in chat replies")
+          )
+        );
+
         var ragKnobBody = e("div", null,
           e("p", { className: "muted", style: { marginTop: 0 } },
             "When enabled, every reply in a server uses the scanned message database for context (no trigger word). ",
@@ -2705,14 +1757,14 @@
             e("span", null, "Enable RAG (all server replies; WebUI master switch)")
           ),
           e("div", { className: "dash-field", style: { marginTop: "0.75rem" } },
-            e("label", null, "Guild for index"),
+            e("label", null, "Server"),
             e("select", {
               value: dbGuild,
               onChange: function (ev) { setDbGuild(ev.target.value); }
             },
               (dbStatus.databases || []).length
                 ? (dbStatus.databases || []).map(function (d) {
-                    return e("option", { key: d.guild_id, value: d.guild_id }, (d.guild_name || "Guild") + " (" + d.guild_id + ")");
+                    return e("option", { key: d.guild_id, value: d.guild_id }, d.guild_name || "Server " + d.guild_id);
                   })
                 : [e("option", { key: "_", value: "" }, "No databases — run /soupyscan first")]
             )
@@ -2723,17 +1775,15 @@
                 e("span", { className: "mono" }, fmtNum(ragStatus.rag_chunks || 0)),
                 " · Messages in DB: ",
                 e("span", { className: "mono" }, fmtNum(ragStatus.total_messages || 0)))
-            : e("p", { className: "muted" }, "Select a guild to see RAG index status."),
+            : e("p", { className: "muted" }, "Pick a server to see its index."),
           profileStatus && profileStatus.ok
             ? e("p", { className: "muted", style: { marginBottom: "0.5rem" } },
                 "Stored member profiles: ",
                 e("span", { className: "mono" }, fmtNum(profileStatus.profile_count || 0)),
                 profileStatus.latest_updated_at
-                  ? e("span", null, " · Last profile update: ", e("span", { className: "mono" }, String(profileStatus.latest_updated_at)))
+                  ? e("span", null, " · Last profile update: ", D.timeAgo(profileStatus.latest_updated_at))
                   : null)
-            : dbGuild && (dbStatus.databases || []).length
-              ? e("p", { className: "muted", style: { marginBottom: "0.5rem" } }, "Member profiles: use Database tab → Profile batch.")
-              : null,
+            : null,
           e("div", { className: "dash-controls", style: { flexWrap: "wrap", gap: "0.5rem" } },
             e("button", {
               className: "secondary",
@@ -2743,8 +1793,8 @@
             e("button", {
               className: "secondary",
               disabled: !dbGuild || !(dbStatus.databases || []).length,
-              onClick: function () { setTab("database"); }
-            }, "Database → profile batch")
+              onClick: function () { navigate("database", "profiles"); }
+            }, "Read the profiles →")
           ),
           e("p", { className: "muted", style: { marginTop: "0.5rem", fontSize: "0.88rem" } },
             "Set ", e("span", { className: "mono" }, "RAG_EMBEDDING_MODEL"),
@@ -3183,7 +2233,7 @@
           { className: "dash-knobs" },
           e("div", { className: "dash-knob" },
             e("div", {
-              className: "dash-knob-header",
+              className: "dash-plain dash-knob-header",
               role: "button",
               tabIndex: 0,
               "aria-expanded": overviewKnobs.commands ? "true" : "false",
@@ -3191,7 +2241,7 @@
               onKeyDown: function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); knobToggle("commands")(); } }
             },
               e("span", null, "Slash Commands"),
-              e("span", { className: "dash-knob-chevron" }, "▶")
+              e("span", { className: "dash-knob-chevron", "aria-hidden": "true" }, "›")
             ),
             overviewKnobs.commands
               ? e("div", { className: "dash-knob-body" }, slashCommandsBody)
@@ -3199,7 +2249,7 @@
           ),
           e("div", { className: "dash-knob" },
             e("div", {
-              className: "dash-knob-header",
+              className: "dash-plain dash-knob-header",
               role: "button",
               tabIndex: 0,
               "aria-expanded": overviewKnobs.rag ? "true" : "false",
@@ -3207,7 +2257,7 @@
               onKeyDown: function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); knobToggle("rag")(); } }
             },
               e("span", null, "RAG (archived messages)"),
-              e("span", { className: "dash-knob-chevron" }, "▶")
+              e("span", { className: "dash-knob-chevron", "aria-hidden": "true" }, "›")
             ),
             overviewKnobs.rag
               ? e("div", { className: "dash-knob-body" }, ragKnobBody)
@@ -3215,1000 +2265,76 @@
           ),
           e("div", { className: "dash-knob" },
             e("div", {
-              className: "dash-knob-link",
+              className: "dash-plain dash-knob-header",
               role: "button",
               tabIndex: 0,
-              onClick: function () { setTab("model"); },
-              onKeyDown: function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setTab("model"); } }
+              "aria-expanded": overviewKnobs.time ? "true" : "false",
+              onClick: knobToggle("time"),
+              onKeyDown: function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); knobToggle("time")(); } }
             },
-              e("span", null, "Model & Personality"),
-              e("span", { className: "dash-knob-link-arrow" }, "→")
-            )
+              e("span", null, "Time awareness"),
+              e("span", { className: "dash-knob-chevron", "aria-hidden": "true" }, "›")
+            ),
+            overviewKnobs.time
+              ? e("div", { className: "dash-knob-body" }, timeKnobBody)
+              : null
           ),
-          e("div", { className: "dash-knob" },
-            e("div", {
-              className: "dash-knob-link",
-              role: "button",
-              tabIndex: 0,
-              onClick: function () { setTab("database"); },
-              onKeyDown: function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); setTab("database"); } }
-            },
-              e("span", null, "Database & Archive"),
-              e("span", { className: "dash-knob-link-arrow" }, "→")
-            )
-          )
         );
 
         return e(
           React.Fragment,
           null,
-          stickyBar,
           bandLive,
           bandLoops,
           bandSnapshot,
           bandKnobs
         );
       })(),
-      tab === "model" &&
-        e(
-          "section",
-          { className: "dash-app" },
-          e(
-            "div",
-            { className: "dash-grid-2-equal" },
-            e(
-              "article",
-              null,
-              e("h4", { style: { marginTop: 0 } }, "LLM Model Selection"),
-              e(
-                "div",
-                { className: "dash-field" },
-                e("label", null, "Find model"),
-                e("input", {
-                  placeholder: "Type to filter models...",
-                  value: modelQuery,
-                  onChange: function (ev) {
-                    setModelQuery(ev.target.value);
-                  },
-                }),
-                e("label", null, "Chat model"),
-                e(
-                  "select",
-                  {
-                    value: selectedModel,
-                    onChange: function (ev) {
-                      setSelectedModel(ev.target.value);
-                    },
-                  },
-                  filteredModels.map(function (m) {
-                    var label = (window._lmModelLabels && window._lmModelLabels[m]) || m;
-                    return e("option", { key: m, value: m }, label);
-                  })
-                ),
-                e("label", { style: { marginTop: "0.5rem" } }, "Context window (tokens)"),
-                e("input", {
-                  type: "number",
-                  min: "1024",
-                  max: "131072",
-                  step: "1024",
-                  value: contextWindowSize,
-                  onChange: function (ev) {
-                    setContextWindowSize(ev.target.value);
-                  },
-                  style: { width: "8rem" },
-                }),
-              ),
-              e("p", { className: "muted" }, "Switching models will unload the current model in LM Studio and load the new one with the specified context window."),
-              e(
-                "button",
-                {
-                  disabled: busy || !selectedModel,
-                  onClick: async function () {
-                    setBusy(true);
-                    setNotice("");
-                    setNoticeError(false);
-                    try {
-                      // Step 1: Tell LM Studio to unload old model and load new one
-                      // Step 1: Try to tell LM Studio to switch models
-                      var lmSwitchOk = false;
-                      var lmMessage = "";
-                      try {
-                        var resp = await fetch("/api/lm-studio/switch-model", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            model: selectedModel,
-                            context_length: parseInt(contextWindowSize, 10) || 16000,
-                          }),
-                        });
-                        var result = await resp.json();
-                        lmSwitchOk = result.ok;
-                        lmMessage = result.message || "";
-                      } catch (lmErr) {
-                        lmMessage = lmErr.message;
-                      }
-
-                      // Step 2: ALWAYS update .env-stable and restart bot, even if LM Studio call failed
-                      await fetch("/api/env/save", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          LOCAL_CHAT: selectedModel,
-                          CONTEXT_WINDOW_TOKENS: contextWindowSize,
-                        }),
-                      });
-                      await fetch("/api/bot/restart", { method: "POST" });
-
-                      if (lmSwitchOk) {
-                        setNotice("Loaded " + selectedModel + " (" + contextWindowSize + " ctx) and restarted bot.");
-                      } else {
-                        setNotice("Bot restarted with " + selectedModel + ". LM Studio auto-load note: " + lmMessage);
-                        setNoticeError(true);
-                      }
-                      await loadEnv();
-                    } catch (err) {
-                      setNotice("Model switch failed: " + err.message);
-                      setNoticeError(true);
-                    } finally {
-                      setBusy(false);
-                    }
-                  },
-                },
-                busy ? "Switching model..." : "Switch model + restart"
-              )
-            ),
-            e(
-              "article",
-              null,
-              e("h4", { style: { marginTop: 0 } }, "Model Catalog"),
-              e(
-                "div",
-                { className: "dash-field" },
-                e("label", null, "AVAILABLE_MODELS (one per line)"),
-                e("textarea", {
-                  value: modelCatalogDraft,
-                  onChange: function (ev) {
-                    setModelCatalogDraft(ev.target.value);
-                  },
-                  placeholder: "llama3.1:8b\nmistral:latest\nqwen2.5:14b",
-                })
-              ),
-              e(
-                "div",
-                { className: "dash-controls" },
-                e(
-                  "button",
-                  { disabled: busy, onClick: fetchLMStudioModels },
-                  busy ? "Fetching..." : "Fetch from LM Studio"
-                ),
-                e(
-                  "button",
-                  { className: "secondary", disabled: busy, onClick: function () { setModelCatalogDraft(models.join("\n")); } },
-                  "Reset to current list"
-                ),
-                e(
-                  "button",
-                  { disabled: busy, onClick: saveAvailableModels },
-                  busy ? "Saving..." : "Save catalog + restart"
-                )
-              )
-            )
-          ),
-          e(
-            "article",
-            { className: "personality-panel" },
-            e("h4", { style: { marginTop: 0 } }, "Personality"),
-            e(
-              "p",
-              { className: "muted", style: { marginTop: 0 } },
-              "Edit the ",
-              e("span", { className: "mono" }, "BEHAVIOUR"),
-              " system prompt or the ",
-              e("span", { className: "mono" }, "BEHAVIOUR_SEARCH"),
-              " search prompt below. Prompts live in ",
-              e("span", { className: "mono" }, "prompts/<name>.txt"),
-              " (loader falls back to legacy env vars and shipped defaults). Auto-format on load; ",
-              e("span", { className: "mono" }, "Load raw"),
-              " shows the file as stored."
-            ),
-            e(
-              "div",
-              { className: "personality-toolbar dash-controls" },
-              e(
-                "div",
-                { className: "dash-field", style: { marginBottom: 0, flex: "1 1 220px", minWidth: "min(100%, 280px)" } },
-                e("label", { htmlFor: "personality-select" }, "Prompt to edit"),
-                e(
-                  "select",
-                  {
-                    id: "personality-select",
-                    value: preset,
-                    disabled: !personalityOptions.length,
-                    onChange: function (ev) {
-                      var val = ev.target.value;
-                      setPreset(val);
-                      setPersonalityText(getPresetValueFormatted(val));
-                    },
-                  },
-                  personalityOptions.length
-                    ? personalityOptions.map(function (opt) {
-                        return e(
-                          "option",
-                          { key: opt.key, value: opt.key },
-                          opt.label + " — " + opt.key
-                        );
-                      })
-                    : e("option", { value: "" }, "No named presets — add one")
-                )
-              ),
-              e(
-                "button",
-                {
-                  type: "button",
-                  className: "secondary",
-                  disabled: busy,
-                  onClick: function () {
-                    loadEnv();
-                    loadPrompts();
-                    setNotice("Reloaded from disk");
-                    setNoticeError(false);
-                  },
-                },
-                "Reload"
-              )
-            ),
-            e(
-              "p",
-              { className: "muted mono", style: { margin: "0.35rem 0 0.5rem" } },
-              "Source: " + (presetSourceLabel(preset) || "—")
-            ),
-            e(
-              "div",
-              { className: "dash-field" },
-              e("label", { htmlFor: "personality-body" }, "Behaviour text"),
-              e("textarea", {
-                id: "personality-body",
-                className: "personality-editor",
-                disabled: !personalityOptions.length,
-                value: personalityText,
-                onChange: function (ev) {
-                  setPersonalityText(normalizeLineEndings(ev.target.value));
-                },
-                placeholder:
-                  "Sections, list numbers, and long ALL-CAPS headers are broken apart for you on load. Edit freely, then Save.",
-              })
-            ),
-            e(
-              "div",
-              { className: "muted" },
-              fmtNum(personalityText.split("\n").length),
-              " lines · ",
-              fmtNum(personalityText.length),
-              " characters"
-            ),
-            e(
-              "div",
-              { className: "dash-controls", style: { marginTop: "0.65rem" } },
-              e(
-                "button",
-                {
-                  type: "button",
-                  className: "secondary",
-                  disabled: busy,
-                  onClick: function () {
-                    setPersonalityText(getPresetValueFormatted(preset));
-                  },
-                },
-                "Revert to saved (formatted)"
-              ),
-              e(
-                "button",
-                {
-                  type: "button",
-                  className: "secondary",
-                  disabled: busy,
-                  onClick: function () {
-                    setPersonalityText(getPresetValueRaw(preset));
-                  },
-                },
-                "Load raw from file"
-              ),
-              e(
-                "button",
-                {
-                  type: "button",
-                  className: "secondary",
-                  disabled: busy,
-                  onClick: function () {
-                    setPersonalityText(formatBehaviourForEditor(personalityText));
-                  },
-                },
-                "Re-tidy editor"
-              ),
-              e(
-                "button",
-                {
-                  type: "button",
-                  className: "secondary",
-                  disabled: busy,
-                  onClick: function () {
-                    savePrompt(
-                      preset,
-                      personalityText,
-                      false,
-                      preset + " saved to prompts/" + promptNameFor(preset) + ".txt (bot not restarted)."
-                    );
-                  },
-                },
-                busy ? "Saving..." : "Save to file"
-              ),
-              e(
-                "button",
-                {
-                  type: "button",
-                  disabled: busy,
-                  onClick: function () {
-                    savePrompt(
-                      preset,
-                      personalityText,
-                      true,
-                      titleFromPersonalityKey(preset) + " saved; bot restarted."
-                    );
-                  },
-                },
-                busy ? "Saving..." : "Save + restart bot"
-              ),
-            )
-          )
-        ),
+      e(D.ModelTab, {
+        active: tab === "model",
+        botRunning: !!status.running,
+        botStartedAt: status.start_time,
+        botModel: dashStatus.model,
+        busy: busy,
+        onBusy: setBusy,
+        notify: notify,
+        confirm: confirm,
+        onStatus: setStatus,
+        onRefreshStatus: refreshStatus,
+      }),
       tab === "stats" &&
         e(StatsStudio, {
           summary: summary,
           active: tab === "stats",
           onReload: loadSummary,
         }),
-      tab === "archive" && e(MediaArchiveTab, { active: tab === "archive" }),
-      tab === "database" &&
-        e(
-          "div",
-          { className: "database-tab-stack" },
-          e(
-            "article",
-            null,
-            e("h4", { style: { marginTop: 0 } }, "Profile batch"),
-            e(
-              "p",
-              { className: "muted", style: { maxWidth: "52rem", marginTop: "0.35rem" } },
-              "Builds dated member profiles (personality, what's going on lately, how they treat Soupy, family, work, opinions, ",
-              e("strong", null, "relationships with other members"),
-              " and more) from the archive. The bot runs the job one saved pass at a time and never alongside a chat reply, so Pause and Cancel take effect after the current pass and Resume picks up where it stopped. Profiles in the old format are rebuilt from scratch (the old rows are kept in ",
-              e("span", { className: "mono" }, "user_profile_summaries_v1"),
-              "). A nightly refresh keeps them current."
-            ),
-            e(
-              "p",
-              { className: "muted", style: { fontSize: "0.88rem" } },
-              "Guild: ",
-              dbGuild ? e("span", { className: "mono" }, dbGuild) : e("span", null, "choose in Database Explorer below.")
-            ),
-            profBatchStatus && profBatchStatus.ok
-              ? e(
-                  "div",
-                  { className: "profile-batch-status-bar" },
-                  e(
-                    "span",
-                    {
-                      className:
-                        "profile-batch-status-chip" +
-                        (profBatchStatus.task_running || profBatchStatus.status === "running"
-                          ? " profile-batch-status-chip-live"
-                          : profBatchStatus.status === "paused"
-                            ? " profile-batch-status-chip-paused"
-                            : ""),
-                    },
-                    String(profBatchStatus.status || "—")
-                  ),
-                  e(
-                    "span",
-                    { className: "profile-batch-status-meta" },
-                    (function () {
-                      var t = profBatchStatus.total || 0;
-                      var ni = profBatchStatus.next_index != null ? Number(profBatchStatus.next_index) : 0;
-                      var bs = profBatchStatus.batch_stats || {};
-                      var saved = bs.saved != null ? Number(bs.saved) : null;
-                      var skipped = bs.skipped != null ? Number(bs.skipped) : null;
-                      var failed = bs.failed != null ? Number(bs.failed) : null;
-                      var prc =
-                        typeof profBatchStatus.profile_row_count === "number"
-                          ? profBatchStatus.profile_row_count
-                          : null;
-                      var parts = [];
-                      parts.push("queue " + fmtNum(ni) + " / " + fmtNum(t) + " (candidates visited)");
-                      if (prc !== null && !Number.isNaN(prc)) {
-                        parts.push(fmtNum(prc) + " row(s) in user_profile_summaries");
-                      }
-                      if (
-                        profBatchStatus.batch_stats &&
-                        saved !== null &&
-                        skipped !== null &&
-                        failed !== null &&
-                        !Number.isNaN(saved + skipped + failed)
-                      ) {
-                        parts.push(
-                          "this run: " +
-                            fmtNum(saved) +
-                            " saved · " +
-                            fmtNum(skipped) +
-                            " skipped · " +
-                            fmtNum(failed) +
-                            " failed"
-                        );
-                      }
-                      if (profBatchStatus.kind && profBatchStatus.kind !== "manual") {
-                        parts.unshift(profBatchStatus.kind + " run");
-                      }
-                      return (
-                        parts.join(" · ") +
-                        (!status.running && profBatchStatus.status === "running"
-                          ? " · the bot is stopped, so this job is on hold"
-                          : profBatchStatus.task_running
-                            ? " · worker running"
-                            : profBatchStatus.waiting_for_bot
-                              ? " · queued; the bot picks it up when it's free (it runs one guild's job at a time)"
-                              : "")
-                      );
-                    })()
-                  )
-                )
-              : null,
-            e(
-              "p",
-              { className: "muted", style: { fontSize: "0.8rem", marginTop: "0.35rem" } },
-              "Log refresh: about every ",
-              e("strong", null, "12s"),
-              " while a job is active, ",
-              e("strong", null, "2 min"),
-              " when idle — so the server log stays quiet."
-            ),
-            e(
-              "div",
-              { className: "dash-controls", style: { flexWrap: "wrap", gap: "0.5rem", marginTop: "0.5rem" } },
-              e(
-                "button",
-                {
-                  className: "secondary",
-                  disabled: !dbGuild || busy,
-                  onClick: profileResetAll,
-                },
-                "Delete all profiles"
-              ),
-              e(
-                "button",
-                { disabled: !dbGuild || busy, onClick: profileBatchStart },
-                "Start batch"
-              ),
-              e(
-                "button",
-                { className: "secondary", disabled: !dbGuild, onClick: profileBatchPause },
-                "Pause"
-              ),
-              e(
-                "button",
-                { className: "secondary", disabled: !dbGuild, onClick: profileBatchResume },
-                "Resume"
-              ),
-              e(
-                "button",
-                { className: "secondary", disabled: !dbGuild, onClick: profileBatchCancel },
-                "Cancel worker"
-              )
-            ),
-            e(
-              "p",
-              { className: "muted", style: { fontSize: "0.82rem", marginTop: "0.35rem" } },
-              e("span", { className: "mono" }, "USER_PROFILES_BATCH_MAX_USERS"),
-              ", ",
-              e("span", { className: "mono" }, "USER_PROFILE_PASS_MAX_MESSAGES"),
-              ", ",
-              e("span", { className: "mono" }, "USER_PROFILE_NIGHTLY_HOUR"),
-              ", ",
-              e("span", { className: "mono" }, "USER_PROFILE_CONTEXT_SAFETY"),
-              " — see ",
-              e("span", { className: "mono" }, ".env-stable"),
-              "."
-            ),
-            e(
-              "div",
-              { className: "profile-batch-console" },
-              e(
-                "div",
-                { className: "profile-batch-console-head" },
-                e("span", { className: "profile-batch-console-title" }, "Activity log"),
-                e(
-                  "span",
-                  { className: "profile-batch-console-sub" },
-                  "newest at bottom · auto-scroll"
-                )
-              ),
-              e(
-                "div",
-                {
-                  ref: profBatchLogRef,
-                  className: "profile-batch-console-body mono",
-                  role: "log",
-                  "aria-live": "polite",
-                  "aria-relevant": "additions",
-                },
-                (profBatchLogLines || []).length
-                  ? (profBatchLogLines || []).map(function (ln, i) {
-                      return profileBatchLogLineRow(ln, i);
-                    })
-                  : e(
-                      "div",
-                      { className: "profile-batch-console-empty" },
-                      "Start a batch to see step-by-step progress: reading messages in passes, calling LOCAL_CHAT, saving after each pass."
-                    )
-              )
-            )
-          ),
-          e(
-            "article",
-            null,
-            e("h4", { style: { marginTop: 0 } }, "Database Explorer"),
-          e(
-            "div",
-            { className: "db-toolbar" },
-            e("div", { className: "dash-field" }, e("label", null, "Server"), e(
-              "select",
-              {
-                value: dbGuild,
-                onChange: function (ev) { setDbGuild(ev.target.value); },
-              },
-              e("option", { value: "" }, "Choose a server"),
-              (dbStatus.databases || []).map(function (d) {
-                const label = (d.guild_name || "Guild") + " (" + d.guild_id + ")";
-                return e("option", { key: d.guild_id, value: d.guild_id }, label);
-              })
-            )),
-            e("div", { className: "dash-field" }, e("label", null, "Table"), e(
-              "select",
-              { value: dbTable, onChange: function (ev) { setDbTable(ev.target.value); } },
-              e("option", { value: "messages" }, "messages"),
-              e("option", { value: "scan_metadata" }, "scan_metadata")
-            )),
-            e("div", { className: "dash-field" }, e("label", null, "Search"), e("input", { value: dbSearch, placeholder: "content, channel, user", onChange: function (ev) { setDbSearch(ev.target.value); } })),
-            e("div", { className: "dash-field" }, e("label", null, "Channel ID"), e("input", { value: dbChannel, placeholder: "optional", onChange: function (ev) { setDbChannel(ev.target.value); } })),
-            e("div", { className: "dash-field" }, e("label", null, "Pick user"), e(
-              "select",
-              {
-                value: pickerSelectValue(dbPickerUsers, dbUser),
-                onChange: function (ev) {
-                  setDbUser(ev.target.value);
-                },
-                disabled: !dbGuild || dbTable !== "messages",
-              },
-              e(
-                "option",
-                { value: "" },
-                !dbGuild
-                  ? "Choose a server first"
-                  : dbTable !== "messages"
-                    ? "Only for messages table"
-                    : "— anyone —"
-              ),
-              dbPickerUsers.map(function (u) {
-                return e(
-                  "option",
-                  { key: "arch-" + u.user_id, value: String(u.user_id) },
-                  u.label + " · " + String(u.user_id) + " · " + fmtNum(u.message_count) + " msgs"
-                );
-              })
-            )),
-            e("div", { className: "dash-field" }, e("label", null, "User ID"), e("input", { value: dbUser, placeholder: "optional, or pick above", onChange: function (ev) { setDbUser(ev.target.value); } })),
-            e("div", { className: "dash-field" }, e("label", null, "Rows"), e(
-              "select",
-              {
-                value: String(dbLimit),
-                onChange: function (ev) { setDbLimit(Number(ev.target.value || 50)); },
-              },
-              [25, 50, 100, 200].map(function (n) {
-                return e("option", { key: n, value: String(n) }, String(n));
-              })
-            ))
-          ),
-          e(
-            "div",
-            { className: "db-switches", style: { marginBottom: "0.5rem" } },
-            e("label", null, e("input", { type: "checkbox", checked: dbHasImages, onChange: function () { setDbHasImages(!dbHasImages); } }), " with image descriptions"),
-            e("label", null, e("input", { type: "checkbox", checked: dbHasUrls, onChange: function () { setDbHasUrls(!dbHasUrls); } }), " with URL summaries")
-          ),
-          e(
-            "div",
-            { className: "dash-controls", style: { flexWrap: "wrap", gap: "0.5rem", alignItems: "center" } },
-            e("button", { onClick: function () { loadRows(0); } }, "Load rows"),
-            e("button", { className: "secondary", onClick: function () { loadRows(Math.max(0, dbOffset - dbLimit)); } }, "Prev"),
-            e("button", { className: "secondary", onClick: function () { if (dbOffset + dbLimit < dbTotal) loadRows(dbOffset + dbLimit); } }, "Next"),
-            e("button", { className: "secondary", onClick: triggerScan }, "Run incremental scan")
-          ),
-          e(
-            "div",
-            {
-              className: "dash-controls",
-              style: { marginTop: "0.65rem", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" },
-            },
-            e(
-              "label",
-              { style: { display: "flex", alignItems: "center", gap: "0.4rem" } },
-              "Auto archive every",
-              e("input", {
-                type: "number",
-                min: 0,
-                max: 10080,
-                step: 1,
-                style: { width: "5rem" },
-                value: archiveScanMinutes,
-                onChange: function (ev) {
-                  setArchiveScanMinutes(ev.target.value);
-                },
-              }),
-              e("span", { className: "muted" }, "minutes (0 = off). Example: 60 ≈ hourly. RAG rebuilds after each scan.")
-            ),
-            e("button", { className: "secondary", disabled: !dbGuild, onClick: saveArchiveSchedule }, "Save schedule")
-          ),
-          (function () {
-            var msg = String(dbInfo || "");
-            var kind = "info";
-            if (/^Loading/i.test(msg)) kind = "loading";
-            else if (/^Failed/i.test(msg)) kind = "error";
-            else if (/^No\s|^Showing\s0\b/i.test(msg)) kind = "empty";
-            return e("div", { style: { marginTop: "0.5rem" } },
-              PanelState({ kind: kind, message: msg, inline: true })
-            );
-          })(),
-          e(
-            "div",
-            { className: "db-table-wrap" },
-            e(
-              "table",
-              { className: "db-table" },
-              e(
-                "thead",
-                null,
-                dbTable === "scan_metadata"
-                  ? e("tr", null, e("th", null, "Type"), e("th", null, "Messages"), e("th", null, "Last scan"), e("th", null, "Created"))
-                  : e("tr", null, e("th", null, "Timestamp"), e("th", null, "User"), e("th", null, "Channel"), e("th", null, "Content"), e("th", null, "Signals"))
-              ),
-              e(
-                "tbody",
-                null,
-                dbRows.map(function (r, i) {
-                  if (dbTable === "scan_metadata") {
-                    return e(
-                      "tr",
-                      { key: i, onClick: function () { setDbSelectedRow(r); } },
-                      e("td", null, r.scan_type || ""),
-                      e("td", null, fmtNum(r.messages_scanned)),
-                      e("td", { className: "mono" }, r.last_scan_time || ""),
-                      e("td", { className: "mono" }, r.created_at || "")
-                    );
-                  }
-                  return e(
-                    "tr",
-                    { key: i, onClick: function () { setDbSelectedRow(r); } },
-                    e("td", { className: "mono" }, (r.date || "") + " " + (r.time || "")),
-                    e("td", null,
-                      e("div", null, r.username || displayNameFor(r.user_id, "Unknown")),
-                      e("div", { className: "muted mono" }, r.user_id || "")),
-                    e("td", null, e("div", null, r.channel_name || "Unknown"), e("div", { className: "muted mono" }, r.channel_id || "")),
-                    e("td", null, r.message_content || e("span", { className: "muted" }, "(empty)")),
-                    e(
-                      "td",
-                      null,
-                      r.image_description ? e("span", { className: "pill" }, "image") : null,
-                      r.url_summary ? e("span", { className: "pill" }, "url") : null,
-                      !r.image_description && !r.url_summary ? e("span", { className: "muted" }, "none") : null
-                    )
-                  );
-                })
-              )
-            )
-          ),
-          dbSelectedRow &&
-            e(
-              "div",
-              { className: "row-drawer", style: { marginTop: "0.65rem" } },
-              e("h5", { style: { marginTop: 0 } }, "Row details"),
-              e("pre", { className: "mono", style: { margin: 0, whiteSpace: "pre-wrap" } }, JSON.stringify(dbSelectedRow, null, 2))
-            )
-          ),
-          e(
-            "article",
-            { style: { marginTop: "2rem" } },
-            e("h4", { style: { marginTop: 0 } }, "Member profiles (RAG sketches)"),
-            e(
-              "p",
-              { className: "muted", style: { marginTop: "0.35rem", maxWidth: "52rem" } },
-              "Rows from ",
-              e("strong", null, "user_profile_summaries"),
-              ". Built from ",
-              e("strong", null, "Profile batch"),
-              " above. Soft context for the model—archived ",
-              e("span", { className: "mono" }, "messages"),
-              " remain the source of truth for what someone actually said."
-            ),
-            e(
-              "p",
-              { className: "muted", style: { marginTop: "0.5rem", fontSize: "0.88rem" } },
-              "Guild: ",
-              dbGuild
-                ? e("span", { className: "mono" }, dbGuild)
-                : e("span", null, "select one in Database Explorer above.")
-            ),
-            e(
-              "div",
-              { className: "db-toolbar", style: { marginTop: "0.5rem" } },
-              e("div", { className: "dash-field" }, e("label", null, "Pick profile"), e(
-                "select",
-                {
-                  value: pickerSelectValue(profPickerUsers, profSearch),
-                  onChange: function (ev) {
-                    var v = ev.target.value;
-                    setProfSearch(v);
-                    setProfSelected(null);
-                    if (v) loadProfileList(0);
-                  },
-                  disabled: !dbGuild || userPickerLoading,
-                },
-                e("option", { value: "" }, (function () {
-                  if (!dbGuild) return "Choose a server first";
-                  if (userPickerLoading) return "Loading user lists…";
-                  if (userPickerError) return "— list failed (see below) —";
-                  if ((profPickerUsers || []).length) return "— all (use search below) —";
-                  if (profileRowCount === 0) {
-                    return "No rows yet — use Profile batch above";
-                  }
-                  return "— none loaded —";
-                })()),
-                (profPickerUsers || []).map(function (u) {
-                  var hint = (u.label || u.nickname_hint || "").trim();
-                  var label = hint ? hint + " · " + String(u.user_id) : String(u.user_id);
-                  return e("option", { key: "prof-p-" + u.user_id, value: String(u.user_id) }, label);
-                })
-              )),
-              e("div", { className: "dash-field" }, e("label", null, "Search"), e(
-                "input",
-                {
-                  value: profSearch,
-                  placeholder: "user id, nickname, or summary text",
-                  onChange: function (ev) {
-                    setProfSearch(ev.target.value);
-                  },
-                }
-              )),
-              e("div", { className: "dash-field" }, e("label", null, "Rows"), e(
-                "select",
-                {
-                  value: String(profLimit),
-                  onChange: function (ev) {
-                    setProfLimit(Number(ev.target.value || 50));
-                  },
-                },
-                [25, 50, 100, 200].map(function (n) {
-                  return e("option", { key: "pl-" + n, value: String(n) }, String(n));
-                })
-              ))
-            ),
-            profileRowCount !== null && !userPickerError
-              ? e(
-                  "p",
-                  { className: "muted", style: { fontSize: "0.88rem", marginTop: "0.4rem", maxWidth: "48rem" } },
-                  e("span", { className: "mono" }, "user_profile_summaries"),
-                  ": ",
-                  e("strong", null, fmtNum(profileRowCount)),
-                  profileRowCount === 0
-                    ? " row — run Profile batch above (LOCAL_CHAT + archive required)."
-                    : " row(s). Pick a user above or use Search."
-                )
-              : null,
-            userPickerError
-              ? e(
-                  "p",
-                  {
-                    className: "dash-message error",
-                    style: { marginTop: "0.4rem", fontSize: "0.9rem" },
-                  },
-                  userPickerError
-                )
-              : null,
-            e(
-              "div",
-              { className: "dash-controls", style: { flexWrap: "wrap", gap: "0.5rem", alignItems: "center", marginTop: "0.5rem" } },
-              e(
-                "button",
-                {
-                  className: "secondary",
-                  disabled: !dbGuild || userPickerLoading,
-                  onClick: function () {
-                    loadUserPickerData();
-                  },
-                },
-                userPickerLoading ? "…" : "Refresh user lists"
-              ),
-              e(
-                "button",
-                { disabled: !dbGuild, onClick: function () { loadProfileList(0); } },
-                "Load profiles"
-              ),
-              e(
-                "button",
-                {
-                  className: "secondary",
-                  disabled: !dbGuild || profOffset <= 0,
-                  onClick: function () {
-                    loadProfileList(Math.max(0, profOffset - profLimit));
-                  },
-                },
-                "Prev"
-              ),
-              e(
-                "button",
-                {
-                  className: "secondary",
-                  disabled: !dbGuild || profOffset + profLimit >= profTotal,
-                  onClick: function () {
-                    if (profOffset + profLimit < profTotal) loadProfileList(profOffset + profLimit);
-                  },
-                },
-                "Next"
-              )
-            ),
-            (function () {
-              var msg = String(profInfo || "");
-              var kind = "info";
-              if (/^Loading/i.test(msg)) kind = "loading";
-              else if (/^Failed/i.test(msg)) kind = "error";
-              else if (/^No\s|^Showing\s0\b/i.test(msg)) kind = "empty";
-              return e("div", { style: { marginTop: "0.5rem" } },
-                PanelState({ kind: kind, message: msg, inline: true })
-              );
-            })(),
-            e(
-              "div",
-              { className: "db-table-wrap" },
-              e(
-                "table",
-                { className: "db-table" },
-                e(
-                  "thead",
-                  null,
-                  e(
-                    "tr",
-                    null,
-                    e("th", null, "User ID"),
-                    e("th", null, "Nick hint"),
-                    e("th", null, "Msgs"),
-                    e("th", null, "Updated"),
-                    e("th", { style: { minWidth: "14rem" } }, "Summary (preview)")
-                  )
-                ),
-                e(
-                  "tbody",
-                  null,
-                  !profRows.length
-                    ? e(
-                        "tr",
-                        null,
-                        e(
-                          "td",
-                          { colSpan: 5 },
-                          PanelState({
-                            kind: "empty",
-                            message: dbGuild ? "No rows loaded. Click Load profiles." : "Select a server in Database Explorer first, or pick one above."
-                          })
-                        )
-                      )
-                    : profRows.map(function (r, i) {
-                        return e(
-                          "tr",
-                          {
-                            key: (r.user_id || "") + "-" + i,
-                            onClick: function () {
-                              setProfSelected(r);
-                            },
-                          },
-                          e("td", null,
-                            (function () {
-                              var name = displayNameFor(r.user_id, "");
-                              return name
-                                ? [e("div", { key: "n" }, name),
-                                   e("div", { key: "i", className: "muted mono" }, String(r.user_id))]
-                                : e("span", { className: "mono" }, r.user_id != null ? String(r.user_id) : "");
-                            })()
-                          ),
-                          e("td", null, r.nickname_hint || e("span", { className: "muted" }, "—")),
-                          e("td", null, fmtNum(r.source_message_count)),
-                          e("td", { className: "mono" }, r.updated_at || "—"),
-                          e(
-                            "td",
-                            { style: { fontSize: "0.88rem", maxWidth: "28rem", whiteSpace: "normal" } },
-                            previewText(r.summary, 220)
-                          )
-                        );
-                      })
-                )
-              )
-            ),
-            profSelected &&
-              e(
-                "div",
-                { className: "row-drawer", style: { marginTop: "0.65rem" } },
-                e("h5", { style: { marginTop: 0 } }, "Profile detail"),
-                e(
-                  "div",
-                  {
-                    className: "muted mono",
-                    style: { fontSize: "0.85rem", marginBottom: "0.5rem" },
-                  },
-                  "user_id ",
-                  String(profSelected.user_id),
-                  (function () {
-                    var name = displayNameFor(profSelected.user_id, "");
-                    return name ? " (" + name + ")" : "";
-                  })(),
-                  " · source_max_message_id ",
-                  profSelected.source_max_message_id != null ? String(profSelected.source_max_message_id) : "—",
-                  " · model ",
-                  String(profSelected.model_used || "—")
-                ),
-                e(
-                  "div",
-                  {
-                    style: {
-                      whiteSpace: "pre-wrap",
-                      fontSize: "0.92rem",
-                      lineHeight: 1.45,
-                      padding: "0.65rem 0.75rem",
-                      borderRadius: "6px",
-                      background: "rgba(0,0,0,0.06)",
-                      marginBottom: "0.65rem",
-                    },
-                  },
-                  profSelected.summary || e("span", { className: "muted" }, "(empty)")
-                ),
-                profSelected.structured_json
-                  ? e(
-                      "div",
-                      { style: { marginBottom: "0.65rem" } },
-                      e("h6", { style: { margin: "0.5rem 0 0.25rem" } }, "Structured (JSON)"),
-                      e(
-                        "pre",
-                        {
-                          className: "mono",
-                          style: {
-                            margin: 0,
-                            whiteSpace: "pre-wrap",
-                            fontSize: "0.78rem",
-                            maxHeight: "320px",
-                            overflow: "auto",
-                            padding: "0.5rem",
-                            background: "rgba(0,0,0,0.06)",
-                          },
-                        },
-                        (function () {
-                          try {
-                            return JSON.stringify(JSON.parse(String(profSelected.structured_json || "{}")), null, 2);
-                          } catch (_e) {
-                            return String(profSelected.structured_json || "");
-                          }
-                        })()
-                      )
-                    )
-                  : null,
-                e("h6", { style: { margin: "0.5rem 0 0.25rem" } }, "Raw row"),
-                e("pre", { className: "mono", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "0.8rem" } }, JSON.stringify(profSelected, null, 2))
-              )
-          )
-        )
+      e(D.MediaTab, { active: tab === "media" }),
+      e(D.DatabaseTab, {
+        active: tab === "database",
+        guild: dbGuild,
+        onGuild: setDbGuild,
+        databases: dbStatus.databases || [],
+        onReloadDatabases: loadDatabases,
+        view: route.view,
+        onView: function (view) {
+          navigate("database", view);
+        },
+        botRunning: !!status.running,
+        busy: busy,
+        notify: notify,
+        confirm: confirm,
+        ragStatus: ragStatus,
+        onRebuildRag: rebuildRagIndex,
+        onScan: triggerScan,
+      }),
+      e(D.Toast, {
+        message: notice,
+        error: noticeError,
+        onDismiss: function () {
+          setNotice("");
+        },
+      }),
+      confirmDialog
     );
   }
 

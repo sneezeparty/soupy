@@ -8,6 +8,8 @@
 
 {% block content %}
 <div id="dashboard-root"></div>
+{# Lightbox, dialogs and toasts are portalled here, outside the page flow. #}
+<div id="dashboard-overlays"></div>
 <script id="dashboard-initial" type="application/json">
 {
   "status": {{ status|tojson }}
@@ -16,7 +18,13 @@
 {% endblock %}
 
 {% block scripts %}
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+{# Served from web/static/vendor, not a CDN: the panel has to load with no internet. #}
+<script src="/static/vendor/react.production.min.js"></script>
+<script src="/static/vendor/react-dom.production.min.js"></script>
+{# Order matters: core defines window.SoupyDash, the tab scripts add to it, the app renders. #}
+<script src="/static/dashboard/dashboard-core.js?v={{ dash_v }}"></script>
+<script src="/static/dashboard/dashboard-media.js?v={{ dash_v }}"></script>
+<script src="/static/dashboard/dashboard-database.js?v={{ dash_v }}"></script>
+<script src="/static/dashboard/dashboard-model.js?v={{ dash_v }}"></script>
 <script src="/static/dashboard/dashboard-app.js?v={{ dash_v }}"></script>
 {% endblock %}

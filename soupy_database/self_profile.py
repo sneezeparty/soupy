@@ -627,12 +627,19 @@ def self_block_for_chat(
     query_tokens: Sequence[str],
     max_chars: int,
     min_sim: float,
+    now: Optional[datetime] = None,
 ) -> Optional[str]:
-    """Soupy's memories for this reply, or None when this guild has no memory yet (callers fall back to SELF.MD)."""
+    """Soupy's memories for this reply, or None when this guild has no memory yet (callers fall back to SELF.MD).
+
+    With ``now`` (time awareness on), items say how long ago they came up instead of the month.
+    """
     doc = load_self_document(guild_id)
     if doc is None:
         return None
-    header = "(Mon YYYY) is when it came up. Things may have changed since."
+    if now:
+        header = "The bracket after each one says how long ago it came up. Things may have changed since."
+    else:
+        header = "(Mon YYYY) is when it came up. Things may have changed since."
     ranked = _ranked_item_ids(conn, query_vec, min_sim) if query_vec is not None else []
     body = render_self_for_chat(
         doc,
@@ -640,8 +647,9 @@ def self_block_for_chat(
         ranked_ids=ranked,
         query_tokens=query_tokens,
         max_chars=max(0, max_chars - len(header) - 1),
-        today=date.today(),
+        today=now.date() if now else date.today(),
         lately_days=_env_int("USER_PROFILE_LATELY_DAYS", 90, minimum=0),
+        relative_dates=now is not None,
     )
     return f"{header}\n{body}" if body else ""
 

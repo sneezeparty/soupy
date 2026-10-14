@@ -12,6 +12,11 @@ from typing import Dict
 from .. import validators
 
 
+def _is_on(value) -> bool:
+    """True for a stored "true". Lets a re-run default to what is already set."""
+    return str(value or "").strip().lower() == "true"
+
+
 def _bluesky(state: Dict, ui) -> Dict:
     ui.step("Bluesky")
     ui.info("Generate an app password at https://bsky.app/settings/app-passwords (NOT your main password).")
@@ -19,14 +24,15 @@ def _bluesky(state: Dict, ui) -> Dict:
         "Bluesky handle (e.g. yourname.bsky.social)",
         default=state.get("BLUESKY_HANDLE", ""),
     )
+    current_password = state.get("BLUESKY_APP_PASSWORD", "") or None
     password = ui.prompt(
-        "Bluesky app password",
+        "Bluesky app password" + (" (enter keeps the current one)" if current_password else ""),
         secret=True,
-        default=state.get("BLUESKY_APP_PASSWORD", "") or None,
+        default=current_password,
     )
     auto_reply = ui.confirm(
         "Enable the autonomous Bluesky loop now? (you can flip this later in the web panel)",
-        default=False,
+        default=_is_on(state.get("BLUESKY_AUTO_REPLY")),
     )
     return {
         "BLUESKY_HANDLE": handle,
@@ -82,7 +88,6 @@ def _local_sd(ui) -> Dict:
 def _local_flux(state: Dict, ui) -> Dict:
     ui.step("Flux (local, mflux)")
     ui.info("Flux runs on this Mac via flux_server.py (port 4942 by default).")
-    ui.info("You'll launch it separately:  python flux_server.py")
     host = ui.prompt(
         "Flux server bind host",
         default=state.get("FLUX_SERVER_HOST", "127.0.0.1"),
@@ -94,13 +99,20 @@ def _local_flux(state: Dict, ui) -> Dict:
     base = f"http://{host}:{port}"
     edit_enabled = ui.confirm(
         "Enable the FLUX.2 Klein-Edit pipeline? (~5-8 GB extra RAM, much stronger img2img edits)",
-        default=False,
+        default=_is_on(state.get("FLUX_EDIT_ENABLED")),
+    )
+    # Yes unless the existing config says no: one process to launch instead of two.
+    # (The template ships "true", so an existing "false" is what reaches `state`.)
+    autostart = ui.confirm(
+        "Have the web panel start the Flux server? (No: you launch it yourself with python flux_server.py)",
+        default=str(state.get("FLUX_SERVER_AUTOSTART") or "true").strip().lower() == "true",
     )
     return {
         "FLUX_ENABLED": "true",
         "FLUX_SERVER_HOST": host,
         "FLUX_SERVER_PORT": str(port),
         "FLUX_SERVER_URL": base,
+        "FLUX_SERVER_AUTOSTART": "true" if autostart else "false",
         "FLUX_EDIT_ENABLED": "true" if edit_enabled else "false",
     }
 
@@ -117,6 +129,8 @@ def _daily_posts(state: Dict, ui) -> Dict:
             channel_map = dict(json.loads(existing_raw))
         except (ValueError, TypeError):
             channel_map = {}
+    if channel_map:
+        ui.info(f"Keeping the {len(channel_map)} channel(s) already configured; add more below.")
 
     while True:
         cid = ui.prompt("channel id (blank to stop)", allow_blank=True)

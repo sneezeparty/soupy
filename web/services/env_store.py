@@ -29,7 +29,6 @@ those. The CLAUDE.md file documents this restriction.
 
 from __future__ import annotations
 
-import codecs
 import os
 import shutil
 from dataclasses import dataclass
@@ -43,6 +42,18 @@ class EnvLine:
     raw: str
     key: Optional[str] = None
     value: Optional[str] = None
+
+
+def _decode_escapes(value: str) -> str:
+    """Turn ``\\n``, ``\\"`` and the like back into the characters they stand for.
+
+    ``unicode_escape`` reads bytes as Latin-1, and handing it a ``str`` gives
+    it that string's UTF-8 bytes, so every non-ASCII character came out as
+    mojibake: an em dash in ``BEHAVIOUR`` reached the bot as three junk
+    characters. Encoding to Latin-1 with the rest written as escapes first
+    lets the same decode bring every character back intact.
+    """
+    return value.encode("latin-1", "backslashreplace").decode("unicode_escape")
 
 
 def parse_env(path: Path) -> Tuple[List[EnvLine], Dict[str, str]]:
@@ -72,9 +83,8 @@ def parse_env(path: Path) -> Tuple[List[EnvLine], Dict[str, str]]:
             if content.endswith(quote):
                 content = content[:-1]
                 # Decode escape sequences (\\n -> \n, \\" -> ", etc.)
-                # Use codecs.decode for more reliable escape sequence handling
                 try:
-                    content = codecs.decode(content, "unicode_escape")
+                    content = _decode_escapes(content)
                 except (UnicodeDecodeError, ValueError):
                     # Fallback: manual replacement for common cases
                     content = (
@@ -104,7 +114,7 @@ def parse_env(path: Path) -> Tuple[List[EnvLine], Dict[str, str]]:
             combined = "\n".join(acc)
             # Decode escape sequences for multiline values too
             try:
-                combined = codecs.decode(combined, "unicode_escape")
+                combined = _decode_escapes(combined)
             except (UnicodeDecodeError, ValueError):
                 # Fallback: manual replacement for common cases
                 combined = (

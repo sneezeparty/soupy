@@ -57,6 +57,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import aiohttp
 
+from soupy import timeaware
+
 from .database import ensure_rag_schema, get_db_path, init_database
 
 logger = logging.getLogger(__name__)
@@ -127,6 +129,16 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 def _parse_msg_dt(date_s: str, time_s: str) -> datetime:
     return datetime.strptime(f"{date_s} {time_s}", "%Y-%m-%d %H:%M:%S")
+
+
+def _age_of_message(message_id: Any, now: Optional[datetime]) -> str:
+    """How long before ``now`` a message was sent ("about 3 weeks ago"), or "" without a clock.
+
+    Read off the Discord id, so it needs no stored date and is exact where the
+    archive's ``date`` column (UTC) is a day ahead for evening messages.
+    """
+    sent = timeaware.snowflake_time(message_id) if now is not None else None
+    return timeaware.describe_age(sent, now, with_year=True) if sent else ""
 
 
 def _line_for_row(row: sqlite3.Row) -> str:
@@ -703,10 +715,11 @@ def _assemble_rag_bundle(
     max_chars: int,
     keyword_max: int,
     self_hits: Optional[List[Tuple[float, str, str]]] = None,
+    now: Optional[datetime] = None,
 ) -> Tuple[str, int, int, int, bool, int]:
     """
     Optional profile sketch (soft context), then self-knowledge, then keyword/SQL block,
-    then vector chunks.
+    then vector chunks. With ``now``, each vector chunk's header says how long ago it was.
     Returns: (text, profile_chars_in_output, keyword_chars_in_output, vector_chunks_in_output,
               truncated, raw_len_if_unlimited).
     """
@@ -748,8 +761,11 @@ def _assemble_rag_bundle(
         chunks.append(kw_piece)
     kw_out = len(kw_piece)
     for i, (score, text, (mid_lo, mid_hi, ch)) in enumerate(hits, 1):
+        age = _age_of_message(mid_hi, now)
+        when = f", from {age}" if age else ""
         chunks.append(
-            f"--- related conversation {i} (relevance={score:.3f}, channel #{ch}, messages {mid_lo}-{mid_hi}) ---\n{text}"
+            f"--- related conversation {i}{when} "
+            f"(relevance={score:.3f}, channel #{ch}, messages {mid_lo}-{mid_hi}) ---\n{text}"
         )
     out = "\n\n".join(chunks)
     raw_len = len(out)
@@ -1277,11 +1293,13 @@ def _keyword_supplement_block(
     query_text: str,
     asking_user_id: int,
     first_person_hint: Optional[str] = None,
+    now: Optional[datetime] = None,
 ) -> str:
     """
     SQL-backed retrieval for names + topics. Embeddings often miss \"what did X say about Y\".
     When the asker talks about *my* views, we lock subject to asking_user_id.
     first_person_hint: usually the current message only (avoids \"my\" in older turns flipping mode).
+    now: when given, each line ends with how long ago it was said instead of its raw UTC timestamp.
     """
     try:
         lim = int(os.getenv("RAG_KEYWORD_SUPPLEMENT_LIMIT", "28"))
@@ -1357,7 +1375,8 @@ def _keyword_supplement_block(
     lines: List[str] = []
     for r in rows:
         base = _line_for_row(r)
-        lines.append(f"{base} [message_id={r['message_id']}, #{r['channel_name']}, {r['date']} {r['time']}]")
+        when = _age_of_message(r["message_id"], now) or f"{r['date']} {r['time']}"
+        lines.append(f"{base} [message_id={r['message_id']}, #{r['channel_name']}, {when}]")
     header = "--- Earlier messages (matched by topic or who posted; use for questions about a person or subject) ---\n"
     block = header + "\n".join(lines)
     if _rag_log_verbose() and lines:
@@ -1387,7 +1406,15 @@ async def fetch_rag_context_for_query(
     query_text: str,
     first_person_hint: Optional[str] = None,
     max_chars_override: Optional[int] = None,
+    now: Optional[datetime] = None,
 ) -> Optional[str]:
+    """Everything retrieved for one chat reply, as one block.
+
+    ``now`` (the bot's local time, see ``soupy.timeaware``) switches the block to
+    relative ages: conversations and keyword lines say how long ago they were,
+    and profile and memory items say how long ago they came up. Without it the
+    block is unchanged.
+    """
     if not query_text:
         return None
     db_path = get_db_path(guild_id)
@@ -1522,6 +1549,7 @@ async def fetch_rag_context_for_query(
             query_text,
             first_person_hint,
             subject_user_id=_subject_uid,
+            now=now,
         )
         # Prepend the name-mapping note so the LLM knows the connection
         if _name_map_note:
@@ -1545,7 +1573,7 @@ async def fetch_rag_context_for_query(
         if os.getenv("RAG_LOG_FULL_CONTENT", "0").strip() in ("1", "true", "yes") and profile_pfx:
             logger.debug("  profile full:\n%s", profile_pfx)
 
-        supplement = _keyword_supplement_block(conn, query_text, author_user_id, first_person_hint)
+        supplement = _keyword_supplement_block(conn, query_text, author_user_id, first_person_hint, now=now)
 
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) AS c FROM rag_chunks")
@@ -1556,7 +1584,7 @@ async def fetch_rag_context_for_query(
             )
             if supplement or profile_pfx:
                 out, prof_out, kw_out, vec_n, truncated, raw_len = _assemble_rag_bundle(
-                    profile_pfx, supplement, [], max_chars, keyword_max
+                    profile_pfx, supplement, [], max_chars, keyword_max, now=now
                 )
                 _log_rag_bundle(prof_out, kw_out, vec_n, len(out), max_chars, truncated, "no vector index")
                 return out
@@ -1580,7 +1608,7 @@ async def fetch_rag_context_for_query(
         if not vecs:
             if supplement or profile_pfx:
                 out, prof_out, kw_out, vec_n, truncated, raw_len = _assemble_rag_bundle(
-                    profile_pfx, supplement, [], max_chars, keyword_max
+                    profile_pfx, supplement, [], max_chars, keyword_max, now=now
                 )
                 _log_rag_bundle(prof_out, kw_out, vec_n, len(out), max_chars, truncated, "embeddings failed")
                 return out
@@ -1666,6 +1694,7 @@ async def fetch_rag_context_for_query(
                     query_tokens=_extract_query_tokens(normalize_rag_query_text(_cur_for_subject)),
                     max_chars=_self_max,
                     min_sim=_self_min_sim,
+                    now=now,
                 )
                 if _memory is not None:
                     if _memory:
@@ -1697,6 +1726,7 @@ async def fetch_rag_context_for_query(
         max_chars,
         keyword_max,
         self_hits=_self_hits,
+        now=now,
     )
     _log_rag_bundle(prof_out, kw_out, vec_n, len(out), max_chars, truncated)
     return out

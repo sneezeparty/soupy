@@ -46,6 +46,7 @@ Gotchas:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -109,8 +110,10 @@ from starlette.templating import Jinja2Templates
 
 from soupy.settings import settings
 
+from .services import browse, lm_studio, prompt_store
 from .services.bot_runner import BotRunner
 from .services.env_store import parse_env, write_env
+from .services.flux_runner import FluxRunner
 from .services.log_stream import WebsocketManager
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -394,14 +397,41 @@ def create_app() -> FastAPI:
         await ws_manager.broadcast_text(clean)
 
     bot_runner = BotRunner(project_root=BASE_DIR, on_output=fanout_output)
+    flux_runner = FluxRunner(project_root=BASE_DIR, on_output=fanout_output)
+    media_archive = browse.MediaArchive(media_dir)
+
+    def _open_guild_db(guild_id: str):
+        """``(connection, None)`` for a guild's archive, or ``(None, error response)``."""
+        from soupy_database.database import get_db_path
+
+        gid = browse.parse_snowflake(guild_id)
+        if gid is None:
+            return None, JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
+        db_path = get_db_path(gid)
+        if not os.path.exists(db_path):
+            return None, JSONResponse({"ok": False, "message": "Database not found"}, status_code=404)
+        return browse.connect(db_path), None
+
+    def _channel_names(guild_id: str) -> Dict[str, str]:
+        conn, _error = _open_guild_db(guild_id)
+        if conn is None:
+            return {}
+        try:
+            return {ch["id"]: ch["name"] for ch in browse.list_channels(conn)}
+        except Exception:
+            logger.debug("Could not read channel names for guild %s", guild_id, exc_info=True)
+            return {}
+        finally:
+            conn.close()
 
     app.state.templates = templates
     app.state.ws_manager = ws_manager
     app.state.bot_runner = bot_runner
+    app.state.flux_runner = flux_runner
 
     _configure_soupy_database_console_logging()
 
-    # Reduce log noise: thumb 304s, noisy dashboard polling endpoints
+    # Reduce log noise: thumb 304s, the dashboard's polling endpoints
     try:
 
         class SuppressNoisyAccess(logging.Filter):
@@ -414,6 +444,11 @@ def create_app() -> FastAPI:
                 if "/media/thumbs/" in msg and " 304 " in msg:
                     return False
                 if "GET /api/profiles/batch/status/" in msg:
+                    return False
+                # The dashboard's status bar polls these every 20 seconds.
+                if "GET /api/bot/status " in msg or "GET /api/bot/dashboard-status " in msg:
+                    return False
+                if "GET /api/flux/status " in msg:
                     return False
                 return True
 
@@ -449,92 +484,15 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
 
     @app.get("/api/archive/images")
-    async def api_archive_images(limit: int = 50, offset: int = 0, kind: str | None = None):
-
-        idx = media_dir / "images" / "index.jsonl"
-        all_items = []
-        if idx.exists():
-            try:
-                with open(idx, "r", encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            all_items.append(json.loads(line))
-                        except Exception:
-                            continue  # skip a single malformed JSONL line
-            except Exception:
-                logger.warning("Failed to read image index %s", idx, exc_info=True)
-        # Newest last → reverse for newest first
-        all_items.reverse()
-        k = (kind or "").strip().lower()
-        if k == "vision":
-            all_items = [x for x in all_items if x.get("event_type") == "vision"]
-        elif k == "generated":
-            all_items = [x for x in all_items if x.get("event_type") != "vision"]
-        total = len(all_items)
-        items = all_items[offset : offset + limit]
-        return JSONResponse({"items": items, "total": total, "kind": k or "all"})
+    async def api_archive_images(limit: int = 60, offset: int = 0, kind: str | None = None, q: str | None = None):
+        """One page of the image archive, newest first. Vision rows carry the whole description."""
+        page = media_archive.images(kind=(kind or "all").strip().lower(), search=q or "", limit=limit, offset=offset)
+        browse.attach_channel_names(page["items"], _channel_names)
+        return JSONResponse(page)
 
     @app.get("/api/archive/messages")
     async def api_archive_messages(limit: int = 50, offset: int = 0):
-
-        log = media_dir / "messages.jsonl"
-        all_items = []
-        if log.exists():
-            try:
-                with open(log, "r", encoding="utf-8") as f:
-                    for line in f:
-                        try:
-                            all_items.append(json.loads(line))
-                        except Exception:
-                            continue  # skip a single malformed JSONL line
-            except Exception:
-                logger.warning("Failed to read message archive %s", log, exc_info=True)
-        all_items.reverse()
-        total = len(all_items)
-        items = all_items[offset : offset + limit]
-        return JSONResponse({"items": items, "total": total})
-
-    @app.get("/api/archive/message_by_image")
-    async def api_message_by_image(filename: str):
-        """Return the most recent message entry that references the given image filename.
-
-        This is primarily used to retrieve the full, non-truncated description for
-        images that were analyzed (vision events) when the paginated preload misses it.
-        """
-        import re
-
-        # Basic filename validation to prevent traversal or odd inputs
-        if not re.fullmatch(r"[A-Za-z0-9._-]+", filename or ""):
-            return JSONResponse({"ok": False, "message": "Invalid filename"}, status_code=400)
-
-        log = media_dir / "messages.jsonl"
-        if not log.exists():
-            return JSONResponse({"ok": False, "message": "messages log not found"}, status_code=404)
-
-        try:
-            lines = log.read_text(encoding="utf-8").splitlines()
-        except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
-
-        # Search newest-first
-        for line in reversed(lines):
-            try:
-                obj = json.loads(line)
-            except Exception:
-                continue
-            if obj.get("image_filename") == filename:
-                # Return minimal useful fields
-                return JSONResponse(
-                    {
-                        "ok": True,
-                        "content": obj.get("content"),
-                        "event_type": obj.get("event_type"),
-                        "ts": obj.get("ts"),
-                        "username": obj.get("username"),
-                    }
-                )
-
-        return JSONResponse({"ok": False, "message": "No matching message found"}, status_code=404)
+        return JSONResponse(media_archive.log(limit=limit, offset=offset))
 
     # -----------------------------------------------------------------------
     # Stats endpoints — user_stats.json + per-guild SQLite roll-ups
@@ -975,341 +933,164 @@ def create_app() -> FastAPI:
             # Convert all values to strings; drop empty/None values so they don't
             # clobber defaults in code (e.g. SOUPY_DB_DIR="" breaks database paths).
             updates = {}
+            skipped = []
             for k, v in payload.items():
                 sv = "" if v is None else str(v).strip()
                 if sv:  # only write non-empty values
                     updates[str(k)] = sv
-            write_env(env_path, updates)
-            return JSONResponse({"ok": True, "message": "Saved"})
+                else:
+                    skipped.append(str(k))
+            if updates:
+                write_env(env_path, updates)
+            # The editor tells the user which fields were written and which emptied ones were not.
+            return JSONResponse(
+                {"ok": True, "message": "Saved", "saved": sorted(updates), "skipped_empty": sorted(skipped)}
+            )
         except Exception as exc:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
 
     # -----------------------------------------------------------------------
-    # Prompts subsystem — BEHAVIOUR, BEHAVIOUR_SEARCH, etc. were migrated out
-    # of .env-stable into prompts/<name>.txt (see soupy/prompts.py and
-    # tools/migrate_prompts.py). The dashboard's Personality panel used to
-    # read these via /api/env/get, which now returns empty for them. These
-    # endpoints expose the same resolution chain the bot uses so the panel
-    # can show the live prompt and write back to the prompts/ file.
+    # Prompts — the bot reads them from prompts/<name>.txt (soupy/prompts.py).
+    # web/services/prompt_store.py lists them and does the reading and writing.
     # -----------------------------------------------------------------------
 
-    # name -> legacy env var. Mirrors soupy/prompts.py::_LEGACY_ENV — kept
-    # local rather than imported so an editor change here doesn't touch the
-    # bot's runtime loader (and vice versa).
-    _PROMPT_NAMES = {
-        "behaviour": "BEHAVIOUR",
-        "behaviour_search": "BEHAVIOUR_SEARCH",
-        "behaviour_daily_post": "BEHAVIOUR_DAILY_POST",
-        "nineball": "9BALL",
-        "fancy": "FANCY",
-        "randomprompt": "RANDOMPROMPT",
-        "sd_negative_prompt": "SD_NEGATIVE_PROMPT",
-    }
+    prompts_dir = BASE_DIR / "prompts"
 
-    def _read_prompt_state(name: str) -> dict:
-        env_var = _PROMPT_NAMES[name]
-        prompts_dir = BASE_DIR / "prompts"
-        custom_path = prompts_dir / f"{name}.txt"
-        default_path = prompts_dir / f"{name}.default.txt"
-        # Re-parse .env-stable each call (cheap) so a legacy env value the
-        # user just edited shows up immediately.
-        _, kv = parse_env(BASE_DIR / ".env-stable")
-        env_value = kv.get(env_var, "")
-        custom_value = custom_path.read_text(encoding="utf-8") if custom_path.is_file() else None
-        default_value = default_path.read_text(encoding="utf-8") if default_path.is_file() else None
-        if env_value:
-            source, value = "env", env_value
-        elif custom_value is not None:
-            source, value = "custom", custom_value
-        elif default_value is not None:
-            source, value = "default", default_value
-        else:
-            source, value = "missing", ""
-        return {
-            "name": name,
-            "env_var": env_var,
-            "source": source,
-            "value": value,
-            "has_env": bool(env_value),
-            "has_custom": custom_value is not None,
-            "has_default": default_value is not None,
-            "custom_path": str(custom_path),
-            "default_path": str(default_path),
-        }
+    def _env_values() -> dict:
+        return parse_env(BASE_DIR / ".env-stable")[1]
 
     @app.get("/api/prompts/get")
     async def api_prompts_get():
-        return JSONResponse({"prompts": {n: _read_prompt_state(n) for n in _PROMPT_NAMES}})
+        return JSONResponse({"ok": True, "prompts": prompt_store.list_states(prompts_dir, _env_values())})
 
-    @app.post("/api/prompts/save")
-    async def api_prompts_save(request: Request):
+    async def _prompt_change(request: Request, change) -> JSONResponse:
         payload = await request.json()
         if not isinstance(payload, dict):
             return JSONResponse({"ok": False, "message": "Invalid payload"}, status_code=400)
-        name = str(payload.get("name", "")).strip().lower()
-        if name not in _PROMPT_NAMES:
-            return JSONResponse({"ok": False, "message": f"Unknown prompt: {name!r}"}, status_code=400)
-        value = payload.get("value")
-        if value is None:
-            return JSONResponse({"ok": False, "message": "Missing 'value'"}, status_code=400)
-        # Normalise CRLF → LF so files saved through the browser don't
-        # accumulate \r characters that survive a round-trip through the
-        # bot's prompt cache.
-        text = str(value).replace("\r\n", "\n").replace("\r", "\n")
-        prompts_dir = BASE_DIR / "prompts"
+        name = str(payload.get("name", ""))
+        env = _env_values()
         try:
-            prompts_dir.mkdir(parents=True, exist_ok=True)
-            target = prompts_dir / f"{name}.txt"
-            tmp = target.with_suffix(target.suffix + ".tmp")
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, target)
-        except Exception as exc:
+            result = change(name, payload, env)
+            state = prompt_store.read_state(name, prompts_dir, env)
+        except prompt_store.PromptError as exc:
+            return JSONResponse({"ok": False, "message": str(exc)}, status_code=exc.status)
+        except OSError as exc:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
-        return JSONResponse({"ok": True, "message": "Saved", "state": _read_prompt_state(name)})
+        return JSONResponse({"ok": True, **result, "prompt": state})
+
+    @app.post("/api/prompts/save")
+    async def api_prompts_save(request: Request):
+        def change(name, payload, env):
+            if not isinstance(payload.get("value"), str):
+                raise prompt_store.PromptError("Missing 'value'")
+            return prompt_store.save(name, payload["value"], prompts_dir, env)
+
+        return await _prompt_change(request, change)
+
+    @app.post("/api/prompts/reset")
+    async def api_prompts_reset(request: Request):
+        return await _prompt_change(request, lambda name, _payload, env: prompt_store.reset(name, prompts_dir, env))
 
     # -----------------------------------------------------------------------
-    # LM Studio integration — list loaded models, hot-swap the chat model
-    # WHY: switching the model writes LOCAL_CHAT to .env-stable and triggers
-    # a bot restart so the new model is picked up by the next chat call.
+    # Models — what the model server has, and switching the chat model.
+    # web/services/lm_studio.py plans a switch and carries it out.
     # -----------------------------------------------------------------------
+
+    switch_lock = asyncio.Lock()
+
+    async def _model_listing(settings: lm_studio.Settings) -> dict:
+        try:
+            return {
+                **(await lm_studio.list_models(settings.base_url, settings.api_key)),
+                "reachable": True,
+                "error": None,
+            }
+        except lm_studio.LMStudioError as exc:
+            return {"native": False, "models": [], "reachable": False, "error": str(exc)}
 
     @app.get("/api/lm-studio/models")
     async def api_lm_studio_models():
-        """Fetch ALL downloaded models from LM Studio's native /api/v1/models endpoint.
-
-        This returns every model file on disk, including all quantization variants,
-        not just currently loaded models.
-        """
-        import aiohttp as _aiohttp
-
-        env_path = BASE_DIR / ".env-stable"
-        _, kv = parse_env(env_path)
-        base_url = kv.get("OPENAI_BASE_URL", "http://localhost:1234/v1").rstrip("/")
-        # Native API is at /api/v1, not /v1
-        api_base = base_url.replace("/v1", "/api/v1")
-        logger.info("🔄 Fetching all downloaded models from %s/models", api_base)
-
-        try:
-            async with _aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{api_base}/models",
-                    timeout=_aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        # Fallback: try the OpenAI-compatible endpoint (older LM Studio versions)
-                        logger.info("🔄 Native API returned %d, falling back to /v1/models", resp.status)
-                        async with session.get(
-                            f"{base_url}/models",
-                            timeout=_aiohttp.ClientTimeout(total=8),
-                        ) as fallback_resp:
-                            if fallback_resp.status != 200:
-                                return JSONResponse(
-                                    {
-                                        "ok": False,
-                                        "models": [],
-                                        "message": f"LM Studio returned HTTP {fallback_resp.status}",
-                                    },
-                                    status_code=502,
-                                )
-                            fallback_data = await fallback_resp.json()
-                            model_ids = [m.get("id", "") for m in fallback_data.get("data", []) if m.get("id")]
-                            model_ids.sort(key=str.lower)
-                            logger.info("🔄 Fallback found %d loaded model(s)", len(model_ids))
-                            return JSONResponse({"ok": True, "models": model_ids})
-
-                    data = await resp.json()
-
-            # Native /api/v1/models returns {"models": [{"key": "...", "type": "llm", "quantization": {...}, ...}]}
-            model_entries = []
-            for m in data.get("models", data.get("data", [])):
-                key = m.get("key") or m.get("id", "")
-                if not key:
-                    continue
-                model_type = m.get("type", "llm")
-                quant = m.get("quantization") or {}
-                quant_name = quant.get("name", "")
-                _display = m.get("display_name", "")
-                size_mb = round(m.get("size_bytes", 0) / (1024 * 1024))
-                loaded = len(m.get("loaded_instances", [])) > 0
-
-                # Build a display label: "google/gemma-3-27b (Q4_K_M, 17GB, llm)"
-                label_parts = []
-                if quant_name:
-                    label_parts.append(quant_name)
-                if size_mb > 0:
-                    if size_mb >= 1024:
-                        label_parts.append(f"{size_mb / 1024:.1f}GB")
-                    else:
-                        label_parts.append(f"{size_mb}MB")
-                if model_type != "llm":
-                    label_parts.append(model_type)
-                if loaded:
-                    label_parts.append("loaded")
-
-                label = f"{key} ({', '.join(label_parts)})" if label_parts else key
-                model_entries.append(
-                    {
-                        "key": key,
-                        "label": label,
-                        "type": model_type,
-                        "quant": quant_name,
-                        "size_mb": size_mb,
-                        "loaded": loaded,
-                    }
-                )
-
-            model_entries.sort(key=lambda e: e["key"].lower())
-            logger.info(
-                "🔄 Found %d model(s) (%d LLM, %d embedding)",
-                len(model_entries),
-                sum(1 for e in model_entries if e["type"] == "llm"),
-                sum(1 for e in model_entries if e["type"] == "embedding"),
-            )
-            return JSONResponse({"ok": True, "models": model_entries})
-
-        except Exception as exc:
-            logger.error("🔄 Failed to fetch models: %s", exc)
-            return JSONResponse(
-                {"ok": False, "models": [], "message": f"Could not reach LM Studio: {exc}"},
-                status_code=502,
-            )
+        """The server's models, which are loaded, and what Soupy uses each for."""
+        settings = lm_studio.settings_from_env(_env_values())
+        listing = await _model_listing(settings)
+        return JSONResponse(
+            {
+                "ok": True,
+                "reachable": listing["reachable"],
+                "error": listing["error"],
+                "native": listing["native"],
+                "models": lm_studio.describe(listing, settings),
+                "settings": {
+                    "chat": settings.chat,
+                    "vision": settings.vision or None,
+                    "vision_enabled": settings.vision_enabled,
+                    "embedding": settings.embedding or None,
+                    "chat_budget": settings.chat_budget,
+                    "saved_list": settings.saved_list,
+                },
+            }
+        )
 
     @app.post("/api/lm-studio/switch-model")
     async def api_lm_studio_switch_model(request: Request):
-        """Unload the current model in LM Studio and load a new one with the specified context length.
+        """Change the chat model, its context length, or the chat prompt budget.
 
-        Also updates LOCAL_CHAT and CONTEXT_WINDOW_TOKENS in .env-stable.
+        With ``dry_run`` the answer is only the plan: what would be unloaded,
+        loaded and written to .env-stable. Without it the plan is carried out,
+        with the bot stopped for the duration.
         """
-        import aiohttp as _aiohttp
-
         payload = await request.json()
-        new_model = payload.get("model", "").strip()
-        context_length = int(payload.get("context_length", 16000))
-
-        if not new_model:
-            return JSONResponse({"ok": False, "message": "No model specified"}, status_code=400)
-
-        logger.info("🔄 ╔══════════════════════════════════════════════════╗")
-        logger.info("🔄 ║  MODEL SWITCH: %s", new_model[:40])
-        logger.info("🔄 ║  Context: %d tokens", context_length)
-        logger.info("🔄 ╚══════════════════════════════════════════════════╝")
-
+        if not isinstance(payload, dict):
+            return JSONResponse({"ok": False, "message": "Invalid payload"}, status_code=400)
         env_path = BASE_DIR / ".env-stable"
-        _, kv = parse_env(env_path)
-        base_url = kv.get("OPENAI_BASE_URL", "http://localhost:1234/v1").rstrip("/")
-        # LM Studio load/unload endpoints use /api/v1 not /v1
-        api_base = base_url.replace("/v1", "/api/v1")
-        logger.info("🔄 LM Studio API: %s", api_base)
-
-        # Models to NEVER unload (embedding, vision, etc.)
-        protected_models = set()
-        rag_model = kv.get("RAG_EMBEDDING_MODEL", "")
-        vision_model = kv.get("VISION_MODEL", "")
-        if rag_model:
-            protected_models.add(rag_model)
-        if vision_model:
-            protected_models.add(vision_model)
-
-        current_chat = kv.get("LOCAL_CHAT", "")
-        logger.info("🔄 Current chat model: %s", current_chat or "(none)")
-        logger.info("🔄 Protected models: %s", protected_models or "(none)")
-
+        settings = lm_studio.settings_from_env(_env_values())
+        listing = await _model_listing(settings)
         try:
-            async with _aiohttp.ClientSession() as session:
-                # Step 1: Get currently loaded models
-                logger.info("🔄 Step 1: Querying loaded models...")
-                async with session.get(
-                    f"{base_url}/models",
-                    timeout=_aiohttp.ClientTimeout(total=8),
-                ) as resp:
-                    loaded = []
-                    if resp.status == 200:
-                        data = await resp.json()
-                        loaded = data.get("data", [])
-                    else:
-                        logger.warning("🔄 Could not query models: HTTP %d", resp.status)
-                logger.info("🔄 Currently loaded: %s", [m.get("id", "?") for m in loaded])
-
-                # Step 2: Unload ONLY the current chat model (protect embedding + vision)
-                logger.info("🔄 Step 2: Unloading current chat model...")
-                for m in loaded:
-                    instance_id = m.get("id", "")
-                    if not instance_id:
-                        continue
-                    if instance_id in protected_models:
-                        logger.info("Keeping protected model loaded: %s", instance_id)
-                        continue
-                    # Only unload the current chat model (or the new model if already loaded)
-                    if instance_id == current_chat or instance_id == new_model:
-                        try:
-                            async with session.post(
-                                f"{api_base}/models/unload",
-                                json={"instance_id": instance_id},
-                                timeout=_aiohttp.ClientTimeout(total=15),
-                            ) as unresp:
-                                if unresp.status == 200:
-                                    logger.info("Unloaded model: %s", instance_id)
-                                else:
-                                    body = await unresp.text()
-                                    logger.warning("Unload %s returned %d: %s", instance_id, unresp.status, body[:200])
-                        except Exception as e:
-                            logger.warning("Unload %s failed: %s", instance_id, e)
-                    else:
-                        logger.info("Keeping unknown model loaded: %s", instance_id)
-
-                # Step 3: Load the new model with the specified context length
-                logger.info("🔄 Step 3: Loading %s (ctx=%d)...", new_model, context_length)
-                load_payload = {
-                    "model": new_model,
-                    "context_length": context_length,
-                    "flash_attention": True,
-                    "echo_load_config": True,
-                }
-                async with session.post(
-                    f"{api_base}/models/load",
-                    json=load_payload,
-                    timeout=_aiohttp.ClientTimeout(total=120),  # Loading can take a while
-                ) as lresp:
-                    if lresp.status != 200:
-                        body = await lresp.text()
-                        logger.error("🔄 ❌ Load failed: HTTP %d — %s", lresp.status, body[:300])
-                        return JSONResponse(
-                            {"ok": False, "message": f"LM Studio load failed ({lresp.status}): {body[:300]}"},
-                            status_code=502,
-                        )
-                    load_result = await lresp.json()
-                    logger.info("🔄 ✅ Model loaded successfully")
-
-            # Step 4: Update .env-stable with new model and context window
-            logger.info("🔄 Step 4: Updating .env-stable...")
-            write_env(
-                env_path,
-                {
-                    "LOCAL_CHAT": new_model,
-                    "CONTEXT_WINDOW_TOKENS": str(context_length),
-                },
+            plan = lm_studio.build_plan(
+                listing,
+                settings,
+                model=payload.get("model", ""),
+                context_length=payload.get("context_length"),
+                chat_budget=payload.get("chat_budget", settings.chat_budget),
+                vision_follows=bool(payload.get("vision_follows")),
+                bot_running=bool((await bot_runner.status())["running"]),
             )
-
-            logger.info("🔄 ✅ Model switch complete: %s (%d ctx)", new_model, context_length)
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "message": f"Loaded {new_model} with {context_length} context",
-                    "load_config": load_result,
-                }
+        except lm_studio.PlanError as exc:
+            return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+        if payload.get("dry_run"):
+            return JSONResponse({"ok": True, "plan": plan})
+        if plan["noop"]:
+            return JSONResponse({"ok": True, "message": "Nothing to change.", "plan": plan})
+        if switch_lock.locked():
+            return JSONResponse({"ok": False, "message": "A model switch is already running."}, status_code=409)
+        async with switch_lock:
+            logger.info("🔄 Model switch: %s (context %s)", plan["model"], plan["context_length"])
+            result = await lm_studio.apply_plan(
+                plan,
+                settings,
+                stop_bot=bot_runner.stop,
+                start_bot=bot_runner.start,
+                write_env=lambda updates: write_env(env_path, updates),
+                log=lambda text: logger.info("🔄 %s", text),
             )
-
-        except Exception as exc:
-            logger.error("🔄 ❌ Model switch failed: %s", exc, exc_info=True)
-            return JSONResponse(
-                {"ok": False, "message": f"Model switch failed: {exc}"},
-                status_code=502,
-            )
+        return JSONResponse(
+            {**result, "plan": plan, **(await bot_runner.status())}, status_code=200 if result["ok"] else 502
+        )
 
     # -----------------------------------------------------------------------
     # Bot status — reads data/bot_dashboard.json (written by the bot every
     # ~15s) and exposes activity feeds for the dashboard.
     # -----------------------------------------------------------------------
+
+    def _written_before(updated_at, runner_status) -> bool:
+        """True when a status file stamped ``updated_at`` predates the bot that is running now."""
+        started = runner_status.get("start_time")
+        if not (runner_status.get("running") and started and updated_at):
+            return False
+        try:
+            return datetime.fromisoformat(str(updated_at)) < datetime.fromisoformat(str(started))
+        except (TypeError, ValueError):
+            return False
 
     @app.get("/api/bot/dashboard-status")
     async def api_bot_dashboard_status():
@@ -1330,7 +1111,9 @@ def create_app() -> FastAPI:
         try:
             if os.path.exists(status_path):
                 raw = _json.loads(open(status_path).read())
-                if isinstance(raw, dict):
+                # A file older than the running bot was written by the bot before it:
+                # its model, uptime and timers describe a process that is gone.
+                if isinstance(raw, dict) and not _written_before(raw.get("updated_at"), runner_status):
                     data.update(raw)
         except Exception:
             logger.debug("Could not read bot_dashboard.json", exc_info=True)
@@ -1453,37 +1236,15 @@ def create_app() -> FastAPI:
         return JSONResponse(read_runtime_flags())
 
     @app.get("/api/channels/{guild_id}")
-    async def api_channels_list(guild_id: int):
+    async def api_channels_list(guild_id: str):
         """Return all known channels for a guild from the SQLite archive."""
-        import sqlite3 as _sql
-
-        from soupy_database.database import get_db_path
-
-        db_path = get_db_path(guild_id)
-        if not os.path.exists(db_path):
+        conn, _error = _open_guild_db(guild_id)
+        if conn is None:
             return JSONResponse({"ok": False, "channels": []})
-        conn = _sql.connect(db_path, check_same_thread=False)
-        conn.row_factory = _sql.Row
         try:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT c.channel_id, c.channel_name, COUNT(m.message_id) AS msg_count
-                FROM channels c
-                LEFT JOIN messages m ON m.channel_id = c.channel_id
-                GROUP BY c.channel_id
-                ORDER BY msg_count DESC
-                """)
-            channels = [
-                {
-                    "id": str(r["channel_id"]),
-                    "name": r["channel_name"] or str(r["channel_id"]),
-                    "messages": r["msg_count"],
-                }
-                for r in cur.fetchall()
-            ]
+            return JSONResponse({"ok": True, "channels": browse.list_channels(conn)})
         finally:
             conn.close()
-        return JSONResponse({"ok": True, "channels": channels})
 
     @app.post("/api/runtime-flags")
     async def api_runtime_flags_post(request: Request):
@@ -1495,6 +1256,8 @@ def create_app() -> FastAPI:
         updates = {}
         if "rag_enabled" in payload:
             updates["rag_enabled"] = bool(payload["rag_enabled"])
+        if "time_awareness" in payload:
+            updates["time_awareness"] = bool(payload["time_awareness"])
         if "disabled_commands" in payload:
             val = payload["disabled_commands"]
             if isinstance(val, list):
@@ -1648,188 +1411,55 @@ def create_app() -> FastAPI:
         return JSONResponse(data)
 
     @app.get("/api/profiles/list/{guild_id}")
-    async def api_profiles_list(
-        guild_id: str,
-        limit: int = 50,
-        offset: int = 0,
-        search: str | None = None,
-    ):
-        """Browse stored member profile summaries (RAG sketch rows) for a guild."""
-        import sqlite3
+    async def api_profiles_list(guild_id: str, search: str | None = None):
+        """Stored member profiles without their bodies, plus Soupy's own memory when it exists."""
+        from soupy_database.self_profile import load_self_state
 
-        from soupy_database.database import get_db_path
-        from soupy_database.user_profiles import ensure_user_profile_schema
-
+        conn, error = _open_guild_db(guild_id)
+        if conn is None:
+            return error
         try:
-            gid = int(guild_id)
-        except ValueError:
-            return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
-
-        db_path = get_db_path(gid)
-        if not os.path.exists(db_path):
-            return JSONResponse({"ok": False, "message": "Database not found"}, status_code=404)
-
-        safe_limit = max(1, min(int(limit), 200))
-        safe_offset = max(0, int(offset))
-
-        conn = sqlite3.connect(db_path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        try:
-            ensure_user_profile_schema(conn)
-            cur = conn.cursor()
-            if search and search.strip():
-                term = f"%{search.strip()}%"
-                cur.execute(
-                    """
-                    SELECT COUNT(*) AS c FROM user_profile_summaries
-                    WHERE CAST(user_id AS TEXT) LIKE ?
-                       OR COALESCE(nickname_hint, '') LIKE ?
-                       OR COALESCE(summary, '') LIKE ?
-                    """,
-                    (term, term, term),
-                )
-                total = int(cur.fetchone()["c"])
-                cur.execute(
-                    """
-                    SELECT user_id, nickname_hint, summary, structured_json, source_message_count,
-                           source_max_message_id, updated_at, model_used
-                    FROM user_profile_summaries
-                    WHERE CAST(user_id AS TEXT) LIKE ?
-                       OR COALESCE(nickname_hint, '') LIKE ?
-                       OR COALESCE(summary, '') LIKE ?
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (term, term, term, safe_limit, safe_offset),
-                )
-            else:
-                cur.execute("SELECT COUNT(*) AS c FROM user_profile_summaries")
-                total = int(cur.fetchone()["c"])
-                cur.execute(
-                    """
-                    SELECT user_id, nickname_hint, summary, structured_json, source_message_count,
-                           source_max_message_id, updated_at, model_used
-                    FROM user_profile_summaries
-                    ORDER BY updated_at DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (safe_limit, safe_offset),
-                )
-            rows = [dict(r) for r in cur.fetchall()]
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "guild_id": str(gid),
-                    "total": total,
-                    "limit": safe_limit,
-                    "offset": safe_offset,
-                    "rows": rows,
-                }
-            )
+            rows = browse.list_profiles(conn, search=search or "")
+            total = browse.count_profiles(conn)
         finally:
             conn.close()
-
-    @app.get("/api/database/user-picker/{guild_id}")
-    async def api_database_user_picker(guild_id: str, archive_limit: int = 400):
-        """
-        Lists users for dashboard dropdowns: top posters from messages, and rows in user_profile_summaries.
-        """
-        import sqlite3
-
-        from soupy_database.database import get_db_path
-        from soupy_database.user_profiles import ensure_user_profile_schema
-
         try:
-            gid = int(guild_id)
-        except ValueError:
-            return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
+            self_row = browse.self_memory_row(load_self_state(int(guild_id)), search=search or "")
+        except Exception:
+            logger.debug("Could not read Soupy's memory for guild %s", guild_id, exc_info=True)
+            self_row = None
+        return JSONResponse({"ok": True, "guild_id": guild_id, "total": total, "rows": rows, "self": self_row})
 
-        db_path = get_db_path(gid)
-        if not os.path.exists(db_path):
-            return JSONResponse({"ok": False, "message": "Database not found"}, status_code=404)
+    @app.get("/api/profiles/get/{guild_id}/{user_id}")
+    async def api_profiles_get(guild_id: str, user_id: str):
+        """One profile laid out in sections. ``user_id`` "self" is Soupy's memory of itself."""
+        from soupy_database.self_profile import load_self_state
 
-        lim = max(1, min(int(archive_limit), 800))
-
+        conn, error = _open_guild_db(guild_id)
+        if conn is None:
+            return error
         try:
-            conn = sqlite3.connect(db_path, check_same_thread=False)
-        except Exception as exc:
-            logging.exception("user-picker connect failed guild=%s", gid)
-            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+            if user_id == "self":
+                detail = browse.self_memory_detail(load_self_state(int(guild_id)))
+            else:
+                uid = browse.parse_snowflake(user_id)
+                if uid is None:
+                    return JSONResponse({"ok": False, "message": "Invalid user ID"}, status_code=400)
+                detail = browse.profile_detail(conn, uid)
+        finally:
+            conn.close()
+        if detail is None:
+            return JSONResponse({"ok": False, "message": "No profile stored for this member"}, status_code=404)
+        return JSONResponse({"ok": True, "guild_id": guild_id, "profile": detail})
 
-        conn.row_factory = sqlite3.Row
+    @app.get("/api/database/members/{guild_id}")
+    async def api_database_members(guild_id: str, limit: int = 400):
+        """Posters by message count, for the member filter."""
+        conn, error = _open_guild_db(guild_id)
+        if conn is None:
+            return error
         try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT user_id,
-                       COUNT(*) AS message_count,
-                       MAX(COALESCE(NULLIF(TRIM(nickname), ''), NULLIF(TRIM(username), ''))) AS label
-                FROM messages
-                GROUP BY user_id
-                ORDER BY message_count DESC
-                LIMIT ?
-                """,
-                (lim,),
-            )
-            from_messages: list[Dict[str, Any]] = []
-            for r in cur.fetchall():
-                uid = int(r["user_id"])
-                lbl = (r["label"] or "").strip() or f"user {uid}"
-                from_messages.append(
-                    {
-                        "user_id": uid,
-                        "label": lbl,
-                        "message_count": int(r["message_count"]),
-                    }
-                )
-
-            ensure_user_profile_schema(conn)
-            cur.execute("SELECT COUNT(*) AS c FROM user_profile_summaries")
-            profile_row_count = int(cur.fetchone()["c"])
-            cur.execute("""
-                SELECT ups.user_id,
-                       ups.nickname_hint,
-                       ups.updated_at,
-                       COALESCE(
-                           NULLIF(TRIM(ups.nickname_hint), ''),
-                           (SELECT MAX(
-                               COALESCE(
-                                   NULLIF(TRIM(m.nickname), ''),
-                                   NULLIF(TRIM(m.username), '')
-                               )
-                            )
-                            FROM messages m
-                            WHERE m.user_id = ups.user_id)
-                       ) AS label
-                FROM user_profile_summaries ups
-                ORDER BY LOWER(TRIM(COALESCE(ups.nickname_hint, ''))), ups.user_id
-                """)
-            from_profiles: list[Dict[str, Any]] = []
-            for r in cur.fetchall():
-                uid = int(r["user_id"])
-                nh = (r["nickname_hint"] or "").strip()
-                lbl = (r["label"] or "").strip() or nh
-                from_profiles.append(
-                    {
-                        "user_id": uid,
-                        "nickname_hint": nh,
-                        "label": lbl,
-                        "updated_at": r["updated_at"],
-                    }
-                )
-
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "guild_id": str(gid),
-                    "profile_row_count": profile_row_count,
-                    "from_messages": from_messages,
-                    "from_profiles": from_profiles,
-                }
-            )
-        except Exception as exc:
-            logging.exception("user-picker query failed guild=%s", gid)
-            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+            return JSONResponse({"ok": True, "guild_id": guild_id, "members": browse.list_members(conn, limit)})
         finally:
             conn.close()
 
@@ -1859,6 +1489,36 @@ def create_app() -> FastAPI:
         await bot_runner.stop()
         ok, message = await bot_runner.start()
         return JSONResponse({"ok": ok, "message": message, **(await bot_runner.status())})
+
+    # -----------------------------------------------------------------------
+    # Flux server lifecycle — start, stop, restart flux_server.py, the local
+    # image backend. A server started by hand is reported and left alone.
+    # WHY: restart is how a FLUX_* edit or a change to flux_server.py takes
+    # effect. Restarting the bot does not touch this process.
+    # -----------------------------------------------------------------------
+
+    @app.get("/api/flux/status")
+    async def api_flux_status():
+        return JSONResponse(await flux_runner.status())
+
+    @app.get("/api/flux/log")
+    async def api_flux_log(lines: int = 100):
+        return JSONResponse({"ok": True, "lines": flux_runner.tail(lines)})
+
+    @app.post("/api/flux/start")
+    async def api_flux_start():
+        ok, message = await flux_runner.start()
+        return JSONResponse({"ok": ok, "message": message, **(await flux_runner.status())})
+
+    @app.post("/api/flux/stop")
+    async def api_flux_stop():
+        ok, message = await flux_runner.stop()
+        return JSONResponse({"ok": ok, "message": message, **(await flux_runner.status())})
+
+    @app.post("/api/flux/restart")
+    async def api_flux_restart():
+        ok, message = await flux_runner.restart()
+        return JSONResponse({"ok": ok, "message": message, **(await flux_runner.status())})
 
     # Database scan APIs
     # -----------------------------------------------------------------------
@@ -1923,6 +1583,9 @@ def create_app() -> FastAPI:
                             )
                     except (ValueError, Exception):
                         continue
+
+            # Biggest archive first: the dashboard opens on the first one.
+            databases.sort(key=lambda d: -int(d["total_messages"] or 0))
 
             return JSONResponse(
                 {"ok": True, "active_scans": active, "databases": databases, "total_databases": len(databases)}
@@ -2475,112 +2138,63 @@ def create_app() -> FastAPI:
         user_id: str | None = None,
         has_images: bool = False,
         has_urls: bool = False,
+        after: str | None = None,
+        before: str | None = None,
+        order: str = "desc",
     ):
-        """Browse database rows with safe, pre-defined filtering."""
-        try:
-            import sqlite3
-
-            from soupy_database.database import get_db_path
-        except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
-
-        try:
-            guild_id_int = int(guild_id)
-        except ValueError:
-            return JSONResponse({"ok": False, "message": "Invalid guild ID"}, status_code=400)
-
+        """Browse archived messages (or the scan history) with a fixed set of filters."""
         table_name = (table or "messages").strip().lower()
         if table_name not in {"messages", "scan_metadata"}:
             return JSONResponse({"ok": False, "message": "Unsupported table"}, status_code=400)
+        filters = {"channel_id": None, "user_id": None}
+        for key, raw in (("channel_id", channel_id), ("user_id", user_id)):
+            if raw and raw.strip():
+                filters[key] = browse.parse_snowflake(raw)
+                if filters[key] is None:
+                    return JSONResponse({"ok": False, "message": f"Invalid {key}"}, status_code=400)
 
-        safe_limit = max(1, min(limit, 200))
-        safe_offset = max(0, offset)
-
-        db_path = get_db_path(guild_id_int)
-        if not os.path.exists(db_path):
-            return JSONResponse({"ok": False, "message": "Database not found"}, status_code=404)
-
+        conn, error = _open_guild_db(guild_id)
+        if conn is None:
+            return error
         try:
-            conn = sqlite3.connect(db_path, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-
             if table_name == "scan_metadata":
-                cur.execute("SELECT COUNT(*) AS c FROM scan_metadata")
-                total = int(cur.fetchone()["c"])
-                cur.execute(
-                    """
-                    SELECT scan_type, last_scan_time, messages_scanned, created_at
-                    FROM scan_metadata
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    (safe_limit, safe_offset),
+                page = browse.recent_scans(conn, limit)
+            else:
+                page = browse.query_messages(
+                    conn,
+                    search=search or "",
+                    has_images=has_images,
+                    has_urls=has_urls,
+                    after=(after or "").strip(),
+                    before=(before or "").strip(),
+                    newest_first=(order or "").strip().lower() != "asc",
+                    limit=limit,
+                    offset=offset,
+                    **filters,
                 )
-                rows = [dict(r) for r in cur.fetchall()]
-                conn.close()
-                return JSONResponse(
-                    {
-                        "ok": True,
-                        "table": table_name,
-                        "total": total,
-                        "limit": safe_limit,
-                        "offset": safe_offset,
-                        "rows": rows,
-                    }
-                )
-
-            where_parts: list[str] = []
-            params: list[Any] = []
-            if search:
-                where_parts.append(
-                    "(message_content LIKE ? OR username LIKE ? OR channel_name LIKE ? OR image_description LIKE ? OR url_summary LIKE ?)"
-                )
-                search_term = f"%{search.strip()}%"
-                params.extend([search_term, search_term, search_term, search_term, search_term])
-            if channel_id:
-                where_parts.append("CAST(channel_id AS TEXT) = ?")
-                params.append(channel_id)
-            if user_id:
-                where_parts.append("CAST(user_id AS TEXT) = ?")
-                params.append(user_id)
-            if has_images:
-                where_parts.append("image_description IS NOT NULL AND TRIM(image_description) != ''")
-            if has_urls:
-                where_parts.append("url_summary IS NOT NULL AND TRIM(url_summary) != ''")
-
-            where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-
-            count_sql = f"SELECT COUNT(*) AS c FROM messages {where_sql}"
-            cur.execute(count_sql, params)
-            total = int(cur.fetchone()["c"])
-
-            data_sql = f"""
-                SELECT
-                    date, time, username, user_id, channel_name, channel_id,
-                    message_content, image_description, url_summary
-                FROM messages
-                {where_sql}
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-            """
-            data_params = [*params, safe_limit, safe_offset]
-            cur.execute(data_sql, data_params)
-            rows = [dict(r) for r in cur.fetchall()]
+            return JSONResponse({"ok": True, "table": table_name, **page})
+        except Exception as exc:
+            logger.warning("Database explore failed for guild %s", guild_id, exc_info=True)
+            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+        finally:
             conn.close()
 
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "table": table_name,
-                    "total": total,
-                    "limit": safe_limit,
-                    "offset": safe_offset,
-                    "rows": rows,
-                }
-            )
-        except Exception as exc:
-            return JSONResponse({"ok": False, "message": str(exc)}, status_code=500)
+    @app.get("/api/database/context/{guild_id}/{message_id}")
+    async def api_database_context(guild_id: str, message_id: str, before: int = 8, after: int = 8):
+        """A message with its neighbours in the same channel, oldest first."""
+        mid = browse.parse_snowflake(message_id)
+        if mid is None:
+            return JSONResponse({"ok": False, "message": "Invalid message ID"}, status_code=400)
+        conn, error = _open_guild_db(guild_id)
+        if conn is None:
+            return error
+        try:
+            context = browse.message_context(conn, mid, before=before, after=after)
+        finally:
+            conn.close()
+        if context is None:
+            return JSONResponse({"ok": False, "message": "Message not found"}, status_code=404)
+        return JSONResponse({"ok": True, **context})
 
     # Logs websocket
     @app.websocket("/ws/logs")
@@ -2600,11 +2214,17 @@ def create_app() -> FastAPI:
         # Optional autostart if env flag is set
         if settings.autostart_bot:
             await bot_runner.start()
+        # FLUX_SERVER_AUTOSTART: bring the image backend up with the panel.
+        # start() declines when a hand-started server already answers.
+        if flux_runner.autostart_wanted():
+            await flux_runner.start()
 
     @app.on_event("shutdown")
     async def _shutdown():
         # Ensure bot is stopped when app shuts down
         await bot_runner.stop()
+        # Only the panel's own Flux server; stop() leaves a hand-started one alone.
+        await flux_runner.stop()
 
     return app
 

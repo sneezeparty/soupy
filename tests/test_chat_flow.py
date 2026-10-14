@@ -29,6 +29,8 @@ import logging
 logging.getLogger("soupy_prompts").setLevel(logging.ERROR)
 logging.getLogger("soupy_remastered_stablediffusion").setLevel(logging.ERROR)
 
+import pytest  # noqa: E402
+
 import soupy_remastered_stablediffusion as bot  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -125,6 +127,32 @@ def test_clean_response_strips_rag_separator_lines():
 
 def test_clean_response_strips_iso_timestamps():
     assert "2026-03-28" not in bot.clean_response("user said hi at 2026-03-28 19:30:53")
+
+
+def test_clean_response_strips_leaked_history_markers():
+    assert bot.clean_response("[chat from yesterday evening] yeah that tracks") == "yeah that tracks"
+    assert bot.clean_response("that was [chat from about 3 hours ago] ages ago") == "that was ages ago"
+
+
+def test_name_prefix_stripper_removes_a_leading_name():
+    assert bot.remove_all_before_colon("soupy: hello there") == "hello there"
+    assert bot.remove_all_before_colon("'glenn': hello") == "hello"
+    assert bot.remove_all_before_colon("soupy: 3:14 am, go to bed") == "3:14 am, go to bed"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "its 3:14 am and youre still up",
+        "3:14 am. go to bed",
+        "it is 6:11 in the morning glenn",
+        "bro its 2:40",
+        "monday at 9:30 is a crime",
+    ],
+)
+def test_name_prefix_stripper_leaves_clock_times_alone(reply):
+    """A reply that opens with the time used to lose everything up to the colon ("14 am and youre still up")."""
+    assert bot.remove_all_before_colon(reply) == reply
 
 
 def test_clean_response_strips_message_id_metadata():

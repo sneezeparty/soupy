@@ -13,6 +13,7 @@ run on a fresh clone before `pip install` has happened).
 from __future__ import annotations
 
 import getpass
+import os
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -41,6 +42,17 @@ def _c(colour: str, text: str) -> str:
 
 class WizardAbort(Exception):
     """Raised when the user picks "abort" at a retry/skip/abort prompt."""
+
+
+def wizard_command(*flags: str) -> str:
+    """The command that runs the wizard again, for messages that tell the user to.
+
+    Uses the name of the interpreter this run started with (`python3`,
+    `python3.12`, `python.exe`), since plain `python` doesn't exist on macOS
+    and `python3` often doesn't on Windows.
+    """
+    interpreter = os.path.basename(sys.executable or "") or "python3"
+    return " ".join([interpreter, "install.py", *flags])
 
 
 class UI:
@@ -95,7 +107,11 @@ class UI:
                 else:
                     value = input(f"{label}{suffix}: ")
             except EOFError:
-                # Treat EOF (e.g. piped stdin exhausted) as accept-default
+                # Treat EOF (e.g. piped stdin exhausted) as accept-default.
+                # With nothing to fall back on, stop: no answer is coming, and
+                # re-asking would spin forever.
+                if default is None and not allow_blank:
+                    raise WizardAbort(f"no answer for: {label}") from None
                 value = ""
             value = value.strip()
             if not value and default is not None:
@@ -134,12 +150,16 @@ class UI:
             try:
                 raw = input(f"choose 1-{len(options)}{suffix}: ").strip()
             except EOFError:
-                raw = ""
+                if default_index:
+                    return options[default_index - 1][0]
+                # No default and stdin is closed — bail loudly rather than loop forever
+                raise WizardAbort(f"no answer for: {label}") from None
             if not raw and default_index:
                 return options[default_index - 1][0]
             if not raw:
-                # No default and no input — bail loudly rather than loop forever
-                raise WizardAbort(f"no answer for: {label}")
+                # A stray Enter at the keyboard is not a reason to end the wizard.
+                self.warn(f"pick a number from 1 to {len(options)}")
+                continue
             try:
                 idx = int(raw)
             except ValueError:

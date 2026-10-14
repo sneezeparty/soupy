@@ -63,7 +63,7 @@ invariant in ARCHITECTURE.md.
 | A config knob | `soupy/settings.py` |
 | A persona / system prompt | `prompts/<name>.default.txt` |
 | Database / RAG / profile / self-knowledge logic | `soupy_database/` |
-| A web endpoint or panel feature | `web/app.py` (+ `web/static/dashboard/`) |
+| A web endpoint or panel feature | `web/app.py` (+ `web/static/dashboard/`). Routes stay thin: the logic goes in `web/services/` (`browse.py` for read-only queries, `lm_studio.py` for the model server, `prompt_store.py` for prompt files), where tests reach it without starting the panel |
 
 Prefer adding to a cog or the `soupy/` package over growing the main file — it's
 already 6 K+ lines and the [roadmap](ROADMAP.md) calls for shrinking it, not feeding
@@ -148,7 +148,8 @@ Checklist:
    (`_env_str`, `_env_int`, `_env_bool`, `_env_str_list`). Give it a sane default.
 2. Read it as `settings.my_var` wherever you need it.
 3. Add it to **`.env-stable.example`** with a comment (this is what the installer
-   renders from — it is not auto-synced).
+   renders from — it is not auto-synced). Put the comment on its own line: the web
+   panel reads everything after `=` as the value.
 4. Document it in **`docs/ENV_REFERENCE.md`**.
 5. If it should be editable from the panel, it already is — the env editor reads
    `.env-stable`. **Exception:** the long prompt vars (`BEHAVIOUR`, `BEHAVIOUR_SEARCH`,
@@ -166,7 +167,10 @@ restart, read it per-call instead and document why (the `triggers.py` pattern).
 
 1. Ship the default as `prompts/<name>.default.txt` (tracked in git).
 2. Load it: `soupy_prompts.load_prompt("<name>", fallback="…")`.
-3. Users override by creating `prompts/<name>.txt` (gitignored).
+3. Add it to `PROMPTS` in `web/services/prompt_store.py`, so the panel's editor
+   lists it. `tests/test_web_prompts.py` fails until you do.
+4. Users override by creating `prompts/<name>.txt` (gitignored), by hand or from
+   the panel.
 
 Resolution order is legacy env var → `prompts/<name>.txt` → `prompts/<name>.default.txt`
 → caller fallback. Legacy env-var prompts emit a one-time deprecation warning.
@@ -243,9 +247,36 @@ python soupy_remastered_stablediffusion.py
 
 ## Touching the web front end (developers only)
 
-End users never need Node — the dashboard's compiled JS ships in
-`web/static/dashboard/`. The active UI is the vanilla-JS dashboard
-(`web/static/dashboard/dashboard-app.js`). A React+Vite rewrite scaffold exists under
+End users never need Node: the dashboard is plain JavaScript served from
+`web/static/dashboard/`, with no build step. `web/templates/dashboard.html` loads
+five scripts in order: `dashboard-core.js` (fetch and formatting helpers, the
+overlay, confirm dialog and toast), `dashboard-media.js` (the Media tab and its
+lightbox), `dashboard-database.js` (the Database tab), `dashboard-model.js` (the
+Model & Personality tab), and `dashboard-app.js` (the shell and the other tabs). They share one namespace, `window.SoupyDash`. React and
+Pico CSS are vendored in `web/static/vendor/`, so the panel needs no internet.
+
+Four things to know before editing it:
+
+- **Send Discord IDs to the browser as strings.** A browser reads a JSON number as
+  a double, so `123456789012345678` arrives as `123456789012345680` and matches
+  nothing when it comes back as a filter. `web/services/browse.py` does this for
+  every row it returns.
+- **Pico CSS restyles ARIA roles.** Anything with `role="button"` is painted as a
+  solid button and `role="group"` as a full-width button group. A row or tile that
+  only behaves like a button takes the `dash-plain` class to undo that.
+- **Overlays render into `#dashboard-overlays`**, outside `#dashboard-root`, so
+  styles scoped to the root don't reach them.
+- **The page can be newer than the server.** Static files are read from disk on
+  every load; `web/app.py` only when the panel starts. A tab that depends on a new
+  or changed endpoint has to cope with the old answer until the restart
+  (`dashboard-model.js` checks the shape and says the panel needs restarting).
+
+To try a change that saves prompts or switches models without touching a real
+install, copy the repo somewhere, give the copy its own `.env-stable` whose
+`OPENAI_BASE_URL` points at `python tests/fake_lm_studio.py --port 15112`, and run
+the panel from the copy on another port.
+
+A React+Vite rewrite scaffold exists under
 `web/frontend/` but is **not currently served**; its fate is an open question in
 [ROADMAP.md](ROADMAP.md). Don't assume work there reaches users until that's
 resolved. If you do work on it: `npm install` once in `web/frontend/`, then

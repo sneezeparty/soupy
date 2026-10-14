@@ -11,6 +11,7 @@ the other way around.
 | `progress_report.py` | Print a per-guild summary of message counts, scan progress, and RAG coverage. |
 | `check_database.py` | One-liner sanity check: row counts, top users, last scan timestamp. |
 | `check_database.sh` | Shell version of the above using `sqlite3` directly — no Python required. |
+| `prune_flux_sources.py` | Remove the copies of archived pictures that older versions left in `media/flux_sources`. Reports by default; `--delete` removes them. |
 
 Run from the repo root, e.g.:
 

@@ -2,7 +2,8 @@
 
 - Verify Python ≥ 3.10 (abort otherwise).
 - Verify `git` on PATH (informational).
-- Create `.venv` if missing and install bot deps from `requirements.txt`.
+- Create `.venv` if missing and install bot deps from `requirements.txt`
+  (or the pinned `requirements.lock` when the wizard was run with `--locked`).
 - If image_gen_mode is local_cuda / local_mps, also build `.venv-sd` with
   the right PyTorch flavour and the SD requirements.
 
@@ -25,12 +26,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BOT_VENV = REPO_ROOT / ".venv"
 SD_VENV = REPO_ROOT / ".venv-sd"
 
-# Prefer the lock file when present, fall back to the loose requirements.
+# requirements.txt is the default: its `>=` pins resolve on every platform and
+# Python the bot supports. The lock is a snapshot of one interpreter on one OS
+# (its header says which), so it is only installed when asked for: preferring
+# it whenever it existed broke Windows (it pins uvloop, which has no Windows
+# build) and sent Python 3.14 off to compile numpy from source.
 BOT_REQS_LOCK = REPO_ROOT / "requirements.lock"
 BOT_REQS_LOOSE = REPO_ROOT / "requirements.txt"
-BOT_REQS = BOT_REQS_LOCK if BOT_REQS_LOCK.exists() else BOT_REQS_LOOSE
 SD_REQS = REPO_ROOT / "sd-api" / "requirements.txt"
 SD_REQS_MAC = REPO_ROOT / "sd-api" / "requirements-m1-mac.txt"
+
+# Entry point per local Stable Diffusion mode, relative to sd-api/.
+SD_ENTRYPOINTS = {"local_cuda": "sd_api.py", "local_mps": "sd_api-mac.py"}
 
 PYTORCH_CUDA_CMD = [
     "torch==2.4.0+cu118",
@@ -46,7 +53,7 @@ PYTORCH_MPS_CMD = ["torch", "torchvision", "torchaudio"]
 FLUX_BOT_VENV_EXTRAS = ["mflux", "python-multipart"]
 
 
-def _venv_python(venv: Path) -> Path:
+def venv_python(venv: Path) -> Path:
     if sys.platform == "win32":  # pragma: no cover — wizard targets POSIX in tests
         return venv / "Scripts" / "python.exe"
     return venv / "bin" / "python"
@@ -70,7 +77,7 @@ def _has_sentinel(venv: Path, sentinel: str) -> bool:
     (regular wheel, editable, direct URL). The previous implementation
     parsed `pip freeze` output and missed editable installs.
     """
-    py = _venv_python(venv)
+    py = venv_python(venv)
     if not py.exists():
         return False
     try:
@@ -91,13 +98,22 @@ def _has_sentinel(venv: Path, sentinel: str) -> bool:
 
 
 def _create_venv(venv: Path, ui) -> None:
-    if venv.exists():
+    if _venv_pip(venv).exists():
         return
+    # Check for pip, not for the directory: a directory with no pip in it is
+    # what a failed `python -m venv` leaves behind (Debian/Ubuntu without
+    # python3-venv). Running venv over it again fills in what is missing.
     ui.step(f"creating {venv.name}")
-    subprocess.run(
-        [sys.executable, "-m", "venv", str(venv)],
-        check=True,
-    )
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(venv)],
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        ui.fail(f"could not create {venv.name} with {sys.executable}")
+        ui.info("  On Debian/Ubuntu the venv module is a separate package:  sudo apt install python3-venv")
+        ui.info("  Then run the wizard again.")
+        raise SystemExit(2) from None
 
 
 def _stream_pip(cmd: List[str], ui) -> int:
@@ -137,15 +153,25 @@ def _install(venv: Path, args: Iterable[str], ui) -> None:
         raise RuntimeError(f"pip install failed (exit {rc}): {' '.join(args)}")
 
 
-def _setup_bot_venv(ui, dry_run: bool) -> None:
+def _bot_requirements(locked: bool, ui) -> Path:
+    if not locked:
+        return BOT_REQS_LOOSE
+    if not BOT_REQS_LOCK.exists():
+        ui.fail(f"--locked needs {BOT_REQS_LOCK.name}, which is not in this checkout")
+        raise SystemExit(2)
+    return BOT_REQS_LOCK
+
+
+def _setup_bot_venv(ui, dry_run: bool, *, locked: bool = False) -> None:
     if _has_sentinel(BOT_VENV, "discord.py"):
         ui.ok(f"{BOT_VENV.name} already has bot deps installed")
         return
+    reqs = _bot_requirements(locked, ui)
     if dry_run:
-        ui.info(f"[dry-run] would create {BOT_VENV.name} and install {BOT_REQS}")
+        ui.info(f"[dry-run] would create {BOT_VENV.name} and install {reqs}")
         return
     _create_venv(BOT_VENV, ui)
-    _install(BOT_VENV, ["-r", str(BOT_REQS)], ui)
+    _install(BOT_VENV, ["-r", str(reqs)], ui)
     ui.ok("bot deps installed")
 
 
@@ -199,7 +225,7 @@ def run(state: Dict, ui) -> Dict:
     dry_run = bool(state.get("__dry_run__"))
 
     mode = state.get("image_gen_mode", "none")
-    _setup_bot_venv(ui, dry_run)
+    _setup_bot_venv(ui, dry_run, locked=bool(state.get("__locked__")))
     if mode == "local_flux":
         _setup_flux_extras(ui, dry_run)
     _setup_sd_venv(mode, ui, dry_run)

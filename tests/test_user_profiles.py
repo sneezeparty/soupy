@@ -318,6 +318,24 @@ def test_chat_render_fits_the_budget_with_whole_items_and_month_dates():
             assert line.endswith("(Mar 2025)"), f"item cut mid-way or missing its month: {line!r}"
 
 
+def test_chat_render_can_say_how_long_ago_instead_of_the_month():
+    text = pdoc.render_for_chat(_rich_doc(), ["tell", "about"], 5000, today=date(2025, 3, 20), relative_dates=True)
+    assert "(Mar 2025)" not in text
+    items = [line for line in text.splitlines()[1:] if not line.startswith("Style:")]
+    assert items and all(re.search(r"\(about (a week|\d weeks) ago\)$", line) for line in items), text
+    assert "shopping for a used camper van (about a week ago)" in text
+
+
+def test_item_age_keeps_the_first_date_and_adds_when_it_came_up_again():
+    today = date(2026, 10, 6)
+    item = {"id": "x1", "text": "has a corgi", "date": "2024-03-02", "last_seen": "2026-09-01"}
+    assert pdoc._item_when(item, today, False) == "Mar 2024"
+    assert pdoc._item_when(item, today, True) == "about 3 years ago, again about 5 weeks ago"
+    same = {"id": "x2", "text": "bought a kayak", "date": "2026-09-01", "last_seen": "2026-09-03"}
+    assert pdoc._item_when(same, today, True) == "about 5 weeks ago", "no 'again' when it says the same thing"
+    assert pdoc._item_when({"id": "x3", "text": "undated"}, today, True) == ""
+
+
 def test_chat_render_hides_guesses_and_stale_lately_items():
     doc = _rich_doc()
     text = pdoc.render_for_chat(doc, ["teacher", "camper"], 5000, today=date(2026, 9, 14))
@@ -580,6 +598,23 @@ def test_full_build_saves_every_pass_with_dated_items(archive, monkeypatch):
     assert cursor == 1059, "cursor is the last message folded in"
     assert [it["date"] for it in pdoc.section_items(doc, "hobbies")] == ["2025-03-01", "2025-03-11", "2025-03-21"]
     assert "(2025-03-11)" in summary
+
+
+def test_profile_prefix_switches_to_ages_when_given_the_clock(archive, monkeypatch):
+    _fake_llm(monkeypatch, _one_add)
+    asyncio.run(user_profiles.refresh_user_profile(1, 1))
+    conn = sqlite3.connect(archive)
+    conn.row_factory = sqlite3.Row
+    try:
+        months = user_profiles.format_profile_prefix_for_rag(conn, 1, "what are my hobbies", "what are my hobbies")
+        ages = user_profiles.format_profile_prefix_for_rag(
+            conn, 1, "what are my hobbies", "what are my hobbies", now=datetime(2025, 6, 1, 9, 0)
+        )
+    finally:
+        conn.close()
+    assert "(Mon YYYY) marks when something came up in chat." in months and "archery (Mar 2025)" in months
+    assert "The bracket after an item says how long ago it came up in chat." in ages
+    assert "archery (about 3 months ago)" in ages and "(Mar 2025)" not in ages and "Mon YYYY" not in ages
 
 
 def test_recent_chat_shrinks_passes(archive, monkeypatch):

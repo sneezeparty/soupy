@@ -97,6 +97,17 @@ def test_parse_existing_returns_kv(tmp_path: Path):
     assert out["BEHAVIOUR"] == "multi\nline"
 
 
+def test_parse_existing_reads_back_what_render_wrote(tmp_path: Path):
+    # A re-run seeds its daily-post prompt from this value. Left escaped, the
+    # JSON didn't load and the existing channel map was replaced by "{}".
+    payload = '{"123456789012345678": "tech and gaming"}'
+    target = tmp_path / ".env-stable"
+    env_writer.write(FIXTURE, target, {"DAILY_POST_CHANNELS": payload, "LOCAL_CHAT": "google/gemma 3 27b"})
+    out = env_writer.parse_existing(target)
+    assert out["DAILY_POST_CHANNELS"] == payload
+    assert out["LOCAL_CHAT"] == "google/gemma 3 27b"
+
+
 def test_diff_masks_secrets():
     rows = env_writer.diff(
         {"DISCORD_TOKEN": "old", "CHANNEL_IDS": "111"},
