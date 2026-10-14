@@ -136,7 +136,7 @@ def test_clean_response_strips_leaked_history_markers():
 
 def test_name_prefix_stripper_removes_a_leading_name():
     assert bot.remove_all_before_colon("soupy: hello there") == "hello there"
-    assert bot.remove_all_before_colon("'glenn': hello") == "hello"
+    assert bot.remove_all_before_colon("'brian': hello") == "hello"
     assert bot.remove_all_before_colon("soupy: 3:14 am, go to bed") == "3:14 am, go to bed"
 
 
@@ -145,7 +145,7 @@ def test_name_prefix_stripper_removes_a_leading_name():
     [
         "its 3:14 am and youre still up",
         "3:14 am. go to bed",
-        "it is 6:11 in the morning glenn",
+        "it is 6:11 in the morning brian",
         "bro its 2:40",
         "monday at 9:30 is a crime",
     ],

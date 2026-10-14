@@ -1088,11 +1088,11 @@ def _token_is_name_match(token: str, name: str) -> bool:
 
     Returns True for:
       - Exact match:        "ranc1d" == "ranc1d"                     (100%)
-      - Leading-word match: "glenn" matches first word of "glenn dafoe"
-      - High-ratio match:   "glenn" in "glenneroo"   (5/9 = 56%)
+      - Leading-word match: "brian" matches first word of "brian dafoe"
+      - High-ratio match:   "brian" in "brianstew"   (5/9 = 56%)
 
     Returns False for:
-      - Low-ratio substring: "cool" in "snackpacksarecool"  (4/17 = 24%)
+      - Low-ratio substring: "cool" in "pancakesaresocool"  (4/17 = 24%)
       - "rights" in "squirrelrights"                        (6/14 = 43%)
 
     The threshold is that the token must cover at least 50% of the matched
@@ -1106,15 +1106,15 @@ def _token_is_name_match(token: str, name: str) -> bool:
     if token == name_lower:
         return True
 
-    # Match on the first word of a multi-word name (e.g. "glenn" → "glenn dafoe")
+    # Match on the first word of a multi-word name (e.g. "brian" → "brian dafoe")
     first_word = name_lower.split()[0] if " " in name_lower else name_lower
     if token == first_word:
         return True
 
     # Check if token is a substantial portion of any individual word in the name.
     # "ranc1d" in "ranc1d"                 → 6/6  = 100% ✓
-    # "glenn"  in "glenneroo"              → 5/9  =  56% ✓
-    # "cool"   in "snackpacksarecool"      → 4/17 =  24% ✗
+    # "brian"  in "brianstew"              → 5/9  =  56% ✓
+    # "cool"   in "pancakesaresocool"      → 4/17 =  24% ✗
     # "rights" in "squirrelrights"         → 6/14 =  43% ✗
     # "art"    in "The Artist"             → 3/7  =  43% ✗ (checked against "artist")
     if token in name_lower:
@@ -1138,7 +1138,7 @@ def _resolve_subject_user_id(conn: sqlite3.Connection, tokens: Sequence[str]) ->
     - Exact matches always win
     - Leading-word matches (first word of multi-word nickname) always win
     - Substring matches require the token to cover ≥50% of the name
-    This prevents "cool" from matching "snackpacksarecool" or "rights" from
+    This prevents "cool" from matching "pancakesaresocool" or "rights" from
     matching "squirrelrights" without needing a stopword list.
     """
     try:
@@ -1172,7 +1172,7 @@ def _resolve_subject_user_id(conn: sqlite3.Connection, tokens: Sequence[str]) ->
         # Skip very short tokens (1-2 chars) — too ambiguous
         if len(tok) < 3:
             continue
-        # Also try without trailing 's' so "glenns" matches "glenn", etc.
+        # Also try without trailing 's' so "brians" matches "brian", etc.
         candidates = [tok]
         if tok.endswith("s") and len(tok) > 3:
             candidates.append(tok[:-1])
@@ -1453,7 +1453,7 @@ async def fetch_rag_context_for_query(
         # Resolve subject early so profile and vector boost target the right person.
         # Use only the current message (not full conversation history) to avoid noise tokens.
         # Also strip the "user (displayname):" prefix so the asker's own name isn't resolved
-        # as the subject (e.g. "user (ranc1d): what are glenns opinions" → "what are glenns opinions").
+        # as the subject (e.g. "user (ranc1d): what are brians opinions" → "what are brians opinions").
         _cur_for_subject = query_text or ""
         if "Current message:\n" in _cur_for_subject:
             _cur_for_subject = _cur_for_subject.split("Current message:\n")[-1].strip()
@@ -1506,7 +1506,7 @@ async def fetch_rag_context_for_query(
         )
 
         # Build a name-mapping note when the subject's display names don't obviously
-        # match the token the user typed (e.g. "agro" → username ".agro.", nickname "oɹƃɐ").
+        # match the token the user typed (e.g. "milo" → username ".milo.", nickname "olᴉɯ").
         _name_map_note = ""
         if _subject_uid and _subject_tok:
             cur = conn.cursor()

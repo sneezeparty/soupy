@@ -211,7 +211,7 @@ def test_long_reply_is_split_into_multiple_sends():
 # ---------------------------------------------------------------------------
 
 _OLD_AND_NEW_HISTORY = (
-    {"role": "user", "content": "glenn: anyone watching the game", "ts": NOW - timedelta(hours=11, minutes=14)},
+    {"role": "user", "content": "brian: anyone watching the game", "ts": NOW - timedelta(hours=11, minutes=14)},
     {"role": "assistant", "content": "nah", "ts": NOW - timedelta(hours=11, minutes=13)},
     {"role": "user", "content": "jdk: morning", "ts": NOW - timedelta(minutes=2)},
 )
@@ -237,7 +237,7 @@ def test_time_awareness_marks_old_history_and_keeps_markers_out_of_soupys_turns(
 
     sent = _llm_messages(started)
     assert all(set(m) == {"role", "content"} for m in sent), "history timestamps must never reach the LLM API"
-    assert sent[1]["content"] == "[chat from yesterday evening]\nglenn: anyone watching the game"
+    assert sent[1]["content"] == "[chat from yesterday evening]\nbrian: anyone watching the game"
     assert sent[2] == {"role": "assistant", "content": "nah"}
     assert sent[3]["content"].startswith("[chat from the last few minutes]\njdk: morning\n")
     assert "The channel had been quiet" not in sent[3]["content"], "the last message was two minutes ago"
@@ -262,7 +262,7 @@ def test_time_awareness_off_leaves_the_prompt_without_a_clock_or_markers():
     assert all(set(m) == {"role", "content"} for m in sent)
     blob = "\n".join(m["content"] for m in sent)
     assert "Right now it is" not in blob and "[chat from" not in blob and "had been quiet" not in blob
-    assert "glenn: anyone watching the game" in blob
+    assert "brian: anyone watching the game" in blob
 
 
 def test_retrieval_gets_the_same_clock_or_none_when_off():

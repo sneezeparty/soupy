@@ -211,7 +211,7 @@ def member_aliases(conn: sqlite3.Connection, names: Mapping[int, str], limit: in
     """Other names each member has gone by in the archive (usernames, older nicknames), newest first.
 
     The exchanges show everyone under their current nickname, but Soupy often used a username or an old
-    nickname ("mr.keith7444" for sMURF0r), so matching memories to people needs all of them.
+    nickname ("mr.dale5521" for gRUMBL0r), so matching memories to people needs all of them.
     """
     out: Dict[int, List[str]] = {}
     for uid, current in names.items():
@@ -424,7 +424,7 @@ async def refresh_self_profile(
         present: Set[int] = set()
         for mid, _day, _text in chunk:
             present.update(people.get(mid, ()))
-        # Members Soupy names without them speaking ("i agree with ranc1d", "mr.keith7444") count too.
+        # Members Soupy names without them speaking ("i agree with ranc1d", "mr.dale5521") count too.
         chunk_lower = "\n".join(u[2] for u in chunk).lower()
         for uid, pats in patterns.items():
             if uid not in present and any(p.search(chunk_lower) for p in pats):

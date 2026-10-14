@@ -219,14 +219,14 @@ def test_live_history_is_left_alone_apart_from_dropping_the_timestamps():
 
 def test_each_stretch_of_history_is_marked_with_its_age():
     history = [
-        _msg("user", "glenn: anyone watching the game", _at(2026, 10, 5, 19, 0)),
+        _msg("user", "brian: anyone watching the game", _at(2026, 10, 5, 19, 0)),
         _msg("assistant", "nah", _at(2026, 10, 5, 19, 1)),
         _msg("user", "bo: back", NOW - timedelta(hours=3)),
         _msg("user", "ann: morning", NOW - timedelta(minutes=2)),
     ]
     assert ta.label_history(history, NOW) == [
         {"role": "user", "content": "[chat from yesterday evening]"},
-        {"role": "user", "content": "glenn: anyone watching the game"},
+        {"role": "user", "content": "brian: anyone watching the game"},
         {"role": "assistant", "content": "nah"},
         {"role": "user", "content": "[chat from about 3 hours ago]"},
         {"role": "user", "content": "bo: back"},
@@ -265,7 +265,7 @@ def test_every_marker_matches_the_pattern_the_reply_cleaner_strips():
 
 
 def test_quiet_note_only_when_the_message_broke_a_silence():
-    history = [_msg("user", "glenn: night all", _at(2026, 10, 5, 19, 1))]
+    history = [_msg("user", "brian: night all", _at(2026, 10, 5, 19, 1))]
     assert ta.quiet_note(history, NOW) == (
         "This message is new. The channel had been quiet for about 11 hours before it.\n"
     )

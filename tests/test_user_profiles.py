@@ -146,22 +146,22 @@ def test_invalid_sections_and_unknown_relationship_ids_are_handled():
 
 
 def test_relationship_items_get_names_and_lose_raw_ids():
-    directory = {109839305987338240: "ohsmitt", 555245126172278785: "big daddio nitro"}
+    directory = {100000000000000001: "marlowe", 100000000000000002: "captain tangent"}
     doc, _ = _doc_with(
         {
             "add": [
                 # The two shapes gemma actually produced in the first sample build.
                 {
                     "section": "relationships_with_others",
-                    "text": "user 0 (?): user 109839305987338240; lives in Barrie",
+                    "text": "user 0 (?): user 100000000000000001; lives in Springfield",
                     "date": "2025-03-05",
                     "user_id": 0,
                 },
                 {
                     "section": "relationships_with_others",
-                    "text": "met up with them in Yelapa",
+                    "text": "met up with them at a convention",
                     "date": "2025-03-06",
-                    "user_id": 555245126172278785,
+                    "user_id": 100000000000000002,
                 },
             ]
         },
@@ -169,13 +169,13 @@ def test_relationship_items_get_names_and_lose_raw_ids():
     )
     rels = pdoc.section_items(doc, "relationships_with_others")
     assert [(r["user_id"], r["name"]) for r in rels] == [
-        (109839305987338240, "ohsmitt"),
-        (555245126172278785, "big daddio nitro"),
+        (100000000000000001, "marlowe"),
+        (100000000000000002, "captain tangent"),
     ]
-    assert rels[0]["text"] == "ohsmitt; lives in Barrie"
-    assert "ohsmitt: ohsmitt" not in pdoc.render_summary(doc), "no name prefix when the text already names them"
+    assert rels[0]["text"] == "marlowe; lives in Springfield"
+    assert "marlowe: marlowe" not in pdoc.render_summary(doc), "no name prefix when the text already names them"
     prompt = pdoc.render_for_prompt(doc)
-    assert "{name=ohsmitt, user_id=109839305987338240}" in prompt
+    assert "{name=marlowe, user_id=100000000000000001}" in prompt
 
     iid = rels[0]["id"]
     doc, _ = pdoc.apply_edits(
@@ -185,7 +185,7 @@ def test_relationship_items_get_names_and_lose_raw_ids():
                 {
                     "id": iid,
                     "date": "2025-03-10",
-                    "text": "fellow Canadian near Barrie {name=ohsmitt, user_id=109839305987338240}",
+                    "text": "fellow gardener near Springfield {name=marlowe, user_id=100000000000000001}",
                 }
             ]
         },
@@ -193,7 +193,7 @@ def test_relationship_items_get_names_and_lose_raw_ids():
         source_text="",
         directory=directory,
     )
-    assert pdoc.section_items(doc, "relationships_with_others")[0]["text"] == "fellow Canadian near Barrie"
+    assert pdoc.section_items(doc, "relationships_with_others")[0]["text"] == "fellow gardener near Springfield"
 
 
 def test_prompt_example_copies_are_dropped_unless_the_member_said_it():

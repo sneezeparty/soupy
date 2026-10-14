@@ -3599,7 +3599,7 @@ def remove_all_before_colon(text: str) -> str:
     Handles both quoted and unquoted prefixes.
     Example: "soupy: hello there" -> "hello there"
     Example: "Alice: what's up" -> "what's up"
-    Example: "'glenn': hello" -> "hello"
+    Example: "'brian': hello" -> "hello"
     Example: "The time is 3:45 PM" -> "The time is 3:45 PM" (not removed, not at start)
     Example: "its 3:45 pm" -> "its 3:45 pm" (not removed, a clock time is not a prefix)
     """
@@ -3965,7 +3965,7 @@ async def process_chat_message(message: discord.Message, image_descriptions: lis
             #
             # Heavy visual fences — `=` rows are uncommon enough in chat that the model
             # latches onto them as scope boundaries even after 10k+ chars of background.
-            # Vague short triggers ("thats a wild home setup lol") were being lost in
+            # Vague short triggers ("thats a wild setup lol") were being lost in
             # the merged user blob and Soupy's reply drifted; bracketing the trigger
             # both before AND after kept the model anchored in tests.
             user_message = {

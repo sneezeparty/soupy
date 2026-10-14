@@ -587,28 +587,28 @@ def test_requested_preview_runs_between_members(archive, monkeypatch):
 
 
 def test_people_are_matched_by_older_names_and_usernames():
-    # The exchange shows sMURF0r's current nickname; Soupy called him by his username.
-    source = "[2025-01-24 #714] SOUPY: wow, mr.keith7444 really knows how to make friends."
+    # The exchange shows gRUMBL0r's current nickname; Soupy called him by his username.
+    source = "[2025-01-24 #lounge] SOUPY: wow, mr.dale5521 really knows how to pick a movie."
     edits = _edits(
         add=[
             {
                 "section": "relationships",
-                "text": "i roast him about his monetization ideas",
+                "text": "i tease him about his sandwich rankings",
                 "date": "2025-01-24",
-                "name": "mr.keith7444",
+                "name": "mr.dale5521",
                 "user_id": 0,
             }
         ]
     )
-    without, stats = _self_doc(edits, source, directory={BO: "sMURF0r"})
+    without, stats = _self_doc(edits, source, directory={BO: "gRUMBL0r"})
     assert pdoc.item_count(without, pdoc.SELF) == 0 and stats.dropped_ungrounded == 1
     with_aliases, _ = pdoc.apply_edits(
         pdoc.new_document(pdoc.SELF),
         edits,
         window=WINDOW,
         source_text=source,
-        directory={BO: "sMURF0r"},
-        aliases={BO: ["mr.keith7444"]},
+        directory={BO: "gRUMBL0r"},
+        aliases={BO: ["mr.dale5521"]},
         kind=pdoc.SELF,
     )
     [item] = pdoc.section_items(with_aliases, "relationships")
@@ -616,14 +616,14 @@ def test_people_are_matched_by_older_names_and_usernames():
 
 
 def test_rephrasings_of_the_same_dynamic_merge_within_one_person():
-    source = "oɹƃɐ: are you ai"
-    directory = {ANN: "oɹƃɐ"}
+    source = "olᴉɯ: are you ai"
+    directory = {ANN: "olᴉɯ"}
     doc, _ = _self_doc(
         _edits(
             add=[
                 {
                     "section": "relationships",
-                    "text": "i'm pretty dry with him; i told him he was just a guy with a camera when he asked if i was ai",
+                    "text": "i'm fairly blunt with him; i told him he was just a man with a kazoo when he asked if i was ai",
                     "date": "2025-01-07",
                     "user_id": ANN,
                 }
@@ -638,7 +638,7 @@ def test_rephrasings_of_the_same_dynamic_merge_within_one_person():
             add=[
                 {
                     "section": "relationships",
-                    "text": "i'm pretty dry with him; i tell him he's just a guy with a camera and mock his bravery",
+                    "text": "i'm fairly blunt with him; i tell him he's just a man with a kazoo and mock his bravery",
                     "date": "2025-01-19",
                     "user_id": ANN,
                 }
@@ -661,11 +661,11 @@ def test_member_aliases_lists_other_names_newest_first(tmp_path):
         "INSERT INTO messages (message_id, date, time, username, nickname, user_id, message_content, channel_id, "
         "channel_name) VALUES (?, ?, ?, ?, ?, ?, ?, 5, 'chan5')",
         [
-            (1, "2025-01-01", "10:00:00", "diego4445", "aggressive squirrel baffle", ANN, "a"),
-            (2, "2025-06-01", "10:00:00", "diego4445", "valued opinion haver", ANN, "b"),
-            (3, "2026-09-01", "10:00:00", "diego4445", "i was fallout", ANN, "c"),
+            (1, "2025-01-01", "10:00:00", "casey2210", "sleepy pancake wizard", ANN, "a"),
+            (2, "2025-06-01", "10:00:00", "casey2210", "certified snack critic", ANN, "b"),
+            (3, "2026-09-01", "10:00:00", "casey2210", "i was a teapot", ANN, "c"),
         ],
     )
-    aliases = self_profile.member_aliases(conn, {ANN: "i was fallout"})
+    aliases = self_profile.member_aliases(conn, {ANN: "i was a teapot"})
     conn.close()
-    assert aliases == {ANN: ["diego4445", "valued opinion haver", "aggressive squirrel baffle"]}
+    assert aliases == {ANN: ["casey2210", "certified snack critic", "sleepy pancake wizard"]}

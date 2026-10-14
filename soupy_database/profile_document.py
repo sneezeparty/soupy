@@ -20,7 +20,7 @@ Shape::
           {"id": "pt3", "text": "...", "date": "2024-03-02", "last_seen": "2025-06-01"},
           ...
         ],
-        "relationships_with_others": [{"id": "rel1", "text": "...", "date": "...", "user_id": 123, "name": "elektron"}],
+        "relationships_with_others": [{"id": "rel1", "text": "...", "date": "...", "user_id": 123, "name": "juniper"}],
         "channels": [{"id": "chan1", "text": "...", "date": "...", "name": "#general"}],
         ...
       },
@@ -841,7 +841,7 @@ def _resolve_member(
     text = _RAW_MEMBER_ID_RE.sub(_named, text)
     text = re.sub(r"\s*\(\?\)", "", text).strip()
     if name:
-        # "knows ohsmitt (ohsmitt)" → "knows ohsmitt"
+        # "knows marlowe (marlowe)" → "knows marlowe"
         text = re.sub(rf"({re.escape(name)})\s*\({re.escape(name)}\)", r"\1", text, flags=re.IGNORECASE)
     return uid, name, text
 
@@ -950,7 +950,7 @@ def apply_edits(
         if member is not None and kind.per_person_cap:
             # Near-duplicates only count within the same person ("i trust X" and "i trust Y" differ), and
             # within one person the bar is lower: a small model keeps rephrasing the same dynamic
-            # ("i'm pretty dry with him; i told him..." / "...i tell him...") instead of updating it.
+            # ("i'm fairly blunt with him; i told him..." / "...i tell him...") instead of updating it.
             pool = [it for it in pool if _as_int(it.get("user_id")) == member[0]]
             threshold = 0.4
         existing = _duplicate_of(pool, text, threshold)

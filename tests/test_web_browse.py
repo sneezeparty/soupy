@@ -19,7 +19,7 @@ from web.services import browse
 
 # Real-sized snowflakes. Neither survives a trip through a JavaScript number.
 RANC1D = 123456789012345678
-GLENN = 234567890123456789
+BRIAN = 234567890123456789
 GENERAL = 345678901234567890
 MEMES = 456789012345678901
 
@@ -35,7 +35,7 @@ def _add_message(conn, mid, user_id, text, *, channel=GENERAL, day="2026-10-13",
             mid,
             day,
             time,
-            extra.get("username", "sneezeparty" if user_id == RANC1D else "glenn"),
+            extra.get("username", "sneezeparty" if user_id == RANC1D else "brian"),
             extra.get("nickname", "ranc1d" if user_id == RANC1D else None),
             user_id,
             text,
@@ -87,14 +87,14 @@ def seeded(archive, write):
     def fill(conn):
         # Inserted newest-first, as a backfill scan does, so created_at runs against send order.
         _add_message(conn, 300, RANC1D, "third: 100% done", created_at="2026-10-13 00:00:01")
-        _add_message(conn, 200, GLENN, "second, snake_case here", day="2026-10-12", created_at="2026-10-13 00:00:02")
+        _add_message(conn, 200, BRIAN, "second, snake_case here", day="2026-10-12", created_at="2026-10-13 00:00:02")
         _add_message(conn, 100, RANC1D, "first", day="2026-10-11", channel=MEMES, created_at="2026-10-13 00:00:03")
-        _add_message(conn, 150, GLENN, "", day="2026-10-11", channel=MEMES, image="a ginger cat asleep in a sink")
+        _add_message(conn, 150, BRIAN, "", day="2026-10-11", channel=MEMES, image="a ginger cat asleep in a sink")
         # Says "1000" and "snake-case": near misses for the wildcard test below.
         _add_message(
             conn,
             250,
-            GLENN,
+            BRIAN,
             "read this snake-case 1000 times",
             day="2026-10-12",
             time="23:30:00",
@@ -152,7 +152,7 @@ def test_filters_combine(seeded):
     assert _ids(browse.query_messages(seeded, channel_id=MEMES)) == ["150", "100"]
     assert _ids(browse.query_messages(seeded, has_images=True)) == ["150"]
     assert _ids(browse.query_messages(seeded, has_urls=True)) == ["250"]
-    assert _ids(browse.query_messages(seeded, channel_id=MEMES, user_id=GLENN)) == ["150"]
+    assert _ids(browse.query_messages(seeded, channel_id=MEMES, user_id=BRIAN)) == ["150"]
     assert browse.query_messages(seeded, channel_id=MEMES, has_urls=True)["total"] == 0
 
 
@@ -176,15 +176,15 @@ def test_members_are_listed_under_their_latest_name(archive, write):
     def fill(conn):
         _add_message(conn, 1, RANC1D, "a", nickname="zzz old nickname")
         _add_message(conn, 2, RANC1D, "b", nickname="ranc1d")
-        _add_message(conn, 3, GLENN, "c", nickname=None, username="glenn")
-        _add_message(conn, 4, GLENN, "d", nickname="  ", username="glenn")
+        _add_message(conn, 3, BRIAN, "c", nickname=None, username="brian")
+        _add_message(conn, 4, BRIAN, "d", nickname="  ", username="brian")
 
     write(fill)
 
     # MAX(name) would pick "zzz old nickname": the alphabetically last, not the current one.
     assert browse.list_members(archive) == [
         {"user_id": str(RANC1D), "label": "ranc1d", "message_count": 2},
-        {"user_id": str(GLENN), "label": "glenn", "message_count": 2},
+        {"user_id": str(BRIAN), "label": "brian", "message_count": 2},
     ]
 
 
@@ -231,7 +231,7 @@ def _v2_doc():
         {"id": "hob2", "text": "bakes sourdough", "date": "2025-04-01", "last_seen": "2025-04-01"},
     ]
     doc["sections"]["relationships_with_others"] = [
-        {"id": "rel1", "text": "trades build advice", "date": "2026-01-02", "user_id": GLENN},
+        {"id": "rel1", "text": "trades build advice", "date": "2026-01-02", "user_id": BRIAN},
         {"id": "rel2", "text": "argues about keyboards", "date": "2026-01-03", "user_id": 0, "name": "someone"},
     ]
     doc["coverage"] = {"first": "2025-03-05", "last": "2026-09-01", "messages": 120, "passes": 3}
@@ -243,7 +243,7 @@ def profiled(seeded, write):
     def fill(conn):
         _store_profile(conn, RANC1D, _v2_doc(), nickname="ranc1d", summary="Overview: builds bots", count=120)
         legacy = {"overview": "An older sketch.", "hobbies": ["chess", " "], "inferred_location": "somewhere cold"}
-        _store_profile(conn, GLENN, legacy, summary="Overview: An older sketch. Mentions llamas.", count=40)
+        _store_profile(conn, BRIAN, legacy, summary="Overview: An older sketch. Mentions llamas.", count=40)
 
     write(fill)
     return seeded
@@ -275,16 +275,16 @@ def test_people_in_a_profile_are_named_from_the_archive(profiled):
         "id": "rel1",
         "text": "trades build advice",
         "date": "2026-01-02",
-        "name": "glenn",
-        "user_id": str(GLENN),
+        "name": "brian",
+        "user_id": str(BRIAN),
     }
     assert people["items"][1]["name"] == "someone" and "user_id" not in people["items"][1]
 
 
 def test_old_format_profiles_still_read(profiled):
-    detail = browse.profile_detail(profiled, GLENN)
+    detail = browse.profile_detail(profiled, BRIAN)
 
-    assert (detail["version"], detail["overview"], detail["name"]) == (1, "An older sketch.", "glenn")
+    assert (detail["version"], detail["overview"], detail["name"]) == (1, "An older sketch.", "brian")
     assert [(s["label"], [i["text"] for i in s["items"]]) for s in detail["sections"]] == [
         ("Hobbies", ["chess"]),
         ("Inferred location", ["somewhere cold"]),
@@ -298,7 +298,7 @@ def test_a_profile_with_no_document_falls_back_to_its_text(seeded, write):
     detail = browse.profile_detail(seeded, RANC1D)
 
     assert (detail["version"], detail["sections"], detail["summary"]) == (0, [], "plain text only")
-    assert browse.profile_detail(seeded, GLENN) is None
+    assert browse.profile_detail(seeded, BRIAN) is None
 
 
 def test_profile_list_leaves_the_bodies_out(profiled):
@@ -306,7 +306,7 @@ def test_profile_list_leaves_the_bodies_out(profiled):
 
     assert [(r["user_id"], r["name"], r["version"], r["item_count"]) for r in rows] == [
         (str(RANC1D), "ranc1d", 2, 4),
-        (str(GLENN), "glenn", 1, 2),
+        (str(BRIAN), "brian", 1, 2),
     ]
     assert rows[0]["preview"] == "Builds bots and argues about hardware."
     assert not {"summary", "structured_json", "sections"} & rows[0].keys()
@@ -317,8 +317,8 @@ def test_profile_search_matches_name_id_or_text(profiled):
         return [r["user_id"] for r in browse.list_profiles(profiled, search=term)]
 
     assert found("ranc") == [str(RANC1D)]
-    assert found(str(GLENN)) == [str(GLENN)]
-    assert found("llamas") == [str(GLENN)]
+    assert found(str(BRIAN)) == [str(BRIAN)]
+    assert found("llamas") == [str(BRIAN)]
     assert found("nobody says this") == []
     assert browse.count_profiles(profiled) == 2
 
@@ -379,7 +379,7 @@ def media(tmp_path):
     _write_jsonl(
         tmp_path / "images" / "index.jsonl",
         [
-            {"filename": "old_sd.png", "prompt": "a castle", "username": "glenn", "user_id": GLENN, "seed": 7},
+            {"filename": "old_sd.png", "prompt": "a castle", "username": "brian", "user_id": BRIAN, "seed": 7},
             {
                 "filename": "vision_1.png",
                 "prompt": "[Vision] " + full[:40],
@@ -457,7 +457,7 @@ def test_image_kind_and_search(media):
     assert archive.images(kind="nonsense")["kind"] == "all"
     # "hillside" is past the point where the index cuts the description off.
     assert [it["filename"] for it in archive.images(search="HILLSIDE")["items"]] == ["vision_1.png"]
-    assert [it["filename"] for it in archive.images(search="glenn")["items"]] == ["old_sd.png"]
+    assert [it["filename"] for it in archive.images(search="brian")["items"]] == ["old_sd.png"]
     assert archive.images(search="flux_1")["total"] == 1
     assert archive.images(limit=1, offset=1)["items"][0]["filename"] == "vision_1.png"
 
