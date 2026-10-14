@@ -438,7 +438,6 @@ class StockCog(commands.Cog):
     )
     @app_commands.describe(query="Stock ticker (e.g., AAPL) or company name (e.g., apple)")
     async def stock_command(self, interaction: discord.Interaction, query: str):
-        start_time = time.time()
         logger.info(f"📈 Stock lookup by {interaction.user}: '{query}'")
 
         if not settings.finnhub_api_key:
