@@ -50,8 +50,8 @@ Design notes:
 - A source image is named by its path under ``media/``: ``images/<file>`` for
   an archived result, ``flux_sources/<file>`` for an upload. Results are not
   copied into ``flux_sources``; the archive already has them.
-- A click is answered with its place in the queue and a time estimate
-  (``_Workload``), and that note is deleted when the job ends.
+- A click is answered with its place in the queue (``_Workload``), and that
+  note is deleted when the job ends.
 """
 
 from __future__ import annotations
@@ -273,48 +273,23 @@ def _make_session() -> aiohttp.ClientSession:
 
 # --- the queue, as a click sees it ---------------------------------------------
 class _Workload:
-    """What Flux has queued and running, so a click can be told how long it will wait.
-
-    The times start as guesses for klein on an M1 Max and follow the runs
-    actually measured since the bot started.
-    """
-
-    # Seconds the LLM takes to write a Fancy or R-Fancy prompt before the image starts.
-    LLM_SECONDS = 8.0
+    """What Flux has queued and running, so a click can be told how many jobs are ahead of it."""
 
     def __init__(self) -> None:
-        self.seconds = {"text": 45.0, "img2img": 50.0, "edit": 85.0}
         self.pending: List[dict] = []
         self.running: Optional[dict] = None
 
-    def _expected(self, job: dict) -> float:
-        return self.seconds.get(job["kind"], 60.0) + (self.LLM_SECONDS if job["llm"] else 0.0)
-
-    def add(self, item: dict) -> tuple[dict, int, float]:
-        """Register a job. Returns ``(job, jobs ahead of it, seconds until its picture)``."""
-        has_source = bool(item.get("source_image") or item.get("image_url"))
-        if not has_source:
-            kind = "text"
-        elif item.get("strength") is None and settings.flux_edit_enabled:
-            kind = "edit"
-        else:
-            kind = "img2img"
-        action = item.get("action")
-        job = {"kind": kind, "llm": action == "fancy" or (action == "random" and not item.get("prompt"))}
-        wait = sum(self._expected(j) for j in self.pending)
-        ahead = len(self.pending)
-        if self.running is not None:
-            ahead += 1
-            elapsed = time.monotonic() - self.running["started"]
-            wait += max(5.0, self._expected(self.running) - elapsed)
+    def add(self) -> tuple[dict, int]:
+        """Register a job. Returns ``(job, jobs ahead of it)``."""
+        job: dict = {}
+        ahead = len(self.pending) + (self.running is not None)
         self.pending.append(job)
-        return job, ahead, wait + self._expected(job)
+        return job, ahead
 
     def start(self, job: Optional[dict]) -> None:
         if job is None:
             return
         self.pending = [j for j in self.pending if j is not job]
-        job["started"] = time.monotonic()
         self.running = job
 
     def finish(self, job: Optional[dict]) -> None:
@@ -324,21 +299,8 @@ class _Workload:
         if self.running is job:
             self.running = None
 
-    def learn(self, kind: str, seconds: float) -> None:
-        """Move the estimate for ``kind`` half-way toward a measured run."""
-        if kind in self.seconds and seconds > 0:
-            self.seconds[kind] = (self.seconds[kind] + seconds) / 2
-
 
 _workload = _Workload()
-
-
-def _about(seconds: float) -> str:
-    seconds = max(5, int(round(seconds / 5.0)) * 5)
-    if seconds < 60:
-        return f"about {seconds} s"
-    minutes, rest = divmod(seconds, 60)
-    return f"about {minutes} min {rest} s" if rest else f"about {minutes} min"
 
 
 async def _submit(interaction: discord.Interaction, item: dict, doing: str) -> None:
@@ -347,11 +309,10 @@ async def _submit(interaction: discord.Interaction, item: dict, doing: str) -> N
     The answer is a private note; ``process_flux_image`` deletes it when the
     job ends, so it doesn't outlive the picture it was about.
     """
-    job, ahead, wait = _workload.add(item)
+    job, ahead = _workload.add()
     note = f"🛠️ {doing}"
     if ahead:
-        note += f" {ahead} ahead of you,"
-    note += f" {_about(wait)}."
+        note += f" {ahead} ahead of you."
     try:
         await interaction.response.send_message(note, ephemeral=True)
     except Exception:
@@ -447,7 +408,7 @@ async def flux(
             "image_url": image_url,
             "strength": float(strength) if strength is not None else None,
         }
-    item["job"] = _workload.add(item)[0]
+    item["job"] = _workload.add()[0]
     await bot.sd_queue.put(item)
     logger.info(f"⚡ Queued flux {mode} generation for {interaction.user}")
 
@@ -531,7 +492,6 @@ async def generate_flux_image(
         asked_strength = strength
         if strength is None:
             strength = settings.flux_default_strength
-        kind = "edit" if is_edit_mode else "img2img" if is_img2img else "text"
 
         async with interaction.channel.typing():
             async with _make_session() as session:
@@ -609,7 +569,6 @@ async def generate_flux_image(
                     logger.warning("⚡ Flux image data lacks PNG/JPEG/GIF magic bytes, continuing anyway")
 
                 server_seconds = time.perf_counter() - image_start_time
-                _workload.learn(kind, server_seconds)
                 total_duration = pre_duration + server_seconds
                 logger.info(f"⏱️ Flux generation time for {interaction.user}: {total_duration:.2f}s")
 

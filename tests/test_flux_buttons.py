@@ -296,20 +296,19 @@ def test_flux_command_ignores_fancy_with_an_image(flux, monkeypatch):
 # ---- the note a click gets ------------------------------------------------------
 
 
-def test_a_click_is_told_its_wait_and_the_note_goes_when_the_picture_arrives(flux, monkeypatch):
+def test_a_click_is_told_its_place_and_the_note_goes_when_the_picture_arrives(flux, monkeypatch):
     plain = as_message(generate(flux, monkeypatch, description="a cat", size="wide"))
-    flux._workload.seconds.update({"text": 45.0, "edit": 85.0})
 
     first, (item_one,) = click(flux, "remix_button", plain)
     second, (item_two,) = click(flux, "remix_button", plain)
-    assert first.response.messages == ["🛠️ Remixing... about 45 s."]
-    assert second.response.messages == ["🛠️ Remixing... 1 ahead of you, about 1 min 30 s."]
+    assert first.response.messages == ["🛠️ Remixing..."]
+    assert second.response.messages == ["🛠️ Remixing... 1 ahead of you."]
 
     _, done = run_queued(flux, monkeypatch, item_one)
     assert done is first and first.deleted_original == 1 and second.deleted_original == 0
     # The second click is now next, and a third only has it ahead.
     third, _ = click(flux, "remix_button", plain)
-    assert third.response.messages[0].startswith("🛠️ Remixing... 1 ahead of you,")
+    assert third.response.messages == ["🛠️ Remixing... 1 ahead of you."]
 
 
 def test_the_note_also_goes_when_the_server_fails_and_the_reason_is_shown(flux, monkeypatch):
@@ -324,23 +323,15 @@ def test_the_note_also_goes_when_the_server_fails_and_the_reason_is_shown(flux, 
     assert flux._workload.running is None and flux._workload.pending == []
 
 
-def test_wait_estimates_follow_the_runs_measured(flux):
+def test_the_count_ahead_includes_the_running_job(flux):
     load = flux._Workload()
-    load.learn("edit", 45.0)
-    assert load.seconds["edit"] == 65.0  # half-way from the 85 s guess
-    job, ahead, wait = load.add({"action": "fancy", "prompt": "a cat"})
-    assert (job["kind"], job["llm"], ahead) == ("text", True, 0) and wait == 45.0 + load.LLM_SECONDS
-    job, ahead, _ = load.add({"action": "img2img", "source_image": "images/x.png", "strength": None})
-    assert (job["kind"], ahead) == ("edit", 1)
-    assert load.add({"action": "random", "prompt": "cat, hat"})[0]["llm"] is False  # R-Keyword asks no LLM
-
-
-@pytest.mark.parametrize(
-    "seconds, text",
-    [(3, "about 5 s"), (44, "about 45 s"), (58, "about 1 min"), (87, "about 1 min 25 s"), (181, "about 3 min")],
-)
-def test_wait_wording(flux, seconds, text):
-    assert flux._about(seconds) == text
+    first, ahead = load.add()
+    assert ahead == 0
+    load.start(first)
+    assert load.add()[1] == 1
+    assert load.add()[1] == 2
+    load.finish(first)
+    assert load.add()[1] == 2
 
 
 # ---- what the archive keeps -----------------------------------------------------
