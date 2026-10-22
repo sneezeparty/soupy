@@ -12,6 +12,7 @@ the other way around.
 | `check_database.py` | One-liner sanity check: row counts, top users, last scan timestamp. |
 | `check_database.sh` | Shell version of the above using `sqlite3` directly — no Python required. |
 | `prune_flux_sources.py` | Remove the copies of archived pictures that older versions left in `media/flux_sources`. Reports by default; `--delete` removes them. |
+| `privacy_check.py` | Compare what is being committed or pushed with this machine's Discord archive and stop on real member IDs, names, config values or copied text. Run by the git hooks; `--all` checks every tracked file. `privacy_allow.txt` lists matches that are not private. |
 
 Run from the repo root, e.g.:
 

@@ -1,0 +1,25 @@
+# Matches with this machine's private data that are not private.
+# One per line, in any case. tools/privacy_check.py ignores a name, a config
+# value or a word listed here, and any copied-text match that contains a listed
+# phrase of 12 or more characters.
+#
+# Never list a real member, their ID, or anything said in the server. If the
+# check stops on one of those, the fix is an invented name, not a line here.
+
+# The bot itself, and the maintainer's own public handles.
+dafoe
+soupy dafoe
+ranc1d
+sneezeparty
+
+# A public Discord bot, named in a comment.
+dyno
+
+# Public model names that are also this install's settings.
+google/gemma-4-12b
+google/gemma-4-31b
+
+# The shipped chat prompt, which the bot's own memory files quote.
+follow all of these behaviours when generating your response
+your core identity and personality are the most important part
+below are snippets from earlier messages in this server

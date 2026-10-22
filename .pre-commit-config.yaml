@@ -6,6 +6,15 @@
 # basic safety hooks. The strict lint/format gate runs in CI
 # (.github/workflows/ci.yml) where it can see the full repo at once and
 # isn't fighting with the developer's in-flight hunks.
+#
+# The "private data" hooks at the bottom compare what is being committed and
+# pushed with the Discord archive on this machine (tools/privacy_check.py).
+# They also run on the commit message and at push, so `pre-commit install`
+# sets up all three git hooks.
+
+default_install_hook_types: [pre-commit, pre-push, commit-msg]
+# The hooks below run at commit unless they name another stage.
+default_stages: [pre-commit]
 
 repos:
   - repo: https://github.com/gitleaks/gitleaks
@@ -22,3 +31,27 @@ repos:
       - id: detect-private-key
       - id: check-yaml
       - id: check-toml
+
+  # This machine's archive holds real members' IDs, names and messages; the
+  # repository is public. On a machine without the archive these pass at once.
+  - repo: local
+    hooks:
+      - id: private-data
+        name: private data (no real member IDs, names, places or archive text)
+        entry: python3 tools/privacy_check.py --staged -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: private-data-push
+        name: private data in the commits being pushed
+        entry: python3 tools/privacy_check.py --push -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: private-data-message
+        name: private data in the commit message
+        entry: python3 tools/privacy_check.py -q --message
+        language: system
+        stages: [commit-msg]

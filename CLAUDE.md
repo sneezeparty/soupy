@@ -10,6 +10,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Private data: read this before writing a test, an example or a commit message
+
+The repository is public. This machine holds the bot's Discord archive: real members' IDs, names and messages (`soupy_database/databases/`, `media/`), their profiles, Soupy's memory of them (`data/`), and the real `.env-stable`. None of it goes into a tracked file or a commit message, in any form.
+
+- **Invent every member, ID, place and line of chat** in fixtures, docstring and comment examples, docs and changelog entries. Reading the archive to understand a bug is fine; copying a row, a nickname, an ID or a fact about someone out of it into the repository is not, even "as a realistic example". `123456789012345678` is an invented ID that still shows the JSON-number rounding.
+- **`tools/privacy_check.py` enforces this** from three git hooks (commit, commit message, push). It stops on a real ID, a real member/server/channel name, a real `.env-stable` value, a sentence copied from the archive, or a word only a few members' profiles mention. Run `python tools/privacy_check.py --all` to check every tracked file.
+- **Never bypass it** with `--no-verify`, and never add a member to `tools/privacy_allow.txt`. That file is for matches that are not private (a public figure, a product, a stock phrase).
+- The check cannot recognise a true fact about a member retold in ordinary words under an invented name. The first rule is the only guard for that.
+
+---
+
 ## Installer
 
 A first-run wizard lives at `install.py`, with helpers under `installer/`
@@ -114,6 +125,7 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | [soupy_database/self_profile.py](soupy_database/self_profile.py) | Soupy's memory of itself: dated items from its own messages, built with the profile pass loop |
 | [soupy_database/self_context.py](soupy_database/self_context.py) | SELF.MD files and the identity anchor in every reply |
 | [soupy_database/runtime_flags.py](soupy_database/runtime_flags.py) | Shared bot↔web feature toggles |
+| [tools/privacy_check.py](tools/privacy_check.py) | The git-hook check that keeps the archive's real IDs, names and text out of commits; [tools/privacy_allow.txt](tools/privacy_allow.txt) lists matches that are not private |
 | [.env-stable](.env-stable) | Master configuration |
 
 ---

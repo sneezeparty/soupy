@@ -26,6 +26,38 @@ pytest
 `pre-commit` runs a `gitleaks` secret scan on commit. Never commit `.env-stable`
 or any `.env-stable.bak.*` — they're gitignored, keep it that way.
 
+`pre-commit install` also sets up the private-data check described next, on the
+commit, on its message, and on the push.
+
+---
+
+## Private data stays out of the repository
+
+The repository is public. The machine that runs the bot holds its Discord
+archive: real members' IDs, names and messages, the profiles built from them,
+and Soupy's memory of them. None of that goes into a commit, in any form.
+
+- **Invent everything.** Test fixtures, examples in docstrings and comments,
+  changelog entries and commit messages use made-up members, IDs, places and
+  lines of chat. Never write one from a real row of the archive, a profile or
+  Soupy's memory, and never paste an ID, a nickname or a line from a log or the
+  panel as an example. `123456789012345678` is an invented ID that still shows
+  the JSON-number rounding (a browser turns it into `123456789012345680`).
+- **`tools/privacy_check.py` enforces it** on a machine that has the archive.
+  It compares what is being committed with the real data and stops on a real
+  Discord ID, a real member, server or channel name, a value from the real
+  `.env-stable`, a sentence copied from the archive, or a word that only a few
+  members' profiles mention (the town someone lives in). Three git hooks run
+  it: on the commit, on the commit message and on the push.
+  `python tools/privacy_check.py --all` checks every tracked file.
+- **A match that is not private** (a public figure, a product, a stock phrase)
+  goes on its own line in `tools/privacy_allow.txt`. A member never goes there,
+  and a real ID cannot be allowed.
+- **Do not skip the hooks** (`--no-verify`). If the check is wrong, fix the
+  check or the allow list.
+- **What the check cannot see:** a true fact about a member retold in ordinary
+  words under an invented name. Only the first rule covers that.
+
 ---
 
 ## The golden rules
