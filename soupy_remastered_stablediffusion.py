@@ -2153,7 +2153,7 @@ async def help_command(interaction: discord.Interaction):
     command_descriptions = {
         "sd": "Generate an image using Stable Diffusion. Provide a description of what you want to see, optionally choose a size and seed.",
         "flux": "Generate an image with Flux. Attach an image to change it instead: the description is then an instruction, or with a strength, what to repaint it toward.",
-        "soupysearch": "Search the web using DuckDuckGo and get a comprehensive answer with citations from multiple sources.",
+        "soupysearch": "Search the web (and the news, for recent events) and get an answer with citations from several sources.",
         "soupyimage": "Search for images using DuckDuckGo and get a random image from the top results.",
         "soupystock": "Look up the current price for a stock ticker or company name (powered by Finnhub).",
         "8ball": "Ask the Magic 8-Ball a yes/no question and receive a classic 8-ball response.",

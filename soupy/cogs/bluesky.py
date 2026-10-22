@@ -66,6 +66,7 @@ from soupy.msn import resolve_article_url
 from soupy.scheduling import load_json_state, save_json_state, window_bounds
 from soupy.settings import openai_client, settings
 from soupy.slop import SLOP_RULES, rank_candidates
+from soupy.url_fetch import USER_AGENTS
 
 logger = logging.getLogger(__name__)
 
@@ -556,15 +557,10 @@ async def _topic_is_duplicate_today(
 # Bluesky's blob limit is ~976 KB. Stay under 950 KB to leave headroom.
 _BSKY_BLOB_MAX_BYTES = 950_000
 
-# User-Agent fallback chain. Many paywalled news sites (NYT, Reuters, WSJ)
-# block generic browser UAs but allow well-known social-media link-preview
-# crawlers, since they want their content shareable on Twitter/Facebook.
-_OG_USER_AGENTS = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (compatible; Twitterbot/1.0)",
-    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
-    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
-)
+# User-Agent fallback chain, shared with /soupysearch's article fetcher. Many
+# paywalled news sites (NYT, Reuters, WSJ) block generic browser UAs but allow
+# well-known social-media link-preview crawlers.
+_OG_USER_AGENTS = USER_AGENTS
 
 
 def _resize_image_for_blob(image_bytes: bytes) -> Optional[Tuple[bytes, str]]:

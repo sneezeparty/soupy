@@ -389,7 +389,7 @@ and RAG status endpoints.
 | LM Studio (OpenAI-compatible) | Chat, embeddings, vision | `OPENAI_BASE_URL`, `LOCAL_CHAT`, `VISION_MODEL` | Chat fails loudly; RAG/embeddings fall back to keyword-only |
 | Stable Diffusion backend | Image gen | `SD_SERVER_URL` (+ img2img/inpaint/outpaint fallbacks) | `/sd` reports backend offline |
 | Flux server (`flux_server.py`, local) | Image gen, image editing | `FLUX_ENABLED`, `FLUX_SERVER_URL` | `/flux` reports the server offline, or the server's own error |
-| DuckDuckGo | Web + image search | — (rotates backends on timeout) | Command reports failure |
+| Web and news search (ddgs) | Web, news and image search | `SEARCH_BACKENDS` (web engines, in order) | `/soupysearch` falls back to the news results; with neither, the command reports failure |
 | Bluesky AT Protocol | Autonomous posts | `BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, `BLUESKY_AUTO_REPLY` | Cog no-ops if credentials missing |
 
 The bot fails fast at import on missing **critical** env (`DISCORD_TOKEN`,

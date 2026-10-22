@@ -1908,7 +1908,7 @@
               SEARCH_SUMMARY_TEMPERATURE: "0.7",
               SEARCH_BACKEND_TIMEOUT_SECONDS: "12",
               SEARCH_RESULTS_PER_QUERY: "5",
-              SEARCH_BACKENDS: "brave,duckduckgo,mojeek,yahoo,yandex",
+              SEARCH_BACKENDS: "yahoo,yandex,mojeek,brave,duckduckgo",
               BEHAVIOUR_SEARCH: "(built-in search persona)",
               NINE_BALL_TEMPERATURE: "0.9",
               "9BALL": "(built-in 9-ball prompt)",

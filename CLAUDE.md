@@ -78,7 +78,7 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 
 2. **Web control panel** (`web/`) — FastAPI app that manages the bot subprocess (`web/services/bot_runner.py`), streams its log via WebSocket (`web/services/log_stream.py`), reads/writes `.env-stable` (`web/services/env_store.py`), and exposes archive/stats/runtime-flag endpoints.
 
-3. **External services** — LM Studio (chat + embeddings, OpenAI-compatible), Stable Diffusion FastAPI backend (image gen), DuckDuckGo (search), Bluesky AT Protocol (autonomous posts), and per-guild SQLite databases for message archive + RAG.
+3. **External services** — LM Studio (chat + embeddings, OpenAI-compatible), Stable Diffusion FastAPI backend (image gen), web and news search through `ddgs` (Yahoo, Yandex, Bing News and others), Bluesky AT Protocol (autonomous posts), and per-guild SQLite databases for message archive + RAG.
 
 **Cross-module imports to be aware of:**
 - `soupy/cogs/dailypost.py` imports `_fetch_og_image` and `_post_url` from `soupy/cogs/bluesky.py` for cross-posting articles to Bluesky.
@@ -92,7 +92,8 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | File | Purpose |
 |------|---------|
 | [soupy_remastered_stablediffusion.py](soupy_remastered_stablediffusion.py) | Main bot — chat, image gen, core slash commands, event loop |
-| [soupy/cogs/search.py](soupy/cogs/search.py) | Cog — DuckDuckGo web search + LLM summary |
+| [soupy/cogs/search.py](soupy/cogs/search.py) | Cog — `/soupysearch`: web + news search, drops junk results, fetches articles (replacing failures), LLM summary with dated sources |
+| [soupy/url_fetch.py](soupy/url_fetch.py) | Article fetcher for search: User-Agent fallback chain, text + publish date, 1 h cache |
 | [soupy/cogs/imagesearch.py](soupy/cogs/imagesearch.py) | Cog — DuckDuckGo image search |
 | [soupy/cogs/dailypost.py](soupy/cogs/dailypost.py) | Cog — autonomous daily article posts to Discord (+ optional Bluesky cross-post) |
 | [soupy/cogs/musings.py](soupy/cogs/musings.py) | Cog — periodic reflective musings in a configured channel |

@@ -43,6 +43,21 @@ class FetchResult:
     from_cache: bool = False
 
 
+# Tried in order until a site answers 200. Many news sites refuse aiohttp's own
+# User-Agent (LA Times, NYT, AP News), and some refuse a browser's too but let
+# link-preview crawlers through, since they want their links to unfurl: NYT
+# answers Twitterbot, AP News only Slackbot.
+USER_AGENTS = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (compatible; Twitterbot/1.0)",
+    "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+    "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+)
+
+# Statuses that mean "not for this User-Agent". Anything else (404, 500) won't
+# change with another one.
+_REFUSED = {401, 403}
+
 # {url: (FetchResult, fetched_at_epoch)}
 _cache: Dict[str, tuple] = {}
 
@@ -85,7 +100,8 @@ def _trafilatura_extract(html: str) -> tuple[Optional[str], Optional[str], Optio
     content = trafilatura.extract(html)
     title = None
     published_at = None
-    meta = trafilatura.extract(html, output_format="json", only_with_metadata=False)
+    # trafilatura 2 leaves the date and title out of the JSON without with_metadata.
+    meta = trafilatura.extract(html, output_format="json", with_metadata=True)
     if meta:
         try:
             meta_dict = json.loads(meta)
@@ -131,14 +147,22 @@ async def fetch_url(session: aiohttp.ClientSession, url: str) -> Optional[FetchR
     timeout_s = max(1, settings.url_fetch_timeout_ms // 1000)
     max_len = settings.url_max_content_length
 
+    html, status = None, None
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout_s)) as resp:
-            if resp.status != 200:
-                logger.debug(f"url_fetch HTTP {resp.status} for {url}")
-                return None
-            html = await resp.text()
+        for user_agent in USER_AGENTS:
+            headers = {"User-Agent": user_agent, "Accept": "text/html,application/xhtml+xml"}
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout_s)) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    break
+                status = resp.status
+            if status not in _REFUSED:
+                break
     except Exception as e:
         logger.warning(f"url_fetch failed for {url}: {e}")
+        return None
+    if html is None:
+        logger.debug(f"url_fetch HTTP {status} for {url}")
         return None
 
     def _extract():

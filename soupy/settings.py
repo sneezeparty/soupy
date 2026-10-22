@@ -228,10 +228,13 @@ class Settings:
         """Comma-separated ddgs text backends. Empty -> library's 'auto' mode.
 
         Valid choices (ddgs 9.x): brave, duckduckgo, grokipedia, mojeek,
-        wikipedia, yahoo, yandex. Default skips the two knowledge-base engines
-        (wikipedia, grokipedia) so news-style queries hit real web sources first.
+        wikipedia, yahoo, yandex; an unknown name is dropped. ddgs asks them two
+        at a time in the order given and stops once it has enough results.
+        Brave and DuckDuckGo have refused this bot since mid-October 2026
+        (HTTP 429 and 202), so they go last. The default skips the two
+        knowledge-base engines (wikipedia, grokipedia).
         """
-        return _env_str("SEARCH_BACKENDS", "brave,duckduckgo,mojeek,yahoo,yandex").strip()
+        return _env_str("SEARCH_BACKENDS", "yahoo,yandex,mojeek,brave,duckduckgo").strip()
 
     @cached_property
     def recent_message_limit(self) -> int:
