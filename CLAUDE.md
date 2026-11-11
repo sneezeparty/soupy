@@ -103,6 +103,8 @@ Web panel binds to `0.0.0.0:4941` by default (override with `SOUPY_WEB_HOST` / `
 | [soupy/msn.py](soupy/msn.py) | Resolves an msn.com link to the article it was syndicated from |
 | [soupy/slop.py](soupy/slop.py) | Anti-slop rules for Bluesky drafts: the prompt block and the tell detector |
 | [soupy/triggers.py](soupy/triggers.py) | Pure respond/don't-respond predicates |
+| [soupy/cogs/linkfix.py](soupy/cogs/linkfix.py) | Cog — replies with a fixer-site link (oginstagram.com, fxtwitter.com …) when a post's link gets no working preview; `LINK_FIX_*` settings |
+| [soupy/linkfix.py](soupy/linkfix.py) | Pure rules behind it: which links are posts, which previews are broken, the rewrite. Soupy's link-only replies are kept out of chat history and his self-memory (`is_bare_links`) |
 | [soupy/timeaware.py](soupy/timeaware.py) | Time awareness for chat: the clock line, age phrases, history markers |
 | [soupy/scheduling.py](soupy/scheduling.py) | Shared local-time windows + atomic JSON state files for the autonomous loops |
 | [run_all.py](run_all.py) | Launcher: starts uvicorn with `SOUPY_AUTOSTART_BOT=1` |

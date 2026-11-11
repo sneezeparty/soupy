@@ -368,6 +368,38 @@ def test_exchanges_carry_member_context_and_skip_command_output(tmp_path):
     assert names == {ANN: "Ann", BO: "Bo"}
 
 
+def test_link_only_messages_are_not_soupys_voice(tmp_path):
+    # The link-fix cog's replies are only links; the archive adds its embed notes after them.
+    path = str(tmp_path / "g.db")
+    conn = sqlite3.connect(path)
+    conn.execute(_MESSAGES_SCHEMA)
+    conn.close()
+    _insert(
+        path,
+        [
+            (1, "2025-03-01", "12:00:00", ANN, "https://social.example/reel/AbC123", 5),
+            (
+                2,
+                "2025-03-01",
+                "12:00:07",
+                BOT,
+                "https://fixer.example/reel/AbC123/ [Embed URL: https://fixer.example/reel/AbC123/]",
+                5,
+            ),
+            (3, "2025-03-01", "12:01:00", BOT, "https://fixer.example/p/One/\nhttps://fixer.example/p/Two/", 5),
+            (4, "2025-03-01", "12:02:00", BOT, "https://fixer.example/p/One/ is the best one", 5),
+            (5, "2025-03-01", "12:03:00", BOT, "see https://fixer.example/p/One/", 5),
+        ],
+    )
+    conn = sqlite3.connect(path)
+    units, _people, _names = self_profile.fetch_self_units(conn, BOT, None)
+    count = self_profile._soupy_message_count(conn, BOT)
+    conn.close()
+
+    assert [u[0] for u in units] == [5], "4 and 5 are one split reply; the bare links aren't read at all"
+    assert count == 2
+
+
 # ---------------------------------------------------------------------------
 # Building
 # ---------------------------------------------------------------------------

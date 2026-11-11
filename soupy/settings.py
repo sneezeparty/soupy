@@ -570,6 +570,22 @@ class Settings:
         except ValueError:
             return None
 
+    # ----- Link fixes (soupy.cogs.linkfix) ------------------------------
+
+    @cached_property
+    def link_fix_enabled(self) -> bool:
+        return _env_bool("LINK_FIX_ENABLED", default=False)
+
+    @cached_property
+    def link_fix_guild_ids(self) -> List[int]:
+        """Servers where broken previews get a fixer link. Empty: every server."""
+        return _env_int_list("LINK_FIX_GUILD_IDS")
+
+    @cached_property
+    def link_fix_sites(self) -> str:
+        """``site=fixer`` pairs, parsed by ``soupy.linkfix.parse_sites``. Empty: every site, default fixers."""
+        return _env_str("LINK_FIX_SITES")
+
     # ----- URL processing ------------------------------------------------
 
     @cached_property

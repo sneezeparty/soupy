@@ -92,10 +92,18 @@ _DIRECTORY_RESERVE_CHARS = 1500
 _MENTION_RE = re.compile(r"<@!?(\d{15,20})>")
 # Soupy's archived messages include slash-command output (search / weather / stock embeds, 8-ball and 9-ball
 # answers). That's the command talking, not Soupy, so it's never read into the memory.
+# A message that is only links (the link-fix cog's replies, before the archive's
+# " [Embed ...]" notes) has nothing of Soupy's voice in it. Newline-separated
+# links contain no space, so they count as one; the SQL twin of soupy.linkfix.is_bare_links.
+_BEFORE_EMBED_NOTES = (
+    "CASE WHEN instr(message_content, ' [Embed ') > 0 "
+    "THEN substr(message_content, 1, instr(message_content, ' [Embed ') - 1) ELSE message_content END"
+)
 _SOUPY_VOICE_SQL = (
     "coalesce(trim(message_content), '') != '' "
     "AND message_content NOT LIKE '[Embed Title:%' "
-    "AND message_content NOT LIKE '%-Ball says:%'"
+    "AND message_content NOT LIKE '%-Ball says:%' "
+    f"AND NOT (message_content LIKE 'http%' AND instr({_BEFORE_EMBED_NOTES}, ' ') = 0)"
 )
 
 # (last message_id covered, YYYY-MM-DD, prompt text) — the shape run_edit_passes reads.

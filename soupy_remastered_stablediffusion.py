@@ -127,6 +127,7 @@ from timezonefinder import TimezoneFinder
 
 from soupy import prompts as soupy_prompts
 from soupy import timeaware
+from soupy.linkfix import is_bare_links
 from soupy.llm_gate import gate_busy as llm_gate_busy
 from soupy.llm_gate import llm_turn, note_chat_activity, note_chat_done, note_chat_queued
 from soupy.settings import openai_client
@@ -1505,8 +1506,12 @@ async def fetch_recent_messages(channel, limit=int(os.getenv("RECENT_MESSAGE_LIM
     # Create a single session for all URL requests
     async with aiohttp.ClientSession() as _session:  # noqa: F841 — kept for future use
         async for msg in channel.history(limit=limit, oldest_first=False):
-            # Skip command messages and bot's image generation messages
-            if msg.content.startswith("!") or (msg.author == bot.user and "Generated Image" in msg.content):
+            # Skip command messages, the bot's image generation messages, and its
+            # link-fix replies (only links: as "assistant" turns they teach the
+            # model to answer with bare links).
+            if msg.content.startswith("!") or (
+                msg.author == bot.user and ("Generated Image" in msg.content or is_bare_links(msg.content))
+            ):
                 continue
 
             # Skip current message if provided
@@ -3294,6 +3299,11 @@ async def load_extensions():
         logger.info("📈 Loaded stock extension")
     except Exception as e:
         logger.error(f"❌ Failed to load stock extension: {e}")
+
+    try:
+        await bot.load_extension("soupy.cogs.linkfix")
+    except Exception as e:
+        logger.error(f"❌ Failed to load linkfix extension: {e}")
 
 
 # Then your existing on_ready event can use it
