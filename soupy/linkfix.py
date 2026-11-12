@@ -1,14 +1,18 @@
-"""Which links in a message got no working preview, and the fixer link to post instead.
+"""Which links in a message are videos Discord can't play, and the fixer link to post instead.
 
-Instagram and Facebook give Discord nothing to show (no preview at all, or a
-"log in" card), and the others fail now and then. Fixer sites serve the same
-post with a preview Discord can play: ``instagram.com/reel/X`` becomes
-``oginstagram.com/reel/X``. Fixer sites die every year or so, which is why the
-domain for each site is a setting, ``LINK_FIX_SITES``.
+A video is the only thing worth fixing. Instagram and Facebook give Discord
+nothing to show (no preview at all, or a "log in" card), and X's own preview of
+a video tweet is a still that opens the tweet in a browser. Fixer sites serve
+the same post with a video Discord plays in the chat: ``instagram.com/reel/X``
+becomes ``oginstagram.com/reel/X``. A text or photo post is left alone, preview
+or not. Fixer sites die every year or so, which is why the domain for each site
+is a setting, ``LINK_FIX_SITES``.
 
 The cog (``soupy.cogs.linkfix``) waits for Discord to build a message's
-previews, describes each one as a :class:`Preview`, and asks :func:`fixes`
-which links still need one. Nothing here touches Discord or the network.
+previews, describes each one as a :class:`Preview`, and asks :func:`not_playing`
+which links have no playing video. Then it reads each one's fixer page the way
+Discord would, and :func:`is_video_page` says whether there is a video to play.
+Nothing here touches Discord or the network.
 
 A link is left alone when it is:
 
@@ -16,8 +20,8 @@ A link is left alone when it is:
 * not a post (a profile page, an Instagram share link the fixer can't read);
 * already on the fixer site we would use (re-posting it would change nothing).
 
-A link on another fixer site counts like the site itself: if it got no preview
-(that fixer is dead), it is rewritten to the current one.
+A link on another fixer site counts like the site itself: if its video doesn't
+play (that fixer is dead), it is rewritten to the current one.
 """
 
 from __future__ import annotations
@@ -31,11 +35,6 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 logger = logging.getLogger(__name__)
 
-# How a preview has to look before the site's link counts as working.
-ANY = "any"  # any preview at all (X, Bluesky and Reddit build text-only ones for text posts)
-MEDIA = "media"  # a picture or a video: a bare title card is a login wall
-VIDEO = "video"  # a picture or a video, not just a thumbnail: TikTok's thumbnail card doesn't play
-
 MAX_LINKS = 5
 
 
@@ -45,7 +44,6 @@ class Site:
     hosts: Tuple[str, ...]  # the site's own domains
     mirrors: "re.Pattern[str]"  # fixer domains people already post for this site
     posts: Tuple["re.Pattern[str]", ...]  # matched against "host/path?query"; group 1 is the post id
-    wants: str
     default_fixer: str
     keep_params: FrozenSet[str] = frozenset()
     short_subdomains: FrozenSet[str] = frozenset()  # kept on the fixer: vt.tiktok.com -> vt.tnktok.com
@@ -58,7 +56,6 @@ SITES: Tuple[Site, ...] = (
         re.compile(r"(?:^|\.)(?:[a-z]+instagram|instagram[a-z]+)\.com$"),
         # /share/ links are left alone: the fixer can't read them (404 when tried, Nov 2026).
         (re.compile(r"^[^/]+/(?:(?!share/)[\w.]+/)?(?:p|reels?|tv)/([\w-]+)"),),
-        MEDIA,
         "oginstagram.com",
         keep_params=frozenset({"img_index"}),
     ),
@@ -67,7 +64,6 @@ SITES: Tuple[Site, ...] = (
         ("x.com", "twitter.com"),
         re.compile(r"(?:^|\.)(?:fxtwitter|vxtwitter|fixupx|fixvx|twittpr)\.com$"),
         (re.compile(r"^[^/]+/(?:\w+|i(?:/web)?)/status(?:es)?/(\d+)"),),
-        ANY,
         "fxtwitter.com",
     ),
     Site(
@@ -75,7 +71,6 @@ SITES: Tuple[Site, ...] = (
         ("bsky.app",),
         re.compile(r"(?:^|\.)(?:fxbsky|bskx|bskye|bskyx|vxbsky)\.app$"),
         (re.compile(r"^[^/]+/profile/[^/]+/post/([a-z0-9]+)"),),
-        ANY,
         "bskx.app",
     ),
     Site(
@@ -86,7 +81,6 @@ SITES: Tuple[Site, ...] = (
             re.compile(r"^[^/]+/(?:r|u|user)/[\w-]+/comments/([a-z0-9]+)"),
             re.compile(r"^[^/]+/r/\w+/s/(\w+)"),
         ),
-        ANY,
         "vxreddit.com",
     ),
     Site(
@@ -98,7 +92,6 @@ SITES: Tuple[Site, ...] = (
             re.compile(r"^[^/]+/t/(\w+)"),
             re.compile(r"^(?:vt|vm)\.[^/]+/(\w+)"),
         ),
-        VIDEO,
         "tnktok.com",
         short_subdomains=frozenset({"vt", "vm"}),
     ),
@@ -112,7 +105,6 @@ SITES: Tuple[Site, ...] = (
             re.compile(r"^[^/]+/watch/?\?(?:.*&)?v=(\d+)"),
             re.compile(r"^[^/]+/(?:permalink|story)\.php\?(?:.*&)?story_fbid=(\w+)"),
         ),
-        MEDIA,
         "facebed.com",
         keep_params=frozenset({"v", "story_fbid", "id", "fbid"}),
     ),
@@ -136,9 +128,20 @@ class Preview:
 
     url: str
     kind: str = "rich"  # "components" is the newer layout fixer sites use, with its media inside
-    image: bool = False
-    thumbnail: bool = False
-    video: bool = False
+    video: bool = False  # the preview names a video
+    video_file: bool = False  # ...and Discord copied the file, so it plays in the chat
+
+
+def plays(preview: Preview) -> bool:
+    """Whether the preview plays a video in the chat.
+
+    Only a video file Discord copied plays properly (Bluesky's own previews,
+    fixer sites). X's own preview of a video tweet names the tweet's page
+    instead, which only opens in a browser, and TikTok's own embeds TikTok's
+    player, which doesn't play right either. "components" is the newer layout
+    fixer sites use; its media sits inside, out of sight, and it plays.
+    """
+    return preview.kind == "components" or (preview.video and preview.video_file)
 
 
 @dataclass(frozen=True)
@@ -254,16 +257,12 @@ def rewrite(link: Link, fixer: str) -> Optional[str]:
     return f"https://{new_host}{path}" + (f"?{urlencode(kept)}" if kept else "")
 
 
-def preview_works(preview: Preview, wants: str) -> bool:
-    if wants == ANY or preview.kind == "components":
-        return True
-    if wants == VIDEO:
-        return preview.video or preview.image
-    return preview.video or preview.image or preview.thumbnail
+def not_playing(links: Sequence[Link], previews: Sequence[Preview], fixers: Dict[str, str]) -> List[str]:
+    """The fixer link for each link whose post has no preview playing a video.
 
-
-def fixes(links: Sequence[Link], previews: Sequence[Preview], fixers: Dict[str, str]) -> List[str]:
-    """Fixer links for every link whose post got no working preview."""
+    Most of these are text or photo posts with nothing to fix; the fixer's page
+    says which are videos (:func:`is_video_page`).
+    """
     out: List[str] = []
     for link in links:
         mine = [p for p in previews if _same_post(p.url, link, fixers)]
@@ -271,13 +270,36 @@ def fixes(links: Sequence[Link], previews: Sequence[Preview], fixers: Dict[str, 
             # One link to this site: Discord may have filed its preview under the
             # resolved address (a short link's full one), so any preview from the site is its.
             mine = [p for p in previews if (site_of(p.url, fixers) or (None,))[0] is link.site]
-        wants = ANY if link.on_mirror else link.site.wants
-        if any(preview_works(p, wants) for p in mine):
+        if any(plays(p) for p in mine):
             continue
         fixed = rewrite(link, fixers[link.site.name])
-        if fixed:
+        if fixed and fixed not in out:
             out.append(fixed)
     return out
+
+
+_META_TAG = re.compile(r"<meta\b[^>]*>", re.I)
+_ATTR = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""")
+_VIDEO_TAGS = frozenset({"og:video", "og:video:url", "og:video:secure_url", "twitter:player:stream"})
+
+
+def is_video_page(html: str) -> bool:
+    """Whether a fixer page, as served to Discord, carries a video.
+
+    Most fixers name the file in ``og:video``; fxtwitter only marks its card as
+    a player and hands Discord the video separately.
+    """
+    for tag in _META_TAG.findall(html or ""):
+        attrs = {m.group(1).lower(): next(g for g in m.groups()[1:] if g is not None) for m in _ATTR.finditer(tag)}
+        key = (attrs.get("property") or attrs.get("name") or "").lower()
+        value = attrs.get("content", "").strip().lower()
+        if not value:
+            continue
+        if key in _VIDEO_TAGS or (key == "og:type" and value.startswith("video")):
+            return True
+        if key == "twitter:card" and value == "player":
+            return True
+    return False
 
 
 def _same_post(url: str, link: Link, fixers: Dict[str, str]) -> bool:

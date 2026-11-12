@@ -578,7 +578,7 @@ class Settings:
 
     @cached_property
     def link_fix_guild_ids(self) -> List[int]:
-        """Servers where broken previews get a fixer link. Empty: every server."""
+        """Servers where videos Discord can't play get a fixer link. Empty: every server."""
         return _env_int_list("LINK_FIX_GUILD_IDS")
 
     @cached_property
